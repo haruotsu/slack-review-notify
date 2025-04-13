@@ -25,11 +25,13 @@ func setupTestRouter(db *gorm.DB) *gin.Engine {
 func setupTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
-		t.Fatalf("テスト用DBのセットアップに失敗: %v", err)
+		t.Fatalf("fail to open test db: %v", err)
 	}
 	
 	// マイグレーションを実行
-	db.AutoMigrate(&models.ChannelConfig{}, &models.ReviewTask{})
+	if err := db.AutoMigrate(&models.ChannelConfig{}, &models.ReviewTask{}); err != nil {
+		t.Fatalf("fail to migrate test db: %v", err)
+	}
 	
 	return db
 }
