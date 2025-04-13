@@ -105,25 +105,24 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
             var pauseUntil time.Time
             
             switch duration {
-            case "20s":
-                pauseUntil = time.Now().Add(20 * time.Second)
+            case "1h":
+                pauseUntil = time.Now().Add(1 * time.Hour)
                 taskToUpdate.ReminderPausedUntil = &pauseUntil
-            case "30s":
-                pauseUntil = time.Now().Add(30 * time.Second)
+            case "2h":
+                pauseUntil = time.Now().Add(2 * time.Hour)
                 taskToUpdate.ReminderPausedUntil = &pauseUntil
-            case "1m":
-                pauseUntil = time.Now().Add(1 * time.Minute)
+            case "4h":
+                pauseUntil = time.Now().Add(4 * time.Hour)
                 taskToUpdate.ReminderPausedUntil = &pauseUntil
             case "today":
-                // 今日の23:59:59まで停止
-                now := time.Now()
-                pauseUntil = time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location())
+                // 24時間停止
+                pauseUntil = time.Now().Add(24 * time.Hour)
                 taskToUpdate.ReminderPausedUntil = &pauseUntil
             case "stop":
                 // レビュー担当者が決まるまで通知しない
                 taskToUpdate.Status = "paused"
             default:
-                pauseUntil = time.Now().Add(30 * time.Second) // デフォルト
+                pauseUntil = time.Now().Add(1 * time.Hour) // デフォルト
                 taskToUpdate.ReminderPausedUntil = &pauseUntil
             }
             

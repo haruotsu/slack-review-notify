@@ -24,7 +24,7 @@ func CheckPendingTasks(db *gorm.DB) {
 	}
  
 	now := time.Now()
-	tenSecondsAgo := now.Add(-10 * time.Second)
+	thirtyMinutesAgo := now.Add(-30 * time.Minute)
 	
 	for _, task := range tasks {
 		// リマインダー一時停止中かチェック
@@ -37,8 +37,8 @@ func CheckPendingTasks(db *gorm.DB) {
 			continue
 		}
 		
-		// 10秒ごとにリマインダーを送信（最終更新から10秒経過しているか確認）
-		if task.UpdatedAt.Before(tenSecondsAgo) {
+		// 30分ごとにリマインダーを送信（最終更新から30分経過しているか確認）
+		if task.UpdatedAt.Before(thirtyMinutesAgo) {
 			err := SendReminderMessage(db, task)
 			if err != nil {
 				log.Printf("reminder send error (task id: %s): %v", task.ID, err)
@@ -73,7 +73,7 @@ func CheckInReviewTasks(db *gorm.DB) {
 	}
 	
 	now := time.Now()
-	tenSecondsAgo := now.Add(-10 * time.Second)
+	oneHourAgo := now.Add(-1 * time.Hour)
 	
 	for _, task := range tasks {
 		// リマインダー一時停止中かチェック
@@ -86,8 +86,8 @@ func CheckInReviewTasks(db *gorm.DB) {
 			continue
 		}
 		
-		// 10秒ごとにリマインダーを送信（最終更新から10秒経過しているか確認）
-		if task.UpdatedAt.Before(tenSecondsAgo) {
+		// 1時間ごとにリマインダーを送信（最終更新から1時間経過しているか確認）
+		if task.UpdatedAt.Before(oneHourAgo) {
 			err := SendReviewerReminderMessage(db, task)
 			if err != nil {
 				log.Printf("reviewer reminder send error (task id: %s): %v", task.ID, err)
