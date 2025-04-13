@@ -235,23 +235,23 @@ func SendReminderMessage(db *gorm.DB, task models.ReviewTask) error {
                         {
                             "text": map[string]string{
                                 "type": "plain_text",
-                                "text": "20秒間停止",
+                                "text": "1時間停止",
                             },
-                            "value": fmt.Sprintf("%s:20s", task.ID),
+                            "value": fmt.Sprintf("%s:1h", task.ID),
                         },
                         {
                             "text": map[string]string{
                                 "type": "plain_text",
-                                "text": "30秒間停止",
+                                "text": "2時間停止",
                             },
-                            "value": fmt.Sprintf("%s:30s", task.ID),
+                            "value": fmt.Sprintf("%s:2h", task.ID),
                         },
                         {
                             "text": map[string]string{
                                 "type": "plain_text",
-                                "text": "1分間停止",
+                                "text": "4時間停止",
                             },
-                            "value": fmt.Sprintf("%s:1m", task.ID),
+                            "value": fmt.Sprintf("%s:4h", task.ID),
                         },
                         {
                             "text": map[string]string{
@@ -383,23 +383,23 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
                         {
                             "text": map[string]string{
                                 "type": "plain_text",
-                                "text": "20秒間停止",
+                                "text": "1時間停止",
                             },
-                            "value": fmt.Sprintf("%s:20s", task.ID),
+                            "value": fmt.Sprintf("%s:1h", task.ID),
                         },
                         {
                             "text": map[string]string{
                                 "type": "plain_text",
-                                "text": "30秒間停止",
+                                "text": "2時間停止",
                             },
-                            "value": fmt.Sprintf("%s:30s", task.ID),
+                            "value": fmt.Sprintf("%s:2h", task.ID),
                         },
                         {
                             "text": map[string]string{
                                 "type": "plain_text",
-                                "text": "1分間停止",
+                                "text": "4時間停止",
                             },
-                            "value": fmt.Sprintf("%s:1m", task.ID),
+                            "value": fmt.Sprintf("%s:4h", task.ID),
                         },
                         {
                             "text": map[string]string{
@@ -451,14 +451,14 @@ func SendReminderPausedMessage(task models.ReviewTask, duration string) error {
     var message string
     
     switch duration {
-    case "20s":
-        message = "はい！20秒間リマインドをストップします！"
-    case "30s":
-        message = "はい！30秒間リマインドをストップします！"
-    case "1m":
-        message = "はい！1分間リマインドをストップします！"
+    case "1h":
+        message = "はい！1時間リマインドをストップします！"
+    case "2h":
+        message = "はい！2時間リマインドをストップします！"
+    case "4h":
+        message = "はい！4時間リマインドをストップします！"
     case "today":
-        message = "今日はもうリマインドしません。明日また通知します！"
+        message = "今日はもうリマインドしません。24時間後に再開します！"
     case "stop":
         message = "リマインダーを完全に停止しました。レビュー担当者が決まるまで通知しません。"
     default:
