@@ -1,4 +1,4 @@
-.PHONY: build run test clean all help
+.PHONY: build run test clean all help lint lint-install deps dev
 
 APP_NAME := slack-review-notify
 GO := go
@@ -10,6 +10,8 @@ help:
 	@echo "  make test     - テストを実行します"
 	@echo "  make clean    - ビルド成果物を削除します"
 	@echo "  make all      - cleanとビルドを実行します"
+	@echo "  make lint     - lintを実行します"
+	@echo "  make lint-install - golangci-lintをインストールします"
 	@echo "  make help     - このヘルプメッセージを表示します"
 
 run: build
@@ -29,6 +31,9 @@ all: clean build
 
 lint:
 	golangci-lint run
+
+lint-install:
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell go env GOPATH)/bin latest
 
 deps:
 	$(GO) mod download
