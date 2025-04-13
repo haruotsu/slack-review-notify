@@ -22,12 +22,12 @@ import (
 func main() {
     err := godotenv.Load()
     if err != nil {
-        log.Println("⚠️ .env ファイルが読み込めませんでした（環境変数が使われている場合はOK）")
+        log.Println("fail to load .env file")
     }
 
     db, err := gorm.Open(sqlite.Open("review_tasks.db"), &gorm.Config{})
     if err != nil {
-        log.Fatal("DB接続失敗:", err)
+        log.Fatal("fail to connect db:", err)
     }
 
     db.AutoMigrate(&models.ReviewTask{}, &models.ChannelConfig{})
@@ -70,11 +70,10 @@ func main() {
                 db.Where("is_active = ?", true).Find(&configs)
                 
                 if len(configs) == 0 {
-                    log.Println("⚠️ アクティブなチャンネル設定が見つかりません。デフォルトチャンネルを使用します。")
+                    log.Println("no active channel config found. use default channel")
                     
-                    // デフォルトチャンネルを使用
-                    slackChannel := os.Getenv("SLACK_CHANNEL_ID")
-                    mentionID := os.Getenv("DEFAULT_MENTION_ID")
+                    slackChannel := ""
+                    mentionID := ""
                     
                     if slackChannel == "" {
                         c.JSON(http.StatusInternalServerError, gin.H{"error": "no channel configured"})
@@ -85,16 +84,16 @@ func main() {
                         pr.GetHTMLURL(), 
                         pr.GetTitle(), 
                         slackChannel,
-                        mentionID, // 環境変数のメンションIDを使用
+                        mentionID,
                     )
                     
                     if err != nil {
-                        log.Println("Slack送信失敗:", err)
+                        log.Println("slack message failed:", err)
                         c.JSON(http.StatusInternalServerError, gin.H{"error": "slack message failed"})
                         return
                     }
                     
-                    log.Printf("Slack送信成功: ts=%s, channel=%s", slackTs, slackChannelID)
+                    log.Printf("slack message sent: ts=%s, channel=%s", slackTs, slackChannelID)
                     
                     task := models.ReviewTask{
                         ID:           uuid.NewString(),
@@ -110,51 +109,46 @@ func main() {
                     }
                     
                     if err := db.Create(&task).Error; err != nil {
-                        log.Println("DB保存失敗:", err)
+                        log.Println("db insert failed:", err)
                         c.JSON(http.StatusInternalServerError, gin.H{"error": "db insert failed"})
                         return
                     }
-                    
-                    log.Printf("保存直前のtask: %+v\n", task)
-                    log.Println("✅ PRを登録しました:", task.PRURL)
+                    log.Println("pr registered:", task.PRURL)
                     
                 } else {
-                    // 設定されたチャンネルごとに通知
                     notified := false
                     
                     for _, config := range configs {
                         // チャンネルがアーカイブされているか確認
                         isArchived, err := services.IsChannelArchived(config.SlackChannelID)
                         if err != nil {
-                            log.Printf("チャンネル状態確認エラー（チャンネル: %s）: %v", config.SlackChannelID, err)
-                            // エラーが出ても一応続行
+                            log.Printf("channel status check error (channel: %s): %v", config.SlackChannelID, err)
                         }
                         
                         if isArchived {
-                            log.Printf("⚠️ チャンネル %s はアーカイブされているためスキップします", config.SlackChannelID)
+                            log.Printf("channel %s is archived. skip", config.SlackChannelID)
                             
                             // アーカイブされたチャンネルの設定を非アクティブに更新
                             config.IsActive = false
                             config.UpdatedAt = time.Now()
                             if err := db.Save(&config).Error; err != nil {
-                                log.Printf("チャンネル設定更新エラー: %v", err)
+                                log.Printf("channel config update error: %v", err)
                             } else {
-                                log.Printf("✅ アーカイブされたチャンネル %s の設定を非アクティブにしました", config.SlackChannelID)
+                                log.Printf("✅ archived channel %s config is deactivated", config.SlackChannelID)
                             }
                             continue
                         }
                         
                         // リポジトリフィルタがある場合はチェック
                         if !services.IsRepositoryWatched(&config, repoFullName) {
-                            // このチャンネルの監視対象外のリポジトリ
-                            log.Printf("リポジトリ %s はチャンネル %s の監視対象外です（設定: %s）", 
+                            log.Printf("repository %s is not watched (channel: %s, config: %s)", 
                                 repoFullName, config.SlackChannelID, config.RepositoryList)
                             continue
                         }
                         
                         // ラベルをチェック
                         if config.LabelName != "" && config.LabelName != labelName {
-                            log.Printf("ラベル %s はチャンネル %s の監視対象外です（設定: %s）", 
+                            log.Printf("label %s is not watched (channel: %s, config: %s)", 
                                 labelName, config.SlackChannelID, config.LabelName)
                             continue
                         }
@@ -162,7 +156,7 @@ func main() {
                         // メンションIDを取得
                         mentionID := config.DefaultMentionID
                         if mentionID == "" {
-                            mentionID = os.Getenv("DEFAULT_MENTION_ID")
+                            mentionID = ""
                         }
                         
                         slackTs, slackChannelID, err := services.SendSlackMessage(
@@ -173,11 +167,11 @@ func main() {
                         )
                         
                         if err != nil {
-                            log.Printf("Slack送信失敗（チャンネル: %s）: %v", config.SlackChannelID, err)
+                            log.Printf("slack message failed (channel: %s): %v", config.SlackChannelID, err)
                             continue
                         }
                         
-                        log.Printf("Slack送信成功: ts=%s, channel=%s", slackTs, slackChannelID)
+                        log.Printf("slack message sent: ts=%s, channel=%s", slackTs, slackChannelID)
                         
                         task := models.ReviewTask{
                             ID:           uuid.NewString(),
@@ -193,17 +187,16 @@ func main() {
                         }
                         
                         if err := db.Create(&task).Error; err != nil {
-                            log.Printf("DB保存失敗（チャンネル: %s）: %v", config.SlackChannelID, err)
+                            log.Printf("db insert failed (channel: %s): %v", config.SlackChannelID, err)
                             continue
                         }
                         
-                        log.Printf("保存直前のtask: %+v\n", task)
-                        log.Printf("✅ PRを登録しました（チャンネル: %s）: %s", config.SlackChannelID, task.PRURL)
+                        log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, task.PRURL)
                         notified = true
                     }
                     
                     if !notified {
-                        log.Println("⚠️ どのチャンネルにも通知されませんでした")
+                        log.Println("no matching channel")
                         c.JSON(http.StatusOK, gin.H{"message": "no matching channel"})
                         return
                     }
@@ -220,9 +213,6 @@ func main() {
     // Slackイベント受信エンドポイント
     r.POST("/slack/events", handlers.HandleSlackEvents(db))
 
-    // チャンネル設定を出力
-    printChannelConfigs(db)
-
     r.Run(":8080")
 }
 
@@ -236,7 +226,7 @@ func runTaskChecker(db *gorm.DB) {
     for {
         select {
         case <-taskTicker.C:
-            log.Println("タスクのチェックを開始します...")
+            log.Println("start task check")
             
             // レビュー待ちタスク（レビュアー未割り当て）のチェック
             services.CheckPendingTasks(db)
@@ -245,7 +235,7 @@ func runTaskChecker(db *gorm.DB) {
             services.CheckInReviewTasks(db)
             
         case <-cleanupTicker.C:
-            log.Println("古いタスクのクリーンアップを開始します...")
+            log.Println("start old task cleanup")
             
             // 古いタスクの削除処理
             services.CleanupOldTasks(db)
@@ -261,20 +251,8 @@ func runChannelChecker(db *gorm.DB) {
     for {
         select {
         case <-ticker.C:
-            log.Println("チャンネル状態チェックを開始します...")
+            log.Println("start channel status check")
             services.CleanupArchivedChannels(db)
         }
-    }
-}
-
-// サーバー起動時にチャンネル設定を出力
-func printChannelConfigs(db *gorm.DB) {
-    var configs []models.ChannelConfig
-    db.Find(&configs)
-    
-    log.Printf("チャンネル設定一覧 (%d件):", len(configs))
-    for i, config := range configs {
-        log.Printf("[%d] ID=%s, Channel=%s, Mention=%s, Active=%v", 
-            i, config.ID, config.SlackChannelID, config.DefaultMentionID, config.IsActive)
     }
 }

@@ -74,7 +74,7 @@ func (h *GithubHandler) HandleWebhook(c *gin.Context) {
                 )
                 
                 if err != nil {
-                    log.Printf("Slack送信失敗（チャンネル: %s）: %v", config.SlackChannelID, err)
+                    log.Printf("slack send error (channel: %s): %v", config.SlackChannelID, err)
                     continue
                 }
                 
@@ -93,11 +93,11 @@ func (h *GithubHandler) HandleWebhook(c *gin.Context) {
                 }
                 
                 if err := h.DB.Create(&task).Error; err != nil {
-                    log.Printf("DB保存失敗: %v", err)
+                    log.Printf("db save error: %v", err)
                     continue
                 }
                 
-                log.Printf("✅ PRを登録しました（チャンネル: %s）: %s", config.SlackChannelID, task.PRURL)
+                log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, task.PRURL)
             }
         }
     }

@@ -20,13 +20,13 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 		channelID := c.PostForm("channel_id")
 		userID := c.PostForm("user_id")
 		
-		log.Printf("Slackコマンド受信: command=%s, text=%s, channel=%s, user=%s",
+		log.Printf("slack command received: command=%s, text=%s, channel=%s, user=%s",
 			command, text, channelID, userID)
 		
 		// すべてのチャンネル設定を出力してデバッグ
 		var allConfigs []models.ChannelConfig
 		db.Find(&allConfigs)
-		log.Printf("データベース内の全チャンネル設定 (%d件):", len(allConfigs))
+		log.Printf("all channel configs in database (%d):", len(allConfigs))
 		for i, cfg := range allConfigs {
 			log.Printf("[%d] ID=%s, Channel=%s", i, cfg.ID, cfg.SlackChannelID)
 		}
@@ -35,7 +35,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 		var config models.ChannelConfig
 		result := db.Where("slack_channel_id = ?", channelID).First(&config)
 		if result.Error != nil {
-			log.Printf("このチャンネル(%s)の設定が見つかりません: %v", channelID, result.Error)
+			log.Printf("this channel(%s) config not found: %v", channelID, result.Error)
 			
 			// 設定がない場合は自動作成
 			newConfig := models.ChannelConfig{
@@ -50,19 +50,12 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			
 			createResult := db.Create(&newConfig)
 			if createResult.Error != nil {
-				log.Printf("チャンネル設定作成エラー: %v", createResult.Error)
-				c.String(200, "チャンネル設定の作成に失敗しました。管理者に連絡してください。")
+				log.Printf("channel config create error: %v", createResult.Error)
+				c.String(200, "channel config create failed. please contact the administrator.")
 				return
 			}
-			
-			log.Printf("✅ コマンド実行時にチャンネル設定を自動作成しました: %s (ID=%s)", 
-				channelID, newConfig.ID)
-				
 			// 作成した設定を使用
 			config = newConfig
-		} else {
-			log.Printf("✅ チャンネル設定が見つかりました: Channel=%s, ID=%s", 
-				config.SlackChannelID, config.ID)
 		}
 		
 		// /review-config コマンドの処理
@@ -297,7 +290,7 @@ func setLabel(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 		config = models.ChannelConfig{
 			ID:              uuid.NewString(),
 			SlackChannelID:  channelID,
-			DefaultMentionID: "", // 空のままなのでset-mentionで設定が必要
+			DefaultMentionID: "",
 			LabelName:       labelName,
 			IsActive:        true,
 			CreatedAt:       time.Now(),
@@ -341,5 +334,3 @@ func activateChannel(c *gin.Context, db *gorm.DB, channelID string, active bool)
 		c.String(200, "このチャンネルでのレビュー通知を無効化しました。")
 	}
 }
-
-// ... 
