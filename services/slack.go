@@ -144,7 +144,9 @@ func PostToThread(channel, ts, message string) error {
     }
     
     bodyBytes, _ := io.ReadAll(resp.Body)
-    json.Unmarshal(bodyBytes, &result)
+    if err := json.Unmarshal(bodyBytes, &result); err != nil {
+        return fmt.Errorf("slack API response parse error: %v", err)
+    }
     
     log.Printf("slack thread post response: %s", string(bodyBytes))
     

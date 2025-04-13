@@ -213,12 +213,11 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
 	}
 	
 	// 既存のリポジトリリストをチェック
-	repos := []string{}
 	if config.RepositoryList != "" {
-		repos = strings.Split(config.RepositoryList, ",")
+		reposList := strings.Split(config.RepositoryList, ",")
 		
 		// 既に含まれているかチェック
-		for _, r := range repos {
+		for _, r := range reposList {
 			if strings.TrimSpace(r) == repoName {
 				c.String(200, fmt.Sprintf("リポジトリ `%s` は既に通知対象です。", repoName))
 				return
