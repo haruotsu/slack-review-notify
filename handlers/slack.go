@@ -179,19 +179,27 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
             
             c.Status(http.StatusOK)
             return
-        }
-        
-        task.UpdatedAt = time.Now()
-        db.Save(&task)
-        
-        // メッセージ更新
-        err := services.UpdateSlackMessage(channel, ts, task)
-        if err != nil {
-            c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update message"})
-            return
-        }
-        
-        c.Status(http.StatusOK)
+		
+		case "review_done":
+			// レビュー完了通知をスレッドに投稿
+			message := fmt.Sprintf("✅ <@%s> さんがレビューを完了しました！", slackUserID)
+			if err := services.PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
+				log.Printf("レビュー完了通知エラー: %v", err)
+			}
+			
+			// ステータスを完了に変更
+			task.Status = "done"
+			task.UpdatedAt = time.Now()
+
+			if err := db.Save(&task).Error; err != nil {
+				log.Printf("タスク保存エラー: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save task"})
+				return
+			}
+			
+			c.Status(http.StatusOK)
+			return
+		}
     }
 }
 
