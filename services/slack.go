@@ -218,14 +218,64 @@ func CheckWatchingTasks(db *gorm.DB) {
     }
 }
 
-// SendReminderMessage はウォッチングタスクの期限が切れた時にリマインダーを送信します
+// リマインダーメッセージをボタン付きで送信する関数（未割り当てタスク用）
 func SendReminderMessage(task models.ReviewTask) error {
     // リマインダーメッセージ本文
-    message := fmt.Sprintf("<@U08MRE10GS2> PRのレビューが必要です。メインメッセージの「レビューします！」ボタンから対応してください！\n*タイトル*: %s\n*リンク*: <%s>", 
+    message := fmt.Sprintf("<@U08MRE10GS2> PRのレビューが必要です。対応できる方はメインメッセージのボタンから対応してください！\n*タイトル*: %s\n*リンク*: <%s>", 
         task.Title, task.PRURL)
     
-    // ボタンなしの通常のテキストメッセージとして送信
-    return postToThread(task.SlackChannel, task.SlackTS, message)
+    // ボタン付きのメッセージブロックを作成
+    blocks := []map[string]interface{}{
+        {
+            "type": "section",
+            "text": map[string]string{
+                "type": "mrkdwn",
+                "text": message,
+            },
+        },
+        {
+            "type": "actions",
+            "elements": []map[string]interface{}{
+                {
+                    "type": "button",
+                    "text": map[string]string{
+                        "type": "plain_text",
+                        "text": "ちょっと待って！",
+                    },
+                    "action_id": "pause_reminder",
+                    "value": task.ID, // タスクのIDをvalueに設定
+                },
+            },
+        },
+    }
+    
+    // スレッドにボタン付きメッセージを投稿
+    body := map[string]interface{}{
+        "channel": task.SlackChannel,
+        "thread_ts": task.SlackTS,
+        "blocks": blocks,
+    }
+    
+    jsonData, _ := json.Marshal(body)
+    req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+    if err != nil {
+        return err
+    }
+    
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+    req.Header.Set("Content-Type", "application/json")
+    
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+    
+    // レスポンスをログに記録
+    bodyBytes, _ := io.ReadAll(resp.Body)
+    fmt.Println("🧵 リマインダー投稿レスポンス:", string(bodyBytes))
+    
+    return nil
 }
 
 // レビュー担当者が決まった時のメッセージ
@@ -234,7 +284,8 @@ func SendReviewerAssignedMessage(task models.ReviewTask) error {
     return postToThread(task.SlackChannel, task.SlackTS, message)
 }
 
-// CheckPendingTasks はレビュー待ちタスクをチェックして通知を送ります
+// CheckPendingTasks とCheckInReviewTasks 関数を修正して
+// ReminderPausedUntil を考慮するようにします
 func CheckPendingTasks(db *gorm.DB) {
     var tasks []models.ReviewTask
     
@@ -250,6 +301,11 @@ func CheckPendingTasks(db *gorm.DB) {
     tenSecondsAgo := now.Add(-10 * time.Second)
     
     for _, task := range tasks {
+        // リマインダー一時停止中かチェック
+        if task.ReminderPausedUntil != nil && now.Before(*task.ReminderPausedUntil) {
+            continue // 一時停止中なのでスキップ
+        }
+        
         // 10秒ごとにリマインダーを送信（最終更新から10秒経過しているか確認）
         if task.UpdatedAt.Before(tenSecondsAgo) {
             err := SendReminderMessage(task)
@@ -267,7 +323,6 @@ func CheckPendingTasks(db *gorm.DB) {
     }
 }
 
-// CheckInReviewTasks はレビュー中のタスクをチェックして担当者にリマインドします
 func CheckInReviewTasks(db *gorm.DB) {
     var tasks []models.ReviewTask
     
@@ -283,6 +338,11 @@ func CheckInReviewTasks(db *gorm.DB) {
     tenSecondsAgo := now.Add(-10 * time.Second)
     
     for _, task := range tasks {
+        // リマインダー一時停止中かチェック
+        if task.ReminderPausedUntil != nil && now.Before(*task.ReminderPausedUntil) {
+            continue // 一時停止中なのでスキップ
+        }
+        
         // 10秒ごとにリマインダーを送信（最終更新から10秒経過しているか確認）
         if task.UpdatedAt.Before(tenSecondsAgo) {
             err := SendReviewerReminderMessage(task)
@@ -300,8 +360,62 @@ func CheckInReviewTasks(db *gorm.DB) {
     }
 }
 
-// SendReviewerReminderMessage はレビュー担当者にリマインドメッセージを送信します
+// レビュアー向けのリマインダーメッセージをボタン付きで送信
 func SendReviewerReminderMessage(task models.ReviewTask) error {
     message := fmt.Sprintf("<@%s> レビューの進捗はいかがですか？まだ完了していない場合は対応をお願いします！", task.Reviewer)
+    
+    // ボタン付きのメッセージブロックを作成
+    blocks := []map[string]interface{}{
+        {
+            "type": "section",
+            "text": map[string]string{
+                "type": "mrkdwn",
+                "text": message,
+            },
+        },
+        {
+            "type": "actions",
+            "elements": []map[string]interface{}{
+                {
+                    "type": "button",
+                    "text": map[string]string{
+                        "type": "plain_text",
+                        "text": "ちょっと待って！",
+                    },
+                    "action_id": "pause_reminder",
+                    "value": task.ID, // タスクIDをvalueに設定
+                },
+            },
+        },
+    }
+    
+    // スレッドにボタン付きメッセージを投稿
+    body := map[string]interface{}{
+        "channel": task.SlackChannel,
+        "thread_ts": task.SlackTS,
+        "blocks": blocks,
+    }
+    
+    jsonData, _ := json.Marshal(body)
+    req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+    if err != nil {
+        return err
+    }
+    
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+    req.Header.Set("Content-Type", "application/json")
+    
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+    
+    return nil
+}
+
+// リマインダーを一時停止したことを通知する関数
+func SendReminderPausedMessage(task models.ReviewTask) error {
+    message := "はい！30秒間リマインドをストップします！"
     return postToThread(task.SlackChannel, task.SlackTS, message)
 }
