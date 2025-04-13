@@ -158,11 +158,53 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
         // 残りは既存のスイッチケース
         switch actionID {
         case "review_take":
+            // レビュアーを設定
             task.Reviewer = slackUserID
+            // ステータスを確実に in_review に設定
             task.Status = "in_review"
             
+            // デバッグログを追加
+            log.Printf("レビュー担当者設定: userID=%s, taskID=%s", slackUserID, task.ID)
+            
+            // 保存前にDBに書き込む前の内容をログ出力
+            log.Printf("保存前のタスク状態: ID=%s, Reviewer=%s, Status=%s", 
+                task.ID, task.Reviewer, task.Status)
+            
+            // タスクを保存
+            if err := db.Save(&task).Error; err != nil {
+                log.Printf("タスク保存エラー: %v", err)
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save task"})
+                return
+            }
+            
+            // 保存後の状態を再度読み込んで確認
+            var checkTask models.ReviewTask
+            if err := db.Where("id = ?", task.ID).First(&checkTask).Error; err != nil {
+                log.Printf("保存確認エラー: %v", err)
+            } else {
+                log.Printf("保存後のタスク状態: ID=%s, Reviewer=%s, Status=%s",
+                    checkTask.ID, checkTask.Reviewer, checkTask.Status)
+            }
+            
             // レビュアーが割り当てられたことをスレッドに通知
-            services.SendReviewerAssignedMessage(task)
+            if err := services.SendReviewerAssignedMessage(task); err != nil {
+                log.Printf("レビュアー割り当て通知エラー: %v", err)
+            }
+            
+            // メッセージ更新の前に、更新するタスクの内容を再度確認
+            log.Printf("メッセージ更新前のタスク: ID=%s, Reviewer=%s, Status=%s",
+                task.ID, task.Reviewer, task.Status)
+            
+            // メッセージ更新
+            err := services.UpdateSlackMessage(channel, ts, task)
+            if err != nil {
+                log.Printf("メッセージ更新エラー: %v", err)
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update message"})
+                return
+            }
+            
+            c.Status(http.StatusOK)
+            return
         }
         
         task.UpdatedAt = time.Now()

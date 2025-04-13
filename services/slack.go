@@ -108,14 +108,27 @@ func SendSlackMessage(prURL, title, channel string) (string, string, error) {
 }
 
 func UpdateSlackMessage(channel, ts string, task models.ReviewTask) error {
-    status := "❓未割り当て"
-    if task.Status == "pending" && task.Reviewer != "" {
+    var status string
+    
+    // ここでステータスと表示内容の決定ロジックを修正
+    if task.Status == "in_review" && task.Reviewer != "" {
+        // レビュー担当者が割り当てられている場合
         status = fmt.Sprintf("✅ <@%s> さんがレビュー担当です！", task.Reviewer)
-    } else if task.Status == "watching" {
+    } else if task.Status == "watching" && task.Reviewer != "" {
+        // 「今見てる！」状態
         status = fmt.Sprintf("👀 <@%s> さんが見てるところです", task.Reviewer)
+    } else if task.Status == "paused" {
+        // 通知が完全に停止されている状態
+        status = "⏸️ リマインダーは停止中です"
+    } else {
+        // その他のケース（未割り当てなど）
+        status = "❓未割り当て"
     }
-
-    // まず元のメッセージを更新
+    
+    // デバッグログ追加
+    log.Printf("UpdateSlackMessage: status=%s, reviewer=%s, taskStatus=%s", 
+        status, task.Reviewer, task.Status)
+    
     body := map[string]interface{}{
         "channel": channel,
         "ts":      ts,
@@ -140,14 +153,11 @@ func UpdateSlackMessage(channel, ts string, task models.ReviewTask) error {
         return err
     }
     defer resp.Body.Close()
-
-    // スレッドにメッセージを投稿
-    if task.Status == "pending" && task.Reviewer != "" {
-        postToThread(channel, ts, fmt.Sprintf("<@%s> さんがレビュー担当になりました", task.Reviewer))
-    } else if task.Status == "watching" {
-        postToThread(channel, ts, fmt.Sprintf("<@%s> さんが確認中です（2時間）", task.Reviewer))
-    }
-
+    
+    // レスポンス内容をデバッグログに出力
+    bodyBytes, _ := io.ReadAll(resp.Body)
+    log.Printf("Slack更新レスポンス: %s", string(bodyBytes))
+    
     return nil
 }
 
