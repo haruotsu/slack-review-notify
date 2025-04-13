@@ -2,23 +2,25 @@ package main
 
 import (
 	"log"
-	"slack-review-notify/models"
 
+	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+
+	"slack-review-notify/handlers"
+	"slack-review-notify/models"
 )
 
 func main() {
-	db, err := gorm.Open(sqlite.Open("review_tasks.db"), &gorm.Config{})
-	if err != nil {
-		log.Fatal(err)
-	}
+    db, _ := gorm.Open(sqlite.Open("review_tasks.db"), &gorm.Config{})
+    db.AutoMigrate(&models.ReviewTask{})
 
-	err = db.AutoMigrate(&models.ReviewTask{})
-	if err != nil {
-		log.Fatal(err)
-	}
+    r := gin.Default()
+	handler := handlers.NewGitHubHandler(db)
+    r.POST("/webhook", handler.HandleWebhook)
 
-	log.Println("Database migrated")
-
+    err := r.Run(":8080")
+    if err != nil {
+        log.Fatal(err)
+    }
 }
