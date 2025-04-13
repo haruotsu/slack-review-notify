@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Build
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o slack-review-notify-linux-amd64
+          GOOS=darwin GOARCH=amd64 go build -o slack-review-notify-darwin-amd64
+          GOOS=darwin GOARCH=arm64 go build -o slack-review-notify-darwin-arm64
+          GOOS=windows GOARCH=amd64 go build -o slack-review-notify-windows-amd64.exe
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            slack-review-notify-linux-amd64
+            slack-review-notify-darwin-amd64
+            slack-review-notify-darwin-arm64
+            slack-review-notify-windows-amd64.exe
+          draft: false
+          prerelease: false
+          generate_release_notes: true
