@@ -58,8 +58,8 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			config = newConfig
 		}
 		
-		// /review-config コマンドの処理
-		if command == "/review-config" {
+		// /slack-review-notify コマンドの処理
+		if command == "/slack-review-notify" {
 			parts := strings.Split(text, " ")
 			
 			if len(parts) == 0 || parts[0] == "" || parts[0] == "help" {
@@ -75,7 +75,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				
 			case "set-mention":
 				if len(parts) < 2 {
-					c.String(200, "メンション先のユーザーIDを指定してください。例: /review-config set-mention U12345678")
+					c.String(200, "メンション先のユーザーIDを指定してください。例: /slack-review-notify set-mention U12345678")
 					return
 				}
 				mentionID := parts[1]
@@ -83,7 +83,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				
 			case "add-repo":
 				if len(parts) < 2 {
-					c.String(200, "リポジトリ名を指定してください。例: /review-config add-repo owner/repo")
+					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify add-repo owner/repo")
 					return
 				}
 				repoName := parts[1]
@@ -91,7 +91,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				
 			case "remove-repo":
 				if len(parts) < 2 {
-					c.String(200, "リポジトリ名を指定してください。例: /review-config remove-repo owner/repo")
+					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify remove-repo owner/repo")
 					return
 				}
 				repoName := parts[1]
@@ -99,7 +99,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				
 			case "set-label":
 				if len(parts) < 2 {
-					c.String(200, "ラベル名を指定してください。例: /review-config set-label needs-review")
+					c.String(200, "ラベル名を指定してください。例: /slack-review-notify set-label needs-review")
 					return
 				}
 				labelName := parts[1]
@@ -112,7 +112,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				activateChannel(c, db, channelID, false)
 				
 			default:
-				c.String(200, "不明なコマンドです。/review-config help で使い方を確認してください。")
+				c.String(200, "不明なコマンドです。/slack-review-notify help で使い方を確認してください。")
 			}
 			
 			return
@@ -125,13 +125,13 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 // ヘルプメッセージを表示
 func showHelp(c *gin.Context) {
 	help := `*Review通知Bot設定コマンド*
-- /review-config show: 現在の設定を表示
-- /review-config set-mention U12345678: メンション先を設定
-- /review-config add-repo owner/repo: 監視対象リポジトリを追加
-- /review-config remove-repo owner/repo: 監視対象リポジトリを削除
-- /review-config set-label label-name: 監視対象ラベルを設定
-- /review-config activate: このチャンネルでの通知を有効化
-- /review-config deactivate: このチャンネルでの通知を無効化`
+- /slack-review-notify show: 現在の設定を表示
+- /slack-review-notify set-mention U12345678: メンション先を設定
+- /slack-review-notify add-repo owner/repo: 通知対象リポジトリを追加
+- /slack-review-notify remove-repo owner/repo: 通知対象リポジトリを削除
+- /slack-review-notify set-label label-name: 通知対象ラベルを設定
+- /slack-review-notify activate: このチャンネルでの通知を有効化
+- /slack-review-notify deactivate: このチャンネルでの通知を無効化`
 	
 	c.String(200, help)
 }
@@ -142,7 +142,7 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID string) {
 	
 	err := db.Where("slack_channel_id = ?", channelID).First(&config).Error
 	if err != nil {
-		c.String(200, "このチャンネルの設定はまだありません。/review-config set-mention コマンドで設定を開始してください。")
+		c.String(200, "このチャンネルの設定はまだありません。/slack-review-notify set-mention コマンドで設定を開始してください。")
 		return
 	}
 	
@@ -154,8 +154,8 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID string) {
 	response := fmt.Sprintf(`*このチャンネルのレビュー通知設定*
 - ステータス: %s
 - メンション先: <@%s>
-- 監視対象リポジトリ: %s
-- 監視対象ラベル: %s`, 
+- 通知対象リポジトリ: %s
+- 通知対象ラベル: %s`, 
 		status, config.DefaultMentionID, config.RepositoryList, config.LabelName)
 	
 	c.String(200, response)
@@ -208,7 +208,7 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
 			UpdatedAt:       time.Now(),
 		}
 		db.Create(&config)
-		c.String(200, fmt.Sprintf("監視対象リポジトリに `%s` を追加しました。", repoName))
+		c.String(200, fmt.Sprintf("通知対象リポジトリに `%s` を追加しました。", repoName))
 		return
 	}
 	
@@ -220,7 +220,7 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
 		// 既に含まれているかチェック
 		for _, r := range repos {
 			if strings.TrimSpace(r) == repoName {
-				c.String(200, fmt.Sprintf("リポジトリ `%s` は既に監視対象です。", repoName))
+				c.String(200, fmt.Sprintf("リポジトリ `%s` は既に通知対象です。", repoName))
 				return
 			}
 		}
@@ -236,7 +236,7 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 	
-	c.String(200, fmt.Sprintf("監視対象リポジトリに `%s` を追加しました。", repoName))
+	c.String(200, fmt.Sprintf("通知対象リポジトリに `%s` を追加しました。", repoName))
 }
 
 // リポジトリを削除
@@ -250,7 +250,7 @@ func removeRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
 	}
 	
 	if config.RepositoryList == "" {
-		c.String(200, "監視対象リポジトリは設定されていません。")
+		c.String(200, "通知対象リポジトリは設定されていません。")
 		return
 	}
 	
@@ -268,7 +268,7 @@ func removeRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
 	}
 	
 	if !found {
-		c.String(200, fmt.Sprintf("リポジトリ `%s` は監視対象ではありません。", repoName))
+		c.String(200, fmt.Sprintf("リポジトリ `%s` は通知対象ではありません。", repoName))
 		return
 	}
 	
@@ -277,7 +277,7 @@ func removeRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 	
-	c.String(200, fmt.Sprintf("監視対象リポジトリから `%s` を削除しました。", repoName))
+	c.String(200, fmt.Sprintf("通知対象リポジトリから `%s` を削除しました。", repoName))
 }
 
 // ラベルを設定
@@ -297,7 +297,7 @@ func setLabel(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 			UpdatedAt:       time.Now(),
 		}
 		db.Create(&config)
-		c.String(200, fmt.Sprintf("監視対象ラベルを `%s` に設定しました。", labelName))
+		c.String(200, fmt.Sprintf("通知対象ラベルを `%s` に設定しました。", labelName))
 		return
 	}
 	
@@ -306,7 +306,7 @@ func setLabel(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 	
-	c.String(200, fmt.Sprintf("監視対象ラベルを `%s` に更新しました。", labelName))
+	c.String(200, fmt.Sprintf("通知対象ラベルを `%s` に更新しました。", labelName))
 }
 
 // チャンネルの有効/無効を切り替え
@@ -316,7 +316,7 @@ func activateChannel(c *gin.Context, db *gorm.DB, channelID string, active bool)
 	result := db.Where("slack_channel_id = ?", channelID).First(&config)
 	if result.Error != nil {
 		if active {
-			c.String(200, "このチャンネルの設定はまだありません。/review-config set-mention コマンドで設定を開始してください。")
+			c.String(200, "このチャンネルの設定はまだありません。/slack-review-notify set-mention コマンドで設定を開始してください。")
 		} else {
 			c.String(200, "このチャンネルの設定はまだありません。")
 		}
