@@ -21,6 +21,7 @@ type SlackActionPayload struct {
     } `json:"user"`
     Actions []struct {
         ActionID string `json:"action_id"`
+        Value    string `json:"value,omitempty"`
     } `json:"actions"`
     Container struct {
         ChannelID string `json:"channel_id"`
@@ -48,6 +49,11 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 
 		log.Printf("Slack action受信: ts=%s, channel=%s, userID=%s", ts, channel, slackUserID)
 
+        // ペイロードにアクションがない場合はエラー
+        if len(payload.Actions) == 0 {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "no action provided"})
+            return
+        }
 
         var task models.ReviewTask
         if err := db.Where("slack_ts = ? AND slack_channel = ?", ts, channel).First(&task).Error; err != nil {
@@ -55,11 +61,14 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
             return
         }
 
-        switch payload.Actions[0].ActionID {
+        // 実際にクリックされたアクションIDを使う
+        actionID := payload.Actions[0].ActionID
+        switch actionID {
         case "review_take":
             task.Reviewer = slackUserID
             task.Status = "pending"
         case "review_watch":
+            task.Reviewer = slackUserID
             task.Status = "watching"
             t := time.Now().Add(2 * time.Hour)
             task.WatchingUntil = &t
