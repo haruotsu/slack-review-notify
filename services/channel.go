@@ -16,20 +16,20 @@ func CleanupArchivedChannels(db *gorm.DB) {
 	for _, config := range configs {
 		isArchived, err := IsChannelArchived(config.SlackChannelID)
 		if err != nil {
-			log.Printf("チャンネル状態確認エラー（チャンネル: %s）: %v", config.SlackChannelID, err)
+			log.Printf("channel status check error (channel: %s): %v", config.SlackChannelID, err)
 			continue
 		}
 		
 		if isArchived {
-			log.Printf("⚠️ チャンネル %s はアーカイブされています", config.SlackChannelID)
+			log.Printf("channel %s is archived", config.SlackChannelID)
 			
 			// 非アクティブに更新
 			config.IsActive = false
 			config.UpdatedAt = time.Now()
 			if err := db.Save(&config).Error; err != nil {
-				log.Printf("チャンネル設定更新エラー: %v", err)
+				log.Printf("channel config update error: %v", err)
 			} else {
-				log.Printf("✅ アーカイブされたチャンネル %s の設定を非アクティブにしました", config.SlackChannelID)
+				log.Printf("channel %s config is deactivated", config.SlackChannelID)
 			}
 		}
 	}

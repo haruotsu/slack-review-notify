@@ -1,13 +1,10 @@
 package handlers
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -47,12 +44,9 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
         payloadStr := c.PostForm("payload")
         payloadStr = strings.TrimSpace(payloadStr)
         
-        // デバッグ用にペイロード全体をログ出力
-        log.Printf("Slackペイロード全体: %s", payloadStr)
-        
         var payload SlackActionPayload
         if err := json.Unmarshal([]byte(payloadStr), &payload); err != nil {
-            log.Printf("ペイロードのJSONパースに失敗: %v", err)
+            log.Printf("payload json parse error: %v", err)
             c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
             return
         }
@@ -61,7 +55,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
         ts := payload.Message.Ts
         channel := payload.Container.ChannelID
         
-        log.Printf("Slack action受信: ts=%s, channel=%s, userID=%s", ts, channel, slackUserID)
+        log.Printf("slack action received: ts=%s, channel=%s, userID=%s", ts, channel, slackUserID)
         
         // アクションがない場合はエラー
         if len(payload.Actions) == 0 {
@@ -82,10 +76,8 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
                 selectedValue = payload.Actions[0].Value
             }
             
-            log.Printf("pause_reminderアクション: 選択値=%s", selectedValue)
-            
             if selectedValue == "" {
-                log.Printf("選択値が空です")
+                log.Printf("selected value is empty")
                 c.JSON(http.StatusBadRequest, gin.H{"error": "selected value is empty"})
                 return
             }
@@ -93,7 +85,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
             // 値からタスクIDと期間を抽出 (形式: "taskID:duration")
             parts := strings.Split(selectedValue, ":")
             if len(parts) != 2 {
-                log.Printf("選択値のフォーマットが不正: %s", selectedValue)
+                log.Printf("invalid value format: %s", selectedValue)
                 c.JSON(http.StatusBadRequest, gin.H{"error": "invalid value format"})
                 return
             }
@@ -104,7 +96,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
             // タスクIDを使ってデータベースから直接タスクを検索
             var taskToUpdate models.ReviewTask
             if err := db.Where("id = ?", taskID).First(&taskToUpdate).Error; err != nil {
-                log.Printf("タスクID %s が見つかりません: %v", taskID, err)
+                log.Printf("task id %s not found: %v", taskID, err)
                 c.JSON(http.StatusNotFound, gin.H{"error": "task not found by ID"})
                 return
             }
@@ -140,7 +132,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
             // 一時停止を通知
             err := services.SendReminderPausedMessage(taskToUpdate, duration)
             if err != nil {
-                log.Printf("一時停止通知の送信に失敗: %v", err)
+                log.Printf("pause reminder send error: %v", err)
             }
             
             c.Status(http.StatusOK)
@@ -150,7 +142,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
         // 「ちょっと待って」以外のアクション（レビューします！など）の場合
         var task models.ReviewTask
         if err := db.Where("slack_ts = ? AND slack_channel = ?", ts, channel).First(&task).Error; err != nil {
-            log.Printf("タスクが見つかりません: ts=%s, channel=%s", ts, channel)
+            log.Printf("task not found: ts=%s, channel=%s", ts, channel)
             c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
             return
         }
@@ -165,14 +157,14 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
             
             // タスクを保存
             if err := db.Save(&task).Error; err != nil {
-                log.Printf("タスク保存エラー: %v", err)
+                log.Printf("task save error: %v", err)
                 c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save task"})
                 return
             }
             
             // レビュアーが割り当てられたことをスレッドに通知
             if err := services.SendReviewerAssignedMessage(task); err != nil {
-                log.Printf("レビュアー割り当て通知エラー: %v", err)
+                log.Printf("reviewer assigned notification error: %v", err)
             }
             
             // メッセージ更新は行わない
@@ -184,7 +176,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			// レビュー完了通知をスレッドに投稿
 			message := fmt.Sprintf("✅ <@%s> さんがレビューを完了しました！", slackUserID)
 			if err := services.PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
-				log.Printf("レビュー完了通知エラー: %v", err)
+				log.Printf("review done notification error: %v", err)
 			}
 			
 			// ステータスを完了に変更
@@ -192,7 +184,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			task.UpdatedAt = time.Now()
 
 			if err := db.Save(&task).Error; err != nil {
-				log.Printf("タスク保存エラー: %v", err)
+				log.Printf("task save error: %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save task"})
 				return
 			}
@@ -201,67 +193,4 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
     }
-}
-
-// リマインダーメッセージを送信する関数
-func SendReminderMessage(task models.ReviewTask) error {
-    // リマインダーメッセージ本文
-    message := fmt.Sprintf("<@U08MRE10GS2> PRのレビューが必要です。対応できる方はメインメッセージのボタンから対応してください！\n*タイトル*: %s\n*リンク*: <%s>", 
-        task.Title, task.PRURL)
-    
-    // デバッグログを追加
-    log.Printf("リマインダー送信時のタスクID: %s", task.ID)
-    
-    // ボタン付きのメッセージブロックを作成
-    blocks := []map[string]interface{}{
-        {
-            "type": "section",
-            "text": map[string]string{
-                "type": "mrkdwn",
-                "text": message,
-            },
-        },
-        {
-            "type": "actions",
-            "elements": []map[string]interface{}{
-                {
-                    "type": "button",
-                    "text": map[string]string{
-                        "type": "plain_text",
-                        "text": "ちょっと待って！",
-                    },
-                    "action_id": "pause_reminder",
-                    "value": task.ID, // ここにタスクIDを明示的に設定
-                },
-            },
-        },
-    }
-    
-    // スレッドにボタン付きメッセージを投稿
-    body := map[string]interface{}{
-        "channel": task.SlackChannel,
-        "thread_ts": task.SlackTS,
-        "blocks": blocks,
-    }
-    
-    jsonData, _ := json.Marshal(body)
-    req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
-    if err != nil {
-        return err
-    }
-    
-    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
-    req.Header.Set("Content-Type", "application/json")
-    
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
-    
-    // レスポンスをログに記録
-    bodyBytes, _ := io.ReadAll(resp.Body)
-    fmt.Println("🧵 リマインダー投稿レスポンス:", string(bodyBytes))
-    
-    return nil
 }
