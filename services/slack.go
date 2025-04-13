@@ -65,14 +65,6 @@ func SendSlackMessage(prURL, title, channel string) (string, string, error) {
                     ActionID: "review_take",
                     Style: "primary",
                 },
-                {
-                    Type: "button",
-                    Text: TextObject{
-                        Type: "plain_text",
-                        Text: "今みてる！",
-                    },
-                    ActionID: "review_watch",
-                },
             },
         },
     }
@@ -228,15 +220,88 @@ func CheckWatchingTasks(db *gorm.DB) {
 
 // SendReminderMessage はウォッチングタスクの期限が切れた時にリマインダーを送信します
 func SendReminderMessage(task models.ReviewTask) error {
-    var message string
+    // リマインダーメッセージ本文
+    message := fmt.Sprintf("<@U08MRE10GS2> PRのレビューが必要です。メインメッセージの「レビューします！」ボタンから対応してください！\n*タイトル*: %s\n*リンク*: <%s>", 
+        task.Title, task.PRURL)
     
-    if task.Status == "watching" {
-        // 初回のリマインダー
-        message = fmt.Sprintf("<@%s> 確認から時間が経過しました。レビューの状況はどうですか？", task.Reviewer)
-    } else {
-        // 2回目以降のリマインダー
-        message = fmt.Sprintf("<@%s> まだレビューは完了していませんか？対応をお願いします！", task.Reviewer)
+    // ボタンなしの通常のテキストメッセージとして送信
+    return postToThread(task.SlackChannel, task.SlackTS, message)
+}
+
+// レビュー担当者が決まった時のメッセージ
+func SendReviewerAssignedMessage(task models.ReviewTask) error {
+    message := fmt.Sprintf("✅ <@%s> さんがレビュー担当になりました！", task.Reviewer)
+    return postToThread(task.SlackChannel, task.SlackTS, message)
+}
+
+// CheckPendingTasks はレビュー待ちタスクをチェックして通知を送ります
+func CheckPendingTasks(db *gorm.DB) {
+    var tasks []models.ReviewTask
+    
+    // "pending" 状態でレビュアーがまだ割り当てられていないタスクを検索
+    result := db.Where("status = ? AND reviewer = ?", "pending", "").Find(&tasks)
+    
+    if result.Error != nil {
+        log.Printf("レビュー待ちタスクの確認中にエラーが発生しました: %v", result.Error)
+        return
     }
     
+    now := time.Now()
+    tenSecondsAgo := now.Add(-10 * time.Second)
+    
+    for _, task := range tasks {
+        // 10秒ごとにリマインダーを送信（最終更新から10秒経過しているか確認）
+        if task.UpdatedAt.Before(tenSecondsAgo) {
+            err := SendReminderMessage(task)
+            if err != nil {
+                log.Printf("リマインダー送信失敗 (Task ID: %s): %v", task.ID, err)
+                continue
+            }
+            
+            // 更新時間を記録
+            task.UpdatedAt = now
+            db.Save(&task)
+            
+            log.Printf("✅ レビュー待ちリマインダーを送信しました: %s (%s)", task.Title, task.ID)
+        }
+    }
+}
+
+// CheckInReviewTasks はレビュー中のタスクをチェックして担当者にリマインドします
+func CheckInReviewTasks(db *gorm.DB) {
+    var tasks []models.ReviewTask
+    
+    // "in_review" 状態でレビュアーが割り当てられているタスクを検索
+    result := db.Where("status = ? AND reviewer != ?", "in_review", "").Find(&tasks)
+    
+    if result.Error != nil {
+        log.Printf("レビュー中タスクの確認中にエラーが発生しました: %v", result.Error)
+        return
+    }
+    
+    now := time.Now()
+    tenSecondsAgo := now.Add(-10 * time.Second)
+    
+    for _, task := range tasks {
+        // 10秒ごとにリマインダーを送信（最終更新から10秒経過しているか確認）
+        if task.UpdatedAt.Before(tenSecondsAgo) {
+            err := SendReviewerReminderMessage(task)
+            if err != nil {
+                log.Printf("レビュアーリマインダー送信失敗 (Task ID: %s): %v", task.ID, err)
+                continue
+            }
+            
+            // 更新時間を記録
+            task.UpdatedAt = now
+            db.Save(&task)
+            
+            log.Printf("✅ レビュアーリマインダーを送信しました: %s (%s)", task.Title, task.ID)
+        }
+    }
+}
+
+// SendReviewerReminderMessage はレビュー担当者にリマインドメッセージを送信します
+func SendReviewerReminderMessage(task models.ReviewTask) error {
+    message := fmt.Sprintf("<@%s> レビューの進捗はいかがですか？まだ完了していない場合は対応をお願いします！", task.Reviewer)
     return postToThread(task.SlackChannel, task.SlackTS, message)
 }

@@ -66,12 +66,10 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
         switch actionID {
         case "review_take":
             task.Reviewer = slackUserID
-            task.Status = "pending"
-        case "review_watch":
-            task.Reviewer = slackUserID
-            task.Status = "watching"
-            t := time.Now().Add(10 * time.Second) // テスト用に10秒後に設定
-            task.WatchingUntil = &t
+            task.Status = "in_review"  // "pending" から "in_review" に変更
+            
+            // レビュアーが割り当てられたことをスレッドに通知
+            services.SendReviewerAssignedMessage(task)
         }
 
         task.UpdatedAt = time.Now()
