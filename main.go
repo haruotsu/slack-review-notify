@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -60,10 +59,11 @@ func main() {
 
         switch e := event.(type) {
         case *github.PullRequestEvent:
-            if e.Action != nil && *e.Action == "labeled" && e.Label != nil && e.Label.GetName() == "needs-review" {
+            if e.Action != nil && *e.Action == "labeled" && e.Label != nil {
                 pr := e.PullRequest
                 repo := e.Repo
                 repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
+                labelName := e.Label.GetName()
                 
                 // チャンネル設定を全て取得
                 var configs []models.ChannelConfig
@@ -145,21 +145,18 @@ func main() {
                         }
                         
                         // リポジトリフィルタがある場合はチェック
-                        if config.RepositoryList != "" {
-                            repos := strings.Split(config.RepositoryList, ",")
-                            found := false
-                            
-                            for _, r := range repos {
-                                if strings.TrimSpace(r) == repoFullName {
-                                    found = true
-                                    break
-                                }
-                            }
-                            
-                            if !found {
-                                // このチャンネルの監視対象外のリポジトリ
-                                continue
-                            }
+                        if !services.IsRepositoryWatched(&config, repoFullName) {
+                            // このチャンネルの監視対象外のリポジトリ
+                            log.Printf("リポジトリ %s はチャンネル %s の監視対象外です（設定: %s）", 
+                                repoFullName, config.SlackChannelID, config.RepositoryList)
+                            continue
+                        }
+                        
+                        // ラベルをチェック
+                        if config.LabelName != "" && config.LabelName != labelName {
+                            log.Printf("ラベル %s はチャンネル %s の監視対象外です（設定: %s）", 
+                                labelName, config.SlackChannelID, config.LabelName)
+                            continue
                         }
                         
                         // メンションIDを取得

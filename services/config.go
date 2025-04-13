@@ -1,6 +1,7 @@
 package services
 
 import (
+	"log"
 	"slack-review-notify/models"
 	"strings"
 
@@ -29,15 +30,22 @@ func HasChannelConfig(db *gorm.DB, channelID string) bool {
 // リポジトリがチャンネルで監視対象かチェックする関数
 func IsRepositoryWatched(config *models.ChannelConfig, repoFullName string) bool {
 	if config == nil || config.RepositoryList == "" {
+		log.Printf("チャンネル %s にリポジトリリスト設定がありません", config.SlackChannelID)
 		return false
 	}
 	
 	repos := strings.Split(config.RepositoryList, ",")
+	log.Printf("チャンネル %s のリポジトリリスト: %v (検査対象: %s)", 
+		config.SlackChannelID, repos, repoFullName)
+	
 	for _, repo := range repos {
-		if strings.TrimSpace(repo) == repoFullName {
+		trimmedRepo := strings.TrimSpace(repo)
+		if trimmedRepo == repoFullName {
+			log.Printf("リポジトリ %s は監視対象です", repoFullName)
 			return true
 		}
 	}
 	
+	log.Printf("リポジトリ %s は監視対象外です", repoFullName)
 	return false
 } 

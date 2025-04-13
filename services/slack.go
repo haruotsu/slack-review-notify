@@ -66,6 +66,15 @@ func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, 
                     ActionID: "review_take",
                     Style: "primary",
                 },
+                {
+                    Type: "button",
+                    Text: TextObject{
+                        Type: "plain_text",
+                        Text: "レビュー完了",
+                    },
+                    ActionID: "review_done",
+                    Style: "primary",
+                },
             },
         },
     }
@@ -111,12 +120,15 @@ func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, 
 func UpdateSlackMessage(channel, ts string, task models.ReviewTask) error {
     var status string
     
-    // ここでステータスと表示内容の決定ロジックを修正
-    if task.Status == "in_review" && task.Reviewer != "" {
+    // ここでステータスと表示内容の決定ロジック
+    if task.Status == "done" {
+        // レビュー完了
+        status = "✅ レビュー完了しました！"
+    } else if task.Status == "in_review" && task.Reviewer != "" {
         // レビュー担当者が割り当てられている場合
         status = fmt.Sprintf("✅ <@%s> さんがレビュー担当です！", task.Reviewer)
     } else if task.Status == "watching" && task.Reviewer != "" {
-        // 「今見てる！」状態
+        // "今見てる！"状態
         status = fmt.Sprintf("👀 <@%s> さんが見てるところです", task.Reviewer)
     } else if task.Status == "paused" {
         // 通知が完全に停止されている状態
@@ -163,7 +175,7 @@ func UpdateSlackMessage(channel, ts string, task models.ReviewTask) error {
 }
 
 // スレッドにメッセージを投稿する関数
-func postToThread(channel, ts, message string) error {
+func PostToThread(channel, ts, message string) error {
     body := map[string]interface{}{
         "channel": channel,
         "thread_ts": ts,
@@ -390,7 +402,7 @@ func SendReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 // レビュー担当者が決まった時のメッセージ
 func SendReviewerAssignedMessage(task models.ReviewTask) error {
     message := fmt.Sprintf("✅ <@%s> さんがレビュー担当になりました！", task.Reviewer)
-    return postToThread(task.SlackChannel, task.SlackTS, message)
+    return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
 // レビュアー向けのリマインダーメッセージも同様に修正
@@ -550,7 +562,7 @@ func SendReminderPausedMessage(task models.ReviewTask, duration string) error {
         message = "リマインドをストップします！"
     }
     
-    return postToThread(task.SlackChannel, task.SlackTS, message)
+    return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
 // ボットが参加しているチャンネルのリストを取得
