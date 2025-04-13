@@ -29,7 +29,12 @@ func HasChannelConfig(db *gorm.DB, channelID string) bool {
 
 // リポジトリがチャンネルで通知対象かチェックする関数
 func IsRepositoryWatched(config *models.ChannelConfig, repoFullName string) bool {
-	if config == nil || config.RepositoryList == "" {
+	if config == nil {
+		log.Printf("channel config is nil")
+		return false
+	}
+	
+	if config.RepositoryList == "" {
 		log.Printf("channel %s has no repository list", config.SlackChannelID)
 		return false
 	}
