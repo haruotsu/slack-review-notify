@@ -358,7 +358,7 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
         return fmt.Errorf("channel is archived: %s", task.SlackChannel)
     }
     
-    message := fmt.Sprintf("<@%s> レビューの進捗はいかがですか？まだ完了していない場合は対応をお願いします！", task.Reviewer)
+    message := fmt.Sprintf("<@%s> レビューしてくれたら嬉しいな...ってbotが言ってます👀", task.Reviewer)
     
     // ボタン付きのメッセージブロックを作成
     blocks := []map[string]interface{}{
