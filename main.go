@@ -101,14 +101,19 @@ func main() {
 
 // 定期的にタスクをチェックするバックグラウンド処理
 func runTaskChecker(db *gorm.DB) {
-    ticker := time.NewTicker(10 * time.Second) // 1分ごとにチェック
+    ticker := time.NewTicker(10 * time.Second) // 10秒ごとにチェック
     defer ticker.Stop()
 
     for {
         select {
         case <-ticker.C:
-            log.Println("ウォッチングタスクのチェックを開始します...")
-            services.CheckWatchingTasks(db)
+            log.Println("タスクのチェックを開始します...")
+            
+            // レビュー待ちタスク（レビュアー未割り当て）のチェック
+            services.CheckPendingTasks(db)
+            
+            // レビュー中タスク（レビュアー割り当て済み）のチェック
+            services.CheckInReviewTasks(db)
         }
     }
 }
