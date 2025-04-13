@@ -56,13 +56,13 @@ func (h *GithubHandler) HandleWebhook(c *gin.Context) {
             h.DB.Where("is_active = ?", true).Find(&configs)
             
             for _, config := range configs {
-                // このチャンネルが監視対象のリポジトリとラベルか確認
+                // このチャンネルが通知対象のリポジトリとラベルか確認
                 if !services.IsRepositoryWatched(&config, repoFullName) {
-                    continue // 監視対象外のリポジトリはスキップ
+                    continue // 通知対象外のリポジトリはスキップ
                 }
                 
                 if config.LabelName != "" && config.LabelName != labelName {
-                    continue // 監視対象外のラベルはスキップ
+                    continue // 通知対象外のラベルはスキップ
                 }
                 
                 // このチャンネルには通知する
