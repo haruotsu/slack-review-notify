@@ -32,6 +32,9 @@ func main() {
 
     db.AutoMigrate(&models.ReviewTask{})
 
+    // バックグラウンドでウォッチングタスクをチェックする定期実行タスク
+    go runTaskChecker(db)
+
     r := gin.Default()
 
     // Slackボタン押下イベント
@@ -94,4 +97,18 @@ func main() {
     })
 
     r.Run(":8080")
+}
+
+// 定期的にタスクをチェックするバックグラウンド処理
+func runTaskChecker(db *gorm.DB) {
+    ticker := time.NewTicker(10 * time.Second) // 1分ごとにチェック
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            log.Println("ウォッチングタスクのチェックを開始します...")
+            services.CheckWatchingTasks(db)
+        }
+    }
 }

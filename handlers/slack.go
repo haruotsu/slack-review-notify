@@ -70,7 +70,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
         case "review_watch":
             task.Reviewer = slackUserID
             task.Status = "watching"
-            t := time.Now().Add(2 * time.Hour)
+            t := time.Now().Add(10 * time.Second) // テスト用に10秒後に設定
             task.WatchingUntil = &t
         }
 

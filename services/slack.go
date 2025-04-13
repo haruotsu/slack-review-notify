@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"slack-review-notify/models"
+	"time"
+
+	"gorm.io/gorm"
 )
 
 type SlackMessage struct {
@@ -183,4 +187,56 @@ func postToThread(channel, ts, message string) error {
     fmt.Println("🧵 スレッド投稿レスポンス:", string(bodyBytes))
 
     return nil
+}
+
+// CheckWatchingTasks は期限切れのウォッチングタスクをチェックして通知を送ります
+func CheckWatchingTasks(db *gorm.DB) {
+    var tasks []models.ReviewTask
+    
+    // "watching" 状態で、WatchingUntilが過去の時間であるか、
+    // "reminded" 状態で最終更新から10秒以上経過しているタスクを検索
+    now := time.Now()
+    tenSecondsAgo := now.Add(-10 * time.Second)
+    
+    result := db.Where(
+        "(status = ? AND watching_until < ?) OR (status = ? AND updated_at < ?)", 
+        "watching", now, 
+        "reminded", tenSecondsAgo,
+    ).Find(&tasks)
+    
+    if result.Error != nil {
+        log.Printf("ウォッチングタスクの確認中にエラーが発生しました: %v", result.Error)
+        return
+    }
+    
+    for _, task := range tasks {
+        // リマインダーを送信
+        err := SendReminderMessage(task)
+        if err != nil {
+            log.Printf("リマインダー送信失敗 (Task ID: %s): %v", task.ID, err)
+            continue
+        }
+        
+        // タスクのステータスを更新（リマインダー済みのステータスに）
+        task.Status = "reminded"
+        task.UpdatedAt = now  // 更新時間を記録
+        db.Save(&task)
+        
+        log.Printf("✅ リマインダーを送信しました: %s (%s)", task.Title, task.ID)
+    }
+}
+
+// SendReminderMessage はウォッチングタスクの期限が切れた時にリマインダーを送信します
+func SendReminderMessage(task models.ReviewTask) error {
+    var message string
+    
+    if task.Status == "watching" {
+        // 初回のリマインダー
+        message = fmt.Sprintf("<@%s> 確認から時間が経過しました。レビューの状況はどうですか？", task.Reviewer)
+    } else {
+        // 2回目以降のリマインダー
+        message = fmt.Sprintf("<@%s> まだレビューは完了していませんか？対応をお願いします！", task.Reviewer)
+    }
+    
+    return postToThread(task.SlackChannel, task.SlackTS, message)
 }
