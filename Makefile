@@ -18,6 +18,9 @@ run: build
 test:
 	$(GO) test ./...
 
+test-coverage:
+	$(GO) test -coverprofile=coverage.out ./...
+
 clean:
 	rm -f $(APP_NAME)
 	rm -f *.db
