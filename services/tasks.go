@@ -106,4 +106,60 @@ func CheckInReviewTasks(db *gorm.DB) {
 			}
 		}
 	}
+}
+
+// CleanupOldTasks は完了したタスクや不要になったタスクを削除する関数
+func CleanupOldTasks(db *gorm.DB) {
+	// 現在の時刻
+	now := time.Now()
+	
+	// 1. 完了（done）状態のタスクで、3日以上経過しているものを削除
+	threeDoysAgo := now.AddDate(0, 0, -3)
+	var doneTasksCount int64
+	resultDone := db.Where("status = ? AND updated_at < ?", "done", threeDoysAgo).
+		Delete(&models.ReviewTask{})
+	
+	if resultDone.Error != nil {
+		log.Printf("完了タスクの削除中にエラーが発生しました: %v", resultDone.Error)
+	} else {
+		doneTasksCount = resultDone.RowsAffected
+		if doneTasksCount > 0 {
+			log.Printf("✅ 完了状態の古いタスクを %d 件削除しました", doneTasksCount)
+		}
+	}
+	
+	// 2. 一時停止（paused）状態のタスクで、1週間以上経過しているものを削除
+	oneWeekAgo := now.AddDate(0, 0, -7)
+	var pausedTasksCount int64
+	resultPaused := db.Where("status = ? AND updated_at < ?", "paused", oneWeekAgo).
+		Delete(&models.ReviewTask{})
+	
+	if resultPaused.Error != nil {
+		log.Printf("一時停止タスクの削除中にエラーが発生しました: %v", resultPaused.Error)
+	} else {
+		pausedTasksCount = resultPaused.RowsAffected
+		if pausedTasksCount > 0 {
+			log.Printf("✅ 一時停止状態の古いタスクを %d 件削除しました", pausedTasksCount)
+		}
+	}
+	
+	// 3. アーカイブ（archived）状態のタスクを全て削除
+	var archivedTasksCount int64
+	resultArchived := db.Where("status = ?", "archived").
+		Delete(&models.ReviewTask{})
+	
+	if resultArchived.Error != nil {
+		log.Printf("アーカイブタスクの削除中にエラーが発生しました: %v", resultArchived.Error)
+	} else {
+		archivedTasksCount = resultArchived.RowsAffected
+		if archivedTasksCount > 0 {
+			log.Printf("✅ アーカイブ状態のタスクを %d 件削除しました", archivedTasksCount)
+		}
+	}
+	
+	// 合計削除件数
+	totalDeleted := doneTasksCount + pausedTasksCount + archivedTasksCount
+	if totalDeleted > 0 {
+		log.Printf("🧹 合計 %d 件の古いタスクを削除しました", totalDeleted)
+	}
 } 
