@@ -218,11 +218,14 @@ func CheckWatchingTasks(db *gorm.DB) {
     }
 }
 
-// リマインダーメッセージをボタン付きで送信する関数（未割り当てタスク用）
+// リマインダーメッセージを送信する関数（複数の時間オプション付き）
 func SendReminderMessage(task models.ReviewTask) error {
     // リマインダーメッセージ本文
     message := fmt.Sprintf("<@U08MRE10GS2> PRのレビューが必要です。対応できる方はメインメッセージのボタンから対応してください！\n*タイトル*: %s\n*リンク*: <%s>", 
         task.Title, task.PRURL)
+    
+    // デバッグログを追加
+    log.Printf("リマインダー送信時のタスクID: %s", task.ID)
     
     // ボタン付きのメッセージブロックを作成
     blocks := []map[string]interface{}{
@@ -237,13 +240,49 @@ func SendReminderMessage(task models.ReviewTask) error {
             "type": "actions",
             "elements": []map[string]interface{}{
                 {
-                    "type": "button",
-                    "text": map[string]string{
+                    "type": "static_select",
+                    "placeholder": map[string]string{
                         "type": "plain_text",
-                        "text": "ちょっと待って！",
+                        "text": "リマインダーを停止...",
                     },
                     "action_id": "pause_reminder",
-                    "value": task.ID, // タスクのIDをvalueに設定
+                    "options": []map[string]interface{}{
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "20秒間停止",
+                            },
+                            "value": fmt.Sprintf("%s:20s", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "30秒間停止",
+                            },
+                            "value": fmt.Sprintf("%s:30s", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "1分間停止",
+                            },
+                            "value": fmt.Sprintf("%s:1m", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "今日は通知しない",
+                            },
+                            "value": fmt.Sprintf("%s:today", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "リマインダーを完全に停止",
+                            },
+                            "value": fmt.Sprintf("%s:stop", task.ID),
+                        },
+                    },
                 },
             },
         },
@@ -284,12 +323,11 @@ func SendReviewerAssignedMessage(task models.ReviewTask) error {
     return postToThread(task.SlackChannel, task.SlackTS, message)
 }
 
-// CheckPendingTasks とCheckInReviewTasks 関数を修正して
-// ReminderPausedUntil を考慮するようにします
+// CheckPendingTasks 関数の修正
 func CheckPendingTasks(db *gorm.DB) {
     var tasks []models.ReviewTask
     
-    // "pending" 状態でレビュアーがまだ割り当てられていないタスクを検索
+    // "pending" 状態、かつ "paused" でないタスクを検索
     result := db.Where("status = ? AND reviewer = ?", "pending", "").Find(&tasks)
     
     if result.Error != nil {
@@ -304,6 +342,11 @@ func CheckPendingTasks(db *gorm.DB) {
         // リマインダー一時停止中かチェック
         if task.ReminderPausedUntil != nil && now.Before(*task.ReminderPausedUntil) {
             continue // 一時停止中なのでスキップ
+        }
+        
+        // 一時停止ステータスならスキップ
+        if task.Status == "paused" {
+            continue
         }
         
         // 10秒ごとにリマインダーを送信（最終更新から10秒経過しているか確認）
@@ -323,6 +366,7 @@ func CheckPendingTasks(db *gorm.DB) {
     }
 }
 
+// CheckInReviewTasks 関数も同様に修正
 func CheckInReviewTasks(db *gorm.DB) {
     var tasks []models.ReviewTask
     
@@ -343,6 +387,11 @@ func CheckInReviewTasks(db *gorm.DB) {
             continue // 一時停止中なのでスキップ
         }
         
+        // 一時停止ステータスならスキップ
+        if task.Status == "paused" {
+            continue
+        }
+        
         // 10秒ごとにリマインダーを送信（最終更新から10秒経過しているか確認）
         if task.UpdatedAt.Before(tenSecondsAgo) {
             err := SendReviewerReminderMessage(task)
@@ -360,7 +409,7 @@ func CheckInReviewTasks(db *gorm.DB) {
     }
 }
 
-// レビュアー向けのリマインダーメッセージをボタン付きで送信
+// レビュアー向けのリマインダーメッセージも同様に修正
 func SendReviewerReminderMessage(task models.ReviewTask) error {
     message := fmt.Sprintf("<@%s> レビューの進捗はいかがですか？まだ完了していない場合は対応をお願いします！", task.Reviewer)
     
@@ -377,13 +426,49 @@ func SendReviewerReminderMessage(task models.ReviewTask) error {
             "type": "actions",
             "elements": []map[string]interface{}{
                 {
-                    "type": "button",
-                    "text": map[string]string{
+                    "type": "static_select",
+                    "placeholder": map[string]string{
                         "type": "plain_text",
-                        "text": "ちょっと待って！",
+                        "text": "リマインダーを停止...",
                     },
                     "action_id": "pause_reminder",
-                    "value": task.ID, // タスクIDをvalueに設定
+                    "options": []map[string]interface{}{
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "20秒間停止",
+                            },
+                            "value": fmt.Sprintf("%s:20s", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "30秒間停止",
+                            },
+                            "value": fmt.Sprintf("%s:30s", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "1分間停止",
+                            },
+                            "value": fmt.Sprintf("%s:1m", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "今日は通知しない",
+                            },
+                            "value": fmt.Sprintf("%s:today", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "リマインダーを完全に停止",
+                            },
+                            "value": fmt.Sprintf("%s:stop", task.ID),
+                        },
+                    },
                 },
             },
         },
@@ -415,7 +500,23 @@ func SendReviewerReminderMessage(task models.ReviewTask) error {
 }
 
 // リマインダーを一時停止したことを通知する関数
-func SendReminderPausedMessage(task models.ReviewTask) error {
-    message := "はい！30秒間リマインドをストップします！"
+func SendReminderPausedMessage(task models.ReviewTask, duration string) error {
+    var message string
+    
+    switch duration {
+    case "20s":
+        message = "はい！20秒間リマインドをストップします！"
+    case "30s":
+        message = "はい！30秒間リマインドをストップします！"
+    case "1m":
+        message = "はい！1分間リマインドをストップします！"
+    case "today":
+        message = "今日はもうリマインドしません。明日また通知します！"
+    case "stop":
+        message = "リマインダーを完全に停止しました。レビュー担当者が決まるまで通知しません。"
+    default:
+        message = "リマインドをストップします！"
+    }
+    
     return postToThread(task.SlackChannel, task.SlackTS, message)
 }

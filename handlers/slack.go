@@ -25,7 +25,14 @@ type SlackActionPayload struct {
     } `json:"user"`
     Actions []struct {
         ActionID string `json:"action_id"`
-        Value    string `json:"value"`
+        Value    string `json:"value,omitempty"`
+        // 選択メニュー用の項目
+        SelectedOption struct {
+            Value string `json:"value"`
+            Text  struct {
+                Text string `json:"text"`
+            } `json:"text"`
+        } `json:"selected_option,omitempty"`
     } `json:"actions"`
     Container struct {
         ChannelID string `json:"channel_id"`
@@ -65,16 +72,34 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
         // アクションIDを取得
         actionID := payload.Actions[0].ActionID
         
-        // 「ちょっと待って」ボタンの場合はvalueからタスクIDを取得
+        // 「リマインダー停止」の選択メニュー処理
         if actionID == "pause_reminder" {
-            taskID := payload.Actions[0].Value
-            log.Printf("pause_reminderアクション: タスクID=%s", taskID)
+            // 選択メニューからの値を取得
+            var selectedValue string
+            if payload.Actions[0].SelectedOption.Value != "" {
+                selectedValue = payload.Actions[0].SelectedOption.Value
+            } else {
+                selectedValue = payload.Actions[0].Value
+            }
             
-            if taskID == "" {
-                log.Printf("タスクIDが空です")
-                c.JSON(http.StatusBadRequest, gin.H{"error": "task ID is empty"})
+            log.Printf("pause_reminderアクション: 選択値=%s", selectedValue)
+            
+            if selectedValue == "" {
+                log.Printf("選択値が空です")
+                c.JSON(http.StatusBadRequest, gin.H{"error": "selected value is empty"})
                 return
             }
+            
+            // 値からタスクIDと期間を抽出 (形式: "taskID:duration")
+            parts := strings.Split(selectedValue, ":")
+            if len(parts) != 2 {
+                log.Printf("選択値のフォーマットが不正: %s", selectedValue)
+                c.JSON(http.StatusBadRequest, gin.H{"error": "invalid value format"})
+                return
+            }
+            
+            taskID := parts[0]
+            duration := parts[1]
             
             // タスクIDを使ってデータベースから直接タスクを検索
             var taskToUpdate models.ReviewTask
@@ -84,13 +109,36 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
                 return
             }
             
-            // 30秒間リマインダーを一時停止
-            pauseUntil := time.Now().Add(30 * time.Second)
-            taskToUpdate.ReminderPausedUntil = &pauseUntil
+            // 選択された期間に基づいてリマインダーを一時停止
+            var pauseUntil time.Time
+            
+            switch duration {
+            case "20s":
+                pauseUntil = time.Now().Add(20 * time.Second)
+                taskToUpdate.ReminderPausedUntil = &pauseUntil
+            case "30s":
+                pauseUntil = time.Now().Add(30 * time.Second)
+                taskToUpdate.ReminderPausedUntil = &pauseUntil
+            case "1m":
+                pauseUntil = time.Now().Add(1 * time.Minute)
+                taskToUpdate.ReminderPausedUntil = &pauseUntil
+            case "today":
+                // 今日の23:59:59まで停止
+                now := time.Now()
+                pauseUntil = time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location())
+                taskToUpdate.ReminderPausedUntil = &pauseUntil
+            case "stop":
+                // レビュー担当者が決まるまで通知しない
+                taskToUpdate.Status = "paused"
+            default:
+                pauseUntil = time.Now().Add(30 * time.Second) // デフォルト
+                taskToUpdate.ReminderPausedUntil = &pauseUntil
+            }
+            
             db.Save(&taskToUpdate)
             
             // 一時停止を通知
-            err := services.SendReminderPausedMessage(taskToUpdate)
+            err := services.SendReminderPausedMessage(taskToUpdate, duration)
             if err != nil {
                 log.Printf("一時停止通知の送信に失敗: %v", err)
             }
