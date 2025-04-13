@@ -218,7 +218,7 @@ func main() {
 
 // 定期的にタスクをチェックするバックグラウンド処理
 func runTaskChecker(db *gorm.DB) {
-    taskTicker := time.NewTicker(10 * time.Second) // 10秒ごとにチェック
+    taskTicker := time.NewTicker(5* time.Minute) // 5分ごとにチェック
     cleanupTicker := time.NewTicker(1 * time.Hour) // 1時間ごとにクリーンアップ
     defer taskTicker.Stop()
     defer cleanupTicker.Stop()
@@ -252,7 +252,7 @@ func runChannelChecker(db *gorm.DB) {
         select {
         case <-ticker.C:
             log.Println("start channel status check")
-            services.CleanupArchivedChannels(db)
+            services.CleanupArchivedChannels(db) // アーカイブされたチャンネルの設定を非アクティブに更新
         }
     }
 }
