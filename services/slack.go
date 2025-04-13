@@ -119,6 +119,7 @@ func UpdateSlackMessage(channel, ts string, task models.ReviewTask) error {
         status = fmt.Sprintf("👀 <@%s> さんが見てるところです", task.Reviewer)
     }
 
+    // まず元のメッセージを更新
     body := map[string]interface{}{
         "channel": channel,
         "ts":      ts,
@@ -143,5 +144,43 @@ func UpdateSlackMessage(channel, ts string, task models.ReviewTask) error {
         return err
     }
     defer resp.Body.Close()
+
+    // スレッドにメッセージを投稿
+    if task.Status == "pending" && task.Reviewer != "" {
+        postToThread(channel, ts, fmt.Sprintf("<@%s> さんがレビュー担当になりました", task.Reviewer))
+    } else if task.Status == "watching" {
+        postToThread(channel, ts, fmt.Sprintf("<@%s> さんが確認中です（2時間）", task.Reviewer))
+    }
+
+    return nil
+}
+
+// スレッドにメッセージを投稿する関数
+func postToThread(channel, ts, message string) error {
+    body := map[string]interface{}{
+        "channel": channel,
+        "thread_ts": ts,  // これがスレッド投稿の重要なパラメータ
+        "text": message,
+    }
+
+    jsonData, _ := json.Marshal(body)
+    req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+    if err != nil {
+        return err
+    }
+
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+    req.Header.Set("Content-Type", "application/json")
+
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    // レスポンスをログに記録
+    bodyBytes, _ := io.ReadAll(resp.Body)
+    fmt.Println("🧵 スレッド投稿レスポンス:", string(bodyBytes))
+
     return nil
 }
