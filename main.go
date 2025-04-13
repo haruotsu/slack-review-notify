@@ -228,12 +228,14 @@ func main() {
 
 // 定期的にタスクをチェックするバックグラウンド処理
 func runTaskChecker(db *gorm.DB) {
-    ticker := time.NewTicker(10 * time.Second) // 10秒ごとにチェック
-    defer ticker.Stop()
+    taskTicker := time.NewTicker(10 * time.Second) // 10秒ごとにチェック
+    cleanupTicker := time.NewTicker(1 * time.Hour) // 1時間ごとにクリーンアップ
+    defer taskTicker.Stop()
+    defer cleanupTicker.Stop()
 
     for {
         select {
-        case <-ticker.C:
+        case <-taskTicker.C:
             log.Println("タスクのチェックを開始します...")
             
             // レビュー待ちタスク（レビュアー未割り当て）のチェック
@@ -241,6 +243,12 @@ func runTaskChecker(db *gorm.DB) {
             
             // レビュー中タスク（レビュアー割り当て済み）のチェック
             services.CheckInReviewTasks(db)
+            
+        case <-cleanupTicker.C:
+            log.Println("古いタスクのクリーンアップを開始します...")
+            
+            // 古いタスクの削除処理
+            services.CleanupOldTasks(db)
         }
     }
 }
