@@ -6,6 +6,9 @@ import (
 	"slack-review-notify/models"
 	"time"
 
+	"log"
+	"slack-review-notify/services"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-github/v71/github"
 	"github.com/google/uuid"
@@ -42,23 +45,59 @@ func (h *GithubHandler) HandleWebhook(c *gin.Context) {
 		// プルリクエストのイベント
     case *github.PullRequestEvent:
         if e.Action != nil && *e.Action == "labeled" && e.Label != nil && e.PullRequest != nil {
-            if e.Label.GetName() == "needs-review" {
-                pr := e.PullRequest
-                repo := e.Repo
-
+            // リポジトリ名を取得
+            repo := e.Repo
+            repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
+            pr := e.PullRequest
+            labelName := e.Label.GetName()
+            
+            // チャンネル設定を全て取得
+            var configs []models.ChannelConfig
+            h.DB.Where("is_active = ?", true).Find(&configs)
+            
+            for _, config := range configs {
+                // このチャンネルが監視対象のリポジトリとラベルか確認
+                if !services.IsRepositoryWatched(&config, repoFullName) {
+                    continue // 監視対象外のリポジトリはスキップ
+                }
+                
+                if config.LabelName != "" && config.LabelName != labelName {
+                    continue // 監視対象外のラベルはスキップ
+                }
+                
+                // このチャンネルには通知する
+                slackTS, slackChannelID, err := services.SendSlackMessage(
+                    pr.GetHTMLURL(), 
+                    pr.GetTitle(), 
+                    config.SlackChannelID,
+                    config.DefaultMentionID, // 第4引数にメンションIDを追加
+                )
+                
+                if err != nil {
+                    log.Printf("Slack送信失敗（チャンネル: %s）: %v", config.SlackChannelID, err)
+                    continue
+                }
+                
+                // タスク作成処理
                 task := models.ReviewTask{
                     ID:           uuid.NewString(),
                     PRURL:        pr.GetHTMLURL(),
-                    Repo:         fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName()),
+                    Repo:         repoFullName,
                     PRNumber:     pr.GetNumber(),
                     Title:        pr.GetTitle(),
+                    SlackTS:      slackTS,
+                    SlackChannel: slackChannelID,
                     Status:       "pending",
                     CreatedAt:    time.Now(),
                     UpdatedAt:    time.Now(),
                 }
-
-                h.DB.Create(&task)
-                fmt.Println("✅ New review task saved:", task.PRURL)
+                
+                if err := h.DB.Create(&task).Error; err != nil {
+                    log.Printf("DB保存失敗: %v", err)
+                    continue
+                }
+                
+                log.Printf("✅ PRを登録しました（チャンネル: %s）: %s", config.SlackChannelID, task.PRURL)
             }
         }
     }

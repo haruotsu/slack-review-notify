@@ -15,7 +15,7 @@ type ReviewTask struct {
 	SlackTS            string
 	SlackChannel       string
 	Reviewer           string
-	Status             string     // "pending", "in_review", "paused", "done"
+	Status             string     // "pending", "in_review", "watching", "paused", "archived", "done"
 	WatchingUntil      *time.Time // nullable
 	ReminderPausedUntil *time.Time // リマインダー一時停止期限
 	CreatedAt          time.Time

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"slack-review-notify/models"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -44,13 +45,13 @@ type SlackPostResponse struct {
     Error   string `json:"error,omitempty"`
 }
 
-func SendSlackMessage(prURL, title, channel string) (string, string, error) {
+func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, error) {
     blocks := []Block{
         {
             Type: "section",
             Text: &TextObject{
                 Type: "mrkdwn",
-                Text: fmt.Sprintf("<@U08MRE10GS2> *🔍 新しいレビュー対象のPRがあります！*\n\n*タイトル*: %s\n*リンク*: <%s>", title, prURL),
+                Text: fmt.Sprintf("<@%s> *🔍 新しいレビュー対象のPRがあります！*\n\n*タイトル*: %s\n*リンク*: <%s>", mentionID, title, prURL),
             },
         },
         {
@@ -165,7 +166,7 @@ func UpdateSlackMessage(channel, ts string, task models.ReviewTask) error {
 func postToThread(channel, ts, message string) error {
     body := map[string]interface{}{
         "channel": channel,
-        "thread_ts": ts,  // これがスレッド投稿の重要なパラメータ
+        "thread_ts": ts,
         "text": message,
     }
 
@@ -184,9 +185,20 @@ func postToThread(channel, ts, message string) error {
     }
     defer resp.Body.Close()
 
-    // レスポンスをログに記録
+    // レスポンスをパースして詳細なエラーを取得
+    var result struct {
+        OK    bool   `json:"ok"`
+        Error string `json:"error"`
+    }
+    
     bodyBytes, _ := io.ReadAll(resp.Body)
-    fmt.Println("🧵 スレッド投稿レスポンス:", string(bodyBytes))
+    json.Unmarshal(bodyBytes, &result)
+    
+    log.Printf("🧵 スレッド投稿レスポンス: %s", string(bodyBytes))
+    
+    if !result.OK {
+        return fmt.Errorf("slack error: %s", result.Error)
+    }
 
     return nil
 }
@@ -213,7 +225,7 @@ func CheckWatchingTasks(db *gorm.DB) {
     
     for _, task := range tasks {
         // リマインダーを送信
-        err := SendReminderMessage(task)
+        err := SendReminderMessage(db, task)
         if err != nil {
             log.Printf("リマインダー送信失敗 (Task ID: %s): %v", task.ID, err)
             continue
@@ -228,8 +240,56 @@ func CheckWatchingTasks(db *gorm.DB) {
     }
 }
 
-// リマインダーメッセージを送信する関数（複数の時間オプション付き）
-func SendReminderMessage(task models.ReviewTask) error {
+// リマインダーメッセージを送信する関数
+func SendReminderMessage(db *gorm.DB, task models.ReviewTask) error {
+    // チャンネルがアーカイブされているか確認
+    isArchived, err := IsChannelArchived(task.SlackChannel)
+    if err != nil {
+        log.Printf("チャンネル状態確認エラー（チャンネル: %s）: %v", task.SlackChannel, err)
+        
+        // Slack APIエラーの場合、エラーの種類を確認
+        if strings.Contains(err.Error(), "not_in_channel") || 
+           strings.Contains(err.Error(), "channel_not_found") {
+            log.Printf("チャンネルにボットが参加していないか、チャンネルが存在しません: %s", task.SlackChannel)
+            
+            // タスクを無効化
+            task.Status = "archived"
+            task.UpdatedAt = time.Now()
+            db.Save(&task)
+            
+            // チャンネル設定も無効化
+            var config models.ChannelConfig
+            if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
+                config.IsActive = false
+                config.UpdatedAt = time.Now()
+                db.Save(&config)
+                log.Printf("✅ チャンネル %s の設定を非アクティブにしました", task.SlackChannel)
+            }
+            
+            return fmt.Errorf("channel is archived or not accessible: %s", task.SlackChannel)
+        }
+    }
+    
+    if isArchived {
+        log.Printf("チャンネル %s はアーカイブされています", task.SlackChannel)
+        
+        // タスクを無効化
+        task.Status = "archived"
+        task.UpdatedAt = time.Now()
+        db.Save(&task)
+        
+        // チャンネル設定も無効化
+        var config models.ChannelConfig
+        if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
+            config.IsActive = false
+            config.UpdatedAt = time.Now()
+            db.Save(&config)
+            log.Printf("✅ チャンネル %s の設定を非アクティブにしました", task.SlackChannel)
+        }
+        
+        return fmt.Errorf("channel is archived: %s", task.SlackChannel)
+    }
+    
     // リマインダーメッセージ本文
     message := fmt.Sprintf("<@U08MRE10GS2> PRのレビューが必要です。対応できる方はメインメッセージのボタンから対応してください！\n*タイトル*: %s\n*リンク*: <%s>", 
         task.Title, task.PRURL)
@@ -333,94 +393,56 @@ func SendReviewerAssignedMessage(task models.ReviewTask) error {
     return postToThread(task.SlackChannel, task.SlackTS, message)
 }
 
-// CheckPendingTasks 関数の修正
-func CheckPendingTasks(db *gorm.DB) {
-    var tasks []models.ReviewTask
-    
-    // "pending" 状態、かつ "paused" でないタスクを検索
-    result := db.Where("status = ? AND reviewer = ?", "pending", "").Find(&tasks)
-    
-    if result.Error != nil {
-        log.Printf("レビュー待ちタスクの確認中にエラーが発生しました: %v", result.Error)
-        return
-    }
-    
-    now := time.Now()
-    tenSecondsAgo := now.Add(-10 * time.Second)
-    
-    for _, task := range tasks {
-        // リマインダー一時停止中かチェック
-        if task.ReminderPausedUntil != nil && now.Before(*task.ReminderPausedUntil) {
-            continue // 一時停止中なのでスキップ
-        }
-        
-        // 一時停止ステータスならスキップ
-        if task.Status == "paused" {
-            continue
-        }
-        
-        // 10秒ごとにリマインダーを送信（最終更新から10秒経過しているか確認）
-        if task.UpdatedAt.Before(tenSecondsAgo) {
-            err := SendReminderMessage(task)
-            if err != nil {
-                log.Printf("リマインダー送信失敗 (Task ID: %s): %v", task.ID, err)
-                continue
-            }
-            
-            // 更新時間を記録
-            task.UpdatedAt = now
-            db.Save(&task)
-            
-            log.Printf("✅ レビュー待ちリマインダーを送信しました: %s (%s)", task.Title, task.ID)
-        }
-    }
-}
-
-// CheckInReviewTasks 関数も同様に修正
-func CheckInReviewTasks(db *gorm.DB) {
-    var tasks []models.ReviewTask
-    
-    // "in_review" 状態でレビュアーが割り当てられているタスクを検索
-    result := db.Where("status = ? AND reviewer != ?", "in_review", "").Find(&tasks)
-    
-    if result.Error != nil {
-        log.Printf("レビュー中タスクの確認中にエラーが発生しました: %v", result.Error)
-        return
-    }
-    
-    now := time.Now()
-    tenSecondsAgo := now.Add(-10 * time.Second)
-    
-    for _, task := range tasks {
-        // リマインダー一時停止中かチェック
-        if task.ReminderPausedUntil != nil && now.Before(*task.ReminderPausedUntil) {
-            continue // 一時停止中なのでスキップ
-        }
-        
-        // 一時停止ステータスならスキップ
-        if task.Status == "paused" {
-            continue
-        }
-        
-        // 10秒ごとにリマインダーを送信（最終更新から10秒経過しているか確認）
-        if task.UpdatedAt.Before(tenSecondsAgo) {
-            err := SendReviewerReminderMessage(task)
-            if err != nil {
-                log.Printf("レビュアーリマインダー送信失敗 (Task ID: %s): %v", task.ID, err)
-                continue
-            }
-            
-            // 更新時間を記録
-            task.UpdatedAt = now
-            db.Save(&task)
-            
-            log.Printf("✅ レビュアーリマインダーを送信しました: %s (%s)", task.Title, task.ID)
-        }
-    }
-}
-
 // レビュアー向けのリマインダーメッセージも同様に修正
-func SendReviewerReminderMessage(task models.ReviewTask) error {
+func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
+    // チャンネルがアーカイブされているか確認
+    isArchived, err := IsChannelArchived(task.SlackChannel)
+    if err != nil {
+        log.Printf("チャンネル状態確認エラー（チャンネル: %s）: %v", task.SlackChannel, err)
+        
+        // Slack APIエラーの場合、エラーの種類を確認
+        if strings.Contains(err.Error(), "not_in_channel") || 
+           strings.Contains(err.Error(), "channel_not_found") {
+            log.Printf("チャンネルにボットが参加していないか、チャンネルが存在しません: %s", task.SlackChannel)
+            
+            // タスクを無効化
+            task.Status = "archived"
+            task.UpdatedAt = time.Now()
+            db.Save(&task)
+            
+            // チャンネル設定も無効化
+            var config models.ChannelConfig
+            if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
+                config.IsActive = false
+                config.UpdatedAt = time.Now()
+                db.Save(&config)
+                log.Printf("✅ チャンネル %s の設定を非アクティブにしました", task.SlackChannel)
+            }
+            
+            return fmt.Errorf("channel is archived or not accessible: %s", task.SlackChannel)
+        }
+    }
+    
+    if isArchived {
+        log.Printf("チャンネル %s はアーカイブされています", task.SlackChannel)
+        
+        // タスクを無効化
+        task.Status = "archived"
+        task.UpdatedAt = time.Now()
+        db.Save(&task)
+        
+        // チャンネル設定も無効化
+        var config models.ChannelConfig
+        if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
+            config.IsActive = false
+            config.UpdatedAt = time.Now()
+            db.Save(&config)
+            log.Printf("✅ チャンネル %s の設定を非アクティブにしました", task.SlackChannel)
+        }
+        
+        return fmt.Errorf("channel is archived: %s", task.SlackChannel)
+    }
+    
     message := fmt.Sprintf("<@%s> レビューの進捗はいかがですか？まだ完了していない場合は対応をお願いします！", task.Reviewer)
     
     // ボタン付きのメッセージブロックを作成
@@ -529,4 +551,148 @@ func SendReminderPausedMessage(task models.ReviewTask, duration string) error {
     }
     
     return postToThread(task.SlackChannel, task.SlackTS, message)
+}
+
+// ボットが参加しているチャンネルのリストを取得
+func GetBotChannels() ([]string, error) {
+    url := "https://slack.com/api/conversations.list?types=public_channel,private_channel"
+    
+    req, err := http.NewRequest("GET", url, nil)
+    if err != nil {
+        return nil, err
+    }
+    
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+    
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+    
+    var result struct {
+        OK       bool `json:"ok"`
+        Channels []struct {
+            ID   string `json:"id"`
+            Name string `json:"name"`
+            // その他のチャンネル情報
+        } `json:"channels"`
+    }
+    
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return nil, err
+    }
+    
+    if !result.OK {
+        return nil, fmt.Errorf("failed to get channels")
+    }
+    
+    channelIDs := make([]string, 0, len(result.Channels))
+    for _, ch := range result.Channels {
+        // チャンネルIDを収集
+        channelIDs = append(channelIDs, ch.ID)
+    }
+    
+    return channelIDs, nil
+}
+
+// SlackのAPIエラーが「チャンネル関連のエラー」かどうかを判定
+func IsChannelRelatedError(err error) bool {
+    if err == nil {
+        return false
+    }
+    
+    errorStr := err.Error()
+    return strings.Contains(errorStr, "not_in_channel") || 
+           strings.Contains(errorStr, "channel_not_found") || 
+           strings.Contains(errorStr, "is_archived") || 
+           strings.Contains(errorStr, "missing_scope") ||
+           strings.Contains(errorStr, "channel_not_found")
+}
+
+// チャンネルのボットの参加状態を確認
+func IsBotInChannel(channelID string) (bool, error) {
+    url := fmt.Sprintf("https://slack.com/api/conversations.members?channel=%s", channelID)
+    
+    req, err := http.NewRequest("GET", url, nil)
+    if err != nil {
+        return false, err
+    }
+    
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+    
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return false, err
+    }
+    defer resp.Body.Close()
+    
+    var result struct {
+        OK      bool     `json:"ok"`
+        Members []string `json:"members"`
+        Error   string   `json:"error"`
+    }
+    
+    bodyBytes, _ := io.ReadAll(resp.Body)
+    if err := json.Unmarshal(bodyBytes, &result); err != nil {
+        return false, err
+    }
+    
+    if !result.OK {
+        return false, fmt.Errorf("slack error: %s", result.Error)
+    }
+    
+    botUserID := os.Getenv("SLACK_BOT_USER_ID")
+    if botUserID == "" {
+        return false, fmt.Errorf("SLACK_BOT_USER_ID is not set")
+    }
+    
+    for _, member := range result.Members {
+        if member == botUserID {
+            return true, nil
+        }
+    }
+    
+    return false, nil
+}
+
+// チャンネルがアーカイブされているかどうかを確認する関数
+func IsChannelArchived(channelID string) (bool, error) {
+    url := fmt.Sprintf("https://slack.com/api/conversations.info?channel=%s", channelID)
+    
+    req, err := http.NewRequest("GET", url, nil)
+    if err != nil {
+        return false, err
+    }
+    
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+    
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return false, err
+    }
+    defer resp.Body.Close()
+    
+    var result struct {
+        OK      bool `json:"ok"`
+        Channel struct {
+            ID        string `json:"id"`
+            IsArchived bool   `json:"is_archived"`
+        } `json:"channel"`
+        Error string `json:"error"`
+    }
+    
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return false, err
+    }
+    
+    if !result.OK {
+        if result.Error == "channel_not_found" {
+            // チャンネルが存在しない場合はアーカイブされていると見なす
+            return true, nil
+        }
+        return false, fmt.Errorf("failed to get channel info: %s", result.Error)
+    }
+    
+    return result.Channel.IsArchived, nil
 }
