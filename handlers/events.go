@@ -6,8 +6,8 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"slack-review-notify/models"
+	"slack-review-notify/services"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +18,9 @@ import (
 // Slackイベントを処理するハンドラ
 func HandleSlackEvents(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// ★★★ リクエスト受信直後にログ出力 ★★★
+		log.Println("INFO: Received request on /slack/events endpoint")
+
 		body, _ := io.ReadAll(c.Request.Body)
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 		log.Printf("slack event received: %s", string(body))
@@ -45,57 +48,66 @@ func HandleSlackEvents(db *gorm.DB) gin.HandlerFunc {
 		
 		// ボットがチャンネルに追加されたイベント
 		if payload.Event.Type == "member_joined_channel" {
-			// ボットのユーザーIDを環境変数から取得または固定値を使用
-			botUserID := os.Getenv("SLACK_BOT_USER_ID")
-			if botUserID == "" {
-				botUserID = "TESTTEST"
-			}
+			log.Printf("bot joined channel: %s", payload.Event.Channel)
 			
-			log.Printf("bot id compare: event=%s, config=%s", payload.Event.User, botUserID)
+			var config models.ChannelConfig
+			var messagePosted bool = false // メッセージ投稿済みフラグ
+			result := db.Where("slack_channel_id = ?", payload.Event.Channel).First(&config)
 			
-			// ボット自身がチャンネルに追加された場合
-			if payload.Event.User == botUserID {
-				log.Printf("bot joined channel: %s", payload.Event.Channel)
-				
-				// チャンネル設定を作成または更新
-				var config models.ChannelConfig
-				result := db.Where("slack_channel_id = ?", payload.Event.Channel).First(&config)
-				
-				if result.Error != nil {
-					// 新規作成
+			if result.Error != nil {
+				if result.Error == gorm.ErrRecordNotFound {
+					// --- 新規作成 --- 
 					config = models.ChannelConfig{
 						ID:               uuid.NewString(),
 						SlackChannelID:   payload.Event.Channel,
-						DefaultMentionID: botUserID, // デフォルトはボット自身
-						LabelName:        "needs-review", // デフォルト値
+						DefaultMentionID: "", // 空に設定
+						LabelName:        "needs-review",
 						IsActive:         true,
 						CreatedAt:        time.Now(),
 						UpdatedAt:        time.Now(),
 					}
-					
-					createResult := db.Create(&config)
-					if createResult.Error != nil {
-						log.Printf("create channel config error: %v", createResult.Error)
+					if err := db.Create(&config).Error; err != nil {
+						log.Printf("create channel config error: %v", err)
 					} else {
-						log.Printf("create channel config: %s, ID=%s", 
-							payload.Event.Channel, config.ID)
-							
-						// 設定が保存されたか再確認
-						var checkConfig models.ChannelConfig
-						checkResult := db.Where("slack_channel_id = ?", payload.Event.Channel).First(&checkConfig)
-						if checkResult.Error != nil {
-							log.Printf("save check error: %v", checkResult.Error)
+						log.Printf("create channel config successful: %s", payload.Event.Channel)
+						// ★★★ 作成成功後にメッセージ投稿 ★★★
+						if postErr := services.PostJoinMessage(payload.Event.Channel); postErr != nil {
+							log.Printf("Failed to post join message after creation: %v", postErr)
 						} else {
-							log.Printf("save check ok: ID=%s, Channel=%s", 
-								checkConfig.ID, checkConfig.SlackChannelID)
+							messagePosted = true
 						}
 					}
 				} else {
-					log.Printf("this channel config already exists: %s", payload.Event.Channel)
+					// レコードが見つからない以外のDBエラー
+					log.Printf("db error finding channel config: %v", result.Error)
+				}
+			} else {
+				// --- 既存レコードあり (再参加など) --- 
+				log.Printf("channel config already exists for %s, reactivating...", payload.Event.Channel)
+				config.IsActive = true // 再参加時はアクティブにする
+				config.UpdatedAt = time.Now()
+				if err := db.Save(&config).Error; err != nil {
+					log.Printf("failed to reactivate channel config for %s: %v", payload.Event.Channel, err)
+				} else {
+					log.Printf("reactivate channel config successful: %s", payload.Event.Channel)
+					// ★★★ 更新成功後にメッセージ投稿 (まだ投稿されていなければ) ★★★
+					if !messagePosted {
+						if postErr := services.PostJoinMessage(payload.Event.Channel); postErr != nil {
+							log.Printf("Failed to post join message after reactivation: %v", postErr)
+						} else {
+							messagePosted = true
+						}
+					}
 				}
 			}
 		}
 		
-		c.Status(http.StatusOK)
+		// URL検証チャレンジへの応答
+		if payload.Type == "url_verification" {
+			c.String(http.StatusOK, payload.Challenge)
+			return
+		}
+
+		c.Status(http.StatusOK) // 他のイベントタイプはOKだけ返す
 	}
 } 

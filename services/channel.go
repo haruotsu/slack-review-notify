@@ -1,7 +1,13 @@
 package services
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"os"
 	"slack-review-notify/models"
 	"time"
 
@@ -33,4 +39,45 @@ func CleanupArchivedChannels(db *gorm.DB) {
 			}
 		}
 	}
+}
+
+// IsChannelArchived はチャンネルがアーカイブされているかどうかを確認します
+func IsChannelArchived(channelID string) (bool, error) {
+	body := map[string]interface{}{
+		"channel": channelID,
+	}
+
+	jsonData, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", "https://slack.com/api/conversations.info", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return false, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		OK      bool `json:"ok"`
+		Channel struct {
+			IsArchived bool `json:"is_archived"`
+		} `json:"channel"`
+		Error string `json:"error"`
+	}
+	
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return false, fmt.Errorf("slack API response parse error: %v", err)
+	}
+
+	if !result.OK {
+		return false, fmt.Errorf("slack error: %s", result.Error)
+	}
+
+	return result.Channel.IsArchived, nil
 } 
