@@ -25,7 +25,12 @@ func main() {
 		log.Println("fail to load .env file")
 	}
 
-	db, err := gorm.Open(sqlite.Open("review_tasks.db"), &gorm.Config{})
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "review_tasks.db"
+	}
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+
 	if err != nil {
 		log.Fatal("fail to connect db:", err)
 	}
