@@ -1,0 +1,44 @@
+{
+  "display_information": {
+    "name": "slack-review-notify"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "slack-review-notify",
+      "always_online": false
+    },
+    "slash_commands": [
+      {
+        "command": "/slack-review-notify",
+        "url": "https://<ngrokのID>.ngrok-free.app/slack/command",
+        "description": "PRレビュー通知ボットの設定",
+        "usage_hint": "help",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "channels:manage",
+        "channels:read",
+        "chat:write",
+        "commands",
+        "groups:read",
+        "groups:write",
+        "mpim:read",
+        "channels:history",
+        "groups:history"
+      ]
+    }
+  },
+  "settings": {
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://<ngrokのID>.ngrok-free.app/slack/actions"
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}
