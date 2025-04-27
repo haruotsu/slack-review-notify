@@ -206,6 +206,12 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
                         randomIndex := r.Intn(len(validReviewers))
                         newReviewerID = validReviewers[randomIndex]
                     }
+                } else {
+                    // レビュワーが1人しかいない場合は通知メッセージを送信
+                    message := "レビュワーが1人しか登録されていないため、変更できません。他のレビュワーを登録してください。"
+                    if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
+                        log.Printf("notification error: %v", err)
+                    }
                 }
             }
             
