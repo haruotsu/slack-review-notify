@@ -642,3 +642,64 @@ func IsChannelArchived(channelID string) (bool, error) {
     
     return result.Channel.IsArchived, nil
 }
+
+// 自動割り当てされたレビュワーを表示し、変更ボタンを表示する関数
+func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
+    message := fmt.Sprintf("自動でレビュワーが割り当てられました: <@%s> さん、レビューをお願いします！", task.Reviewer)
+    
+    // ボタン付きのメッセージブロックを作成
+    blocks := []map[string]interface{}{
+        {
+            "type": "section",
+            "text": map[string]string{
+                "type": "mrkdwn",
+                "text": message,
+            },
+        },
+        {
+            "type": "actions",
+            "elements": []map[string]interface{}{
+                {
+                    "type": "button",
+                    "text": map[string]string{
+                        "type": "plain_text",
+                        "text": "変わってほしい！",
+                    },
+                    "action_id": "change_reviewer",
+                    "value": task.ID,
+                    "style": "danger",
+                },
+            },
+        },
+    }
+    
+    // スレッドにボタン付きメッセージを投稿
+    body := map[string]interface{}{
+        "channel": task.SlackChannel,
+        "thread_ts": task.SlackTS,
+        "blocks": blocks,
+    }
+    
+    jsonData, _ := json.Marshal(body)
+    req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+    if err != nil {
+        return err
+    }
+    
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+    req.Header.Set("Content-Type", "application/json")
+    
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+    
+    return nil
+}
+
+// レビュワーが変更されたことを通知する関数
+func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) error {
+    message := fmt.Sprintf("レビュワーを変更しました: <@%s> → <@%s> さん、よろしくお願いします！", oldReviewerID, task.Reviewer)
+    return PostToThread(task.SlackChannel, task.SlackTS, message)
+}

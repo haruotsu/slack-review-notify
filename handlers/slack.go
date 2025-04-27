@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -138,17 +139,17 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
             return
         }
         
-        // 「ちょっと待って」以外のアクション（レビューします！など）の場合
-        var task models.ReviewTask
-        if err := db.Where("slack_ts = ? AND slack_channel = ?", ts, channel).First(&task).Error; err != nil {
-            log.Printf("task not found: ts=%s, channel=%s", ts, channel)
-            c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
-            return
-        }
-        
-        // 残りは既存のスイッチケース
+        // 各アクションに対する処理
         switch actionID {
         case "review_take":
+            // tsとchannelを使ってタスクを検索
+            var task models.ReviewTask
+            if err := db.Where("slack_ts = ? AND slack_channel = ?", ts, channel).First(&task).Error; err != nil {
+                log.Printf("task not found: ts=%s, channel=%s", ts, channel)
+                c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+                return
+            }
+            
             // レビュアーを設定
             task.Reviewer = slackUserID
             // ステータスを確実に in_review に設定
@@ -166,30 +167,90 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
                 log.Printf("reviewer assigned notification error: %v", err)
             }
             
-            // メッセージ更新は行わない
+            c.Status(http.StatusOK)
+            return
+        
+        case "review_done":
+            // tsとchannelを使ってタスクを検索
+            var task models.ReviewTask
+            if err := db.Where("slack_ts = ? AND slack_channel = ?", ts, channel).First(&task).Error; err != nil {
+                log.Printf("task not found: ts=%s, channel=%s", ts, channel)
+                c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+                return
+            }
+            
+            // レビュー完了通知をスレッドに投稿
+            message := fmt.Sprintf("✅ <@%s> さんがレビューを完了しました！感謝！👏", slackUserID)
+            if err := services.PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
+                log.Printf("review done notification error: %v", err)
+            }
+            
+            // ステータスを完了に変更
+            task.Status = "done"
+            task.UpdatedAt = time.Now()
+
+            if err := db.Save(&task).Error; err != nil {
+                log.Printf("task save error: %v", err)
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save task"})
+                return
+            }
             
             c.Status(http.StatusOK)
             return
-		
-		case "review_done":
-			// レビュー完了通知をスレッドに投稿
-			message := fmt.Sprintf("✅ <@%s> さんがレビューを完了しました！感謝！👏", slackUserID)
-			if err := services.PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
-				log.Printf("review done notification error: %v", err)
-			}
-			
-			// ステータスを完了に変更
-			task.Status = "done"
-			task.UpdatedAt = time.Now()
 
-			if err := db.Save(&task).Error; err != nil {
-				log.Printf("task save error: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save task"})
-				return
-			}
-			
-			c.Status(http.StatusOK)
-			return
-		}
+        case "change_reviewer":
+            // タスクIDを取得
+            taskID := payload.Actions[0].Value
+            
+            // タスクIDを使ってデータベースからタスクを検索
+            var taskToUpdate models.ReviewTask
+            if err := db.Where("id = ?", taskID).First(&taskToUpdate).Error; err != nil {
+                log.Printf("task id %s not found: %v", taskID, err)
+                c.JSON(http.StatusNotFound, gin.H{"error": "task not found by ID"})
+                return
+            }
+            
+            // 古いレビュワーIDを保存
+            oldReviewerID := taskToUpdate.Reviewer
+            
+            // 新しいレビュワーをランダムに選択
+            newReviewerID := services.SelectRandomReviewer(db, taskToUpdate.SlackChannel)
+            
+            // 新しいレビュワーが前と同じであれば、再度選択
+            // (レビュワーリストが1人しかない場合は同じになるが、その場合は仕方ない)
+            var config models.ChannelConfig
+            if newReviewerID == oldReviewerID && db.Where("slack_channel_id = ?", taskToUpdate.SlackChannel).First(&config).Error == nil {
+                reviewers := strings.Split(config.ReviewerList, ",")
+                if len(reviewers) > 1 {
+                    // リストから古いレビュワー以外を選ぶ
+                    validReviewers := []string{}
+                    for _, r := range reviewers {
+                        if trimmed := strings.TrimSpace(r); trimmed != "" && trimmed != oldReviewerID {
+                            validReviewers = append(validReviewers, trimmed)
+                        }
+                    }
+                    
+                    if len(validReviewers) > 0 {
+                        r := rand.New(rand.NewSource(time.Now().UnixNano()))
+                        randomIndex := r.Intn(len(validReviewers))
+                        newReviewerID = validReviewers[randomIndex]
+                    }
+                }
+            }
+            
+            // レビュワーを更新
+            taskToUpdate.Reviewer = newReviewerID
+            taskToUpdate.UpdatedAt = time.Now()
+            db.Save(&taskToUpdate)
+            
+            // レビュワーが変更されたことを通知
+            err := services.SendReviewerChangedMessage(taskToUpdate, oldReviewerID)
+            if err != nil {
+                log.Printf("reviewer change notification error: %v", err)
+            }
+            
+            c.Status(http.StatusOK)
+            return
+        }
     }
 }

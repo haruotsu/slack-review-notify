@@ -200,8 +200,7 @@ func main() {
 						
 						// レビュワーが割り当てられたことをスレッドに通知
 						if randomReviewerID != "" {
-							message := fmt.Sprintf("自動でレビュワーが割り当てられました: <@%s> さん、レビューをお願いします！", randomReviewerID)
-							if err := services.PostToThread(slackChannelID, slackTs, message); err != nil {
+							if err := services.PostReviewerAssignedMessageWithChangeButton(task); err != nil {
 								log.Printf("reviewer assigned notification error: %v", err)
 							}
 						}
