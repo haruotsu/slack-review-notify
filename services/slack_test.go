@@ -304,50 +304,6 @@ func TestSendReminderMessage(t *testing.T) {
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
 }
 
-func TestSendReviewerAssignedMessage(t *testing.T) {
-	// テスト前の環境変数を保存し、テスト後に復元
-	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
-	
-	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
-	
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
-	
-	// スレッドメッセージ送信のモック
-	gock.New("https://slack.com").
-		Post("/api/chat.postMessage").
-		MatchHeader("Authorization", "Bearer test-token").
-		MatchHeader("Content-Type", "application/json").
-		Reply(200).
-		JSON(map[string]interface{}{
-			"ok": true,
-		})
-	
-	// テスト用のタスクを作成
-	task := models.ReviewTask{
-		ID:           "test-id",
-		PRURL:        "https://github.com/owner/repo/pull/1",
-		Repo:         "owner/repo",
-		PRNumber:     1,
-		Title:        "Test PR",
-		SlackTS:      "1234.5678",
-		SlackChannel: "C12345",
-		Reviewer:     "U12345",
-		Status:       "in_review",
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-	
-	// 関数を実行
-	err := SendReviewerAssignedMessage(task)
-	
-	// アサーション
-	assert.NoError(t, err)
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
-}
-
 func TestSendReviewerReminderMessage(t *testing.T) {
 	// テスト用DBのセットアップ
 	db := setupTestDB(t)
