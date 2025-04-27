@@ -241,9 +241,6 @@ func runTaskChecker(db *gorm.DB) {
 		case <-taskTicker.C:
 			log.Println("start task check")
 			
-			// レビュー待ちタスク（レビュアー未割り当て）のチェック
-			services.CheckPendingTasks(db)
-			
 			// レビュー中タスク（レビュアー割り当て済み）のチェック
 			services.CheckInReviewTasks(db)
 			

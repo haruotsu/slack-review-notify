@@ -142,17 +142,10 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				
 			case "deactivate":
 				activateChannel(c, db, channelID, false)
-				
-			case "set-reminder-interval":
-				if params == "" {
-					c.String(200, "リマインド頻度を分単位で指定してください。例: /slack-review-notify set-reminder-interval 30")
-					return
-				}
-				setReminderInterval(c, db, channelID, strings.TrimSpace(params), false)
-				
+		
 			case "set-reviewer-reminder-interval":
 				if params == "" {
-					c.String(200, "レビュワー割り当て後のリマインド頻度を分単位で指定してください。例: /slack-review-notify set-reviewer-reminder-interval 60")
+					c.String(200, "レビュワー割り当て後のリマインド頻度を分単位で指定してください。例: /slack-review-notify set-reviewer-reminder-interval 30")
 					return
 				}
 				setReminderInterval(c, db, channelID, strings.TrimSpace(params), true)
@@ -179,8 +172,7 @@ func showHelp(c *gin.Context) {
 - /slack-review-notify add-repo owner/repo: 通知対象リポジトリを追加
 - /slack-review-notify remove-repo owner/repo: 通知対象リポジトリを削除
 - /slack-review-notify set-label label-name: 通知対象ラベルを設定
-- /slack-review-notify set-reminder-interval 30: レビュワー募集中のリマインド頻度を設定（分単位）
-- /slack-review-notify set-reviewer-reminder-interval 60: レビュワー割り当て後のリマインド頻度を設定（分単位）
+- /slack-review-notify set-reviewer-reminder-interval 30: レビュワー割り当て後のリマインド頻度を設定（分単位）
 - /slack-review-notify activate: このチャンネルでの通知を有効化
 - /slack-review-notify deactivate: このチャンネルでの通知を無効化`
 	
@@ -202,15 +194,9 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID string) {
 		status = "有効"
 	}
 	
-	// リマインド頻度のデフォルト値
-	reminderInterval := config.ReminderInterval
-	if reminderInterval <= 0 {
-		reminderInterval = 30
-	}
-	
 	reviewerReminderInterval := config.ReviewerReminderInterval
 	if reviewerReminderInterval <= 0 {
-		reviewerReminderInterval = 60
+		reviewerReminderInterval = 30
 	}
 	
 	response := fmt.Sprintf(`*このチャンネルのレビュー通知設定*
@@ -219,11 +205,9 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID string) {
 - レビュワーリスト: %s
 - 通知対象リポジトリ: %s
 - 通知対象ラベル: %s
-- レビュワー募集中のリマインド頻度: %d分
 - レビュワー割り当て後のリマインド頻度: %d分`, 
 		status, config.DefaultMentionID, formatReviewerList(config.ReviewerList), 
-		config.RepositoryList, config.LabelName,
-		reminderInterval, reviewerReminderInterval)
+		config.RepositoryList, config.LabelName, reviewerReminderInterval)
 	
 	c.String(200, response)
 }

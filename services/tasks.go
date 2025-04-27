@@ -10,65 +10,6 @@ import (
 	"slack-review-notify/models"
 )
 
-// CheckPendingTasks 関数を修正
-func CheckPendingTasks(db *gorm.DB) {
-	var tasks []models.ReviewTask
-	
-	// "pending" 状態で、"archived" 状態ではないタスクを検索
-	result := db.Where("status = ? AND reviewer = ?", "pending", "").
-		Where("status != ?", "archived").Find(&tasks)
-	
-	if result.Error != nil {
-		log.Printf("review pending task check error: %v", result.Error)
-		return
-	}
- 
-	now := time.Now()
-	
-	for _, task := range tasks {
-		// リマインダー一時停止中かチェック
-		if task.ReminderPausedUntil != nil && now.Before(*task.ReminderPausedUntil) {
-			continue // 一時停止中なのでスキップ
-		}
-		
-		// 一時停止ステータスならスキップ
-		if task.Status == "paused" {
-			continue
-		}
-		
-		// チャンネル設定からリマインド頻度を取得
-		var config models.ChannelConfig
-		var reminderInterval int = 30 // デフォルト値（30分）
-		
-		if err := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config).Error; err == nil {
-			if config.ReminderInterval > 0 {
-				reminderInterval = config.ReminderInterval
-			}
-		}
-		
-		// 設定された頻度でリマインダーを送信
-		reminderTime := now.Add(-time.Duration(reminderInterval) * time.Minute)
-		if task.UpdatedAt.Before(reminderTime) {
-			err := SendReminderMessage(db, task)
-			if err != nil {
-				log.Printf("reminder send error (task id: %s): %v", task.ID, err)
-				
-				// チャンネル関連のエラーの場合はループ継続せずスキップ
-				if strings.Contains(err.Error(), "channel is archived") || 
-				   strings.Contains(err.Error(), "not accessible") {
-					continue
-				}
-			} else {
-				// 更新時間を記録
-				task.UpdatedAt = now
-				db.Save(&task)
-				
-				log.Printf("reminder sent (task id: %s)", task.ID)
-			}
-		}
-	}
-}
-
 // CheckInReviewTasks 関数も同様に修正
 func CheckInReviewTasks(db *gorm.DB) {
 	var tasks []models.ReviewTask
@@ -97,7 +38,7 @@ func CheckInReviewTasks(db *gorm.DB) {
 		
 		// チャンネル設定からリマインド頻度を取得
 		var config models.ChannelConfig
-		var reminderInterval int = 60 // デフォルト値（60分）
+		var reminderInterval int = 30 // デフォルト値（30分）
 		
 		if err := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config).Error; err == nil {
 			if config.ReviewerReminderInterval > 0 {
