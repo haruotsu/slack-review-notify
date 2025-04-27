@@ -60,33 +60,42 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 		
 		// /slack-review-notify コマンドの処理
 		if command == "/slack-review-notify" {
-			parts := strings.Split(text, " ")
+			// コマンド部分とパラメータを分離
+			var subCommand, params string
 			
-			if len(parts) == 0 || parts[0] == "" || parts[0] == "help" {
+			// 最初の空白でコマンドとパラメータを分割
+			parts := strings.SplitN(text, " ", 2)
+			subCommand = parts[0]
+			if len(parts) > 1 {
+				params = parts[1]
+			}
+			
+			if subCommand == "" || subCommand == "help" {
 				// ヘルプを表示
 				showHelp(c)
 				return
 			}
 			
-			switch parts[0] {
+			switch subCommand {
 			case "show":
 				// 現在の設定を表示
 				showConfig(c, db, channelID)
 				
 			case "set-mention":
-				if len(parts) < 2 {
+				if params == "" {
 					c.String(200, "メンション先のユーザーIDを指定してください。例: /slack-review-notify set-mention U12345678")
 					return
 				}
-				mentionID := parts[1]
+				mentionID := strings.TrimSpace(params)
 				setMention(c, db, channelID, mentionID)
 				
 			case "add-reviewer":
-				if len(parts) < 2 {
+				if params == "" {
 					c.String(200, "レビュワーのユーザーIDをカンマ区切りで指定してください。例: /slack-review-notify add-reviewer U12345678,U87654321")
 					return
 				}
-				reviewerIDs := parts[1]
+				// カンマとスペースを考慮して整形
+				reviewerIDs := strings.ReplaceAll(params, ", ", ",")
 				addReviewers(c, db, channelID, reviewerIDs)
 				
 			case "show-reviewers":
@@ -98,27 +107,27 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				clearReviewers(c, db, channelID)
 				
 			case "add-repo":
-				if len(parts) < 2 {
+				if params == "" {
 					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify add-repo owner/repo")
 					return
 				}
-				repoName := parts[1]
+				repoName := params
 				addRepository(c, db, channelID, repoName)
 				
 			case "remove-repo":
-				if len(parts) < 2 {
+				if params == "" {
 					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify remove-repo owner/repo")
 					return
 				}
-				repoName := parts[1]
+				repoName := params
 				removeRepository(c, db, channelID, repoName)
 				
 			case "set-label":
-				if len(parts) < 2 {
+				if params == "" {
 					c.String(200, "ラベル名を指定してください。例: /slack-review-notify set-label needs-review")
 					return
 				}
-				labelName := parts[1]
+				labelName := params
 				setLabel(c, db, channelID, labelName)
 				
 			case "activate":
@@ -199,8 +208,14 @@ func formatReviewerList(reviewerList string) string {
 
 // 文字列を清潔なユーザーIDに変換する関数
 func cleanUserID(userID string) string {
+	// 空白を削除
+	userID = strings.TrimSpace(userID)
+	
 	// @から始まる場合は@を削除
 	userID = strings.TrimPrefix(userID, "@")
+	
+	// カンマが含まれる場合は削除
+	userID = strings.ReplaceAll(userID, ",", "")
 	
 	// <@で始まり>で終わる場合はそのまま返す（すでに正しい形式）
 	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
