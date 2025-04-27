@@ -166,8 +166,8 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 func showHelp(c *gin.Context) {
 	help := `*Review通知Bot設定コマンド*
 - /slack-review-notify show: 現在の設定を表示
-- /slack-review-notify set-mention U12345678: メンション先を設定
-- /slack-review-notify add-reviewer U12345678,U87654321: レビュワーを追加（カンマ区切り）
+- /slack-review-notify set-mention @user: メンション先を設定
+- /slack-review-notify add-reviewer @user1,@user2: レビュワーを追加（カンマ区切り）
 - /slack-review-notify show-reviewers: 登録されたレビュワーリストを表示
 - /slack-review-notify clear-reviewers: レビュワーリストをクリア
 - /slack-review-notify add-repo owner/repo: 通知対象リポジトリを追加
