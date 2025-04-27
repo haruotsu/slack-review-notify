@@ -197,6 +197,34 @@ func formatReviewerList(reviewerList string) string {
 	return strings.Join(formattedList, ", ")
 }
 
+// 文字列を清潔なユーザーIDに変換する関数
+func cleanUserID(userID string) string {
+	// @から始まる場合は@を削除
+	userID = strings.TrimPrefix(userID, "@")
+	
+	// <@で始まり>で終わる場合はそのまま返す（すでに正しい形式）
+	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
+		return strings.TrimPrefix(strings.TrimSuffix(userID, ">"), "<@")
+	}
+	
+	return userID
+}
+
+// 複数のユーザーIDを整形
+func cleanupUserIDs(userIDs string) string {
+	ids := strings.Split(userIDs, ",")
+	cleanedIDs := make([]string, 0, len(ids))
+	
+	for _, id := range ids {
+		cleaned := cleanUserID(strings.TrimSpace(id))
+		if cleaned != "" {
+			cleanedIDs = append(cleanedIDs, cleaned)
+		}
+	}
+	
+	return strings.Join(cleanedIDs, ",")
+}
+
 // レビュワーを追加
 func addReviewers(c *gin.Context, db *gorm.DB, channelID, reviewerIDs string) {
 	var config models.ChannelConfig
@@ -207,14 +235,14 @@ func addReviewers(c *gin.Context, db *gorm.DB, channelID, reviewerIDs string) {
 		config = models.ChannelConfig{
 			ID:              uuid.NewString(),
 			SlackChannelID:  channelID,
-			ReviewerList:    reviewerIDs,
+			ReviewerList:    cleanupUserIDs(reviewerIDs), // ユーザーID形式を整形
 			LabelName:       "needs-review", // デフォルト値
 			IsActive:        true,
 			CreatedAt:       time.Now(),
 			UpdatedAt:       time.Now(),
 		}
 		db.Create(&config)
-		c.String(200, fmt.Sprintf("レビュワーリストを設定しました: %s", formatReviewerList(reviewerIDs)))
+		c.String(200, fmt.Sprintf("レビュワーリストを設定しました: %s", formatReviewerList(config.ReviewerList)))
 		return
 	}
 	
@@ -230,7 +258,7 @@ func addReviewers(c *gin.Context, db *gorm.DB, channelID, reviewerIDs string) {
 	// 新しいレビュワーを追加
 	newReviewers := strings.Split(reviewerIDs, ",")
 	for _, newReviewer := range newReviewers {
-		newReviewer = strings.TrimSpace(newReviewer)
+		newReviewer = cleanUserID(strings.TrimSpace(newReviewer))
 		alreadyExists := false
 		
 		for _, existingReviewer := range currentReviewers {
