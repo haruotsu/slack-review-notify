@@ -81,6 +81,22 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				mentionID := parts[1]
 				setMention(c, db, channelID, mentionID)
 				
+			case "add-reviewer":
+				if len(parts) < 2 {
+					c.String(200, "レビュワーのユーザーIDをカンマ区切りで指定してください。例: /slack-review-notify add-reviewer U12345678,U87654321")
+					return
+				}
+				reviewerIDs := parts[1]
+				addReviewers(c, db, channelID, reviewerIDs)
+				
+			case "show-reviewers":
+				// レビュワーリストを表示
+				showReviewers(c, db, channelID)
+				
+			case "clear-reviewers":
+				// レビュワーリストをクリア
+				clearReviewers(c, db, channelID)
+				
 			case "add-repo":
 				if len(parts) < 2 {
 					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify add-repo owner/repo")
@@ -127,6 +143,9 @@ func showHelp(c *gin.Context) {
 	help := `*Review通知Bot設定コマンド*
 - /slack-review-notify show: 現在の設定を表示
 - /slack-review-notify set-mention U12345678: メンション先を設定
+- /slack-review-notify add-reviewer U12345678,U87654321: レビュワーを追加（カンマ区切り）
+- /slack-review-notify show-reviewers: 登録されたレビュワーリストを表示
+- /slack-review-notify clear-reviewers: レビュワーリストをクリア
 - /slack-review-notify add-repo owner/repo: 通知対象リポジトリを追加
 - /slack-review-notify remove-repo owner/repo: 通知対象リポジトリを削除
 - /slack-review-notify set-label label-name: 通知対象ラベルを設定
@@ -154,11 +173,120 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID string) {
 	response := fmt.Sprintf(`*このチャンネルのレビュー通知設定*
 - ステータス: %s
 - メンション先: <@%s>
+- レビュワーリスト: %s
 - 通知対象リポジトリ: %s
 - 通知対象ラベル: %s`, 
-		status, config.DefaultMentionID, config.RepositoryList, config.LabelName)
+		status, config.DefaultMentionID, formatReviewerList(config.ReviewerList), config.RepositoryList, config.LabelName)
 	
 	c.String(200, response)
+}
+
+// レビュワーリストをフォーマット
+func formatReviewerList(reviewerList string) string {
+	if reviewerList == "" {
+		return "未設定"
+	}
+	
+	reviewers := strings.Split(reviewerList, ",")
+	formattedList := []string{}
+	
+	for _, reviewer := range reviewers {
+		formattedList = append(formattedList, fmt.Sprintf("<@%s>", strings.TrimSpace(reviewer)))
+	}
+	
+	return strings.Join(formattedList, ", ")
+}
+
+// レビュワーを追加
+func addReviewers(c *gin.Context, db *gorm.DB, channelID, reviewerIDs string) {
+	var config models.ChannelConfig
+	
+	result := db.Where("slack_channel_id = ?", channelID).First(&config)
+	if result.Error != nil {
+		// 設定がまだない場合は新規作成
+		config = models.ChannelConfig{
+			ID:              uuid.NewString(),
+			SlackChannelID:  channelID,
+			ReviewerList:    reviewerIDs,
+			LabelName:       "needs-review", // デフォルト値
+			IsActive:        true,
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
+		}
+		db.Create(&config)
+		c.String(200, fmt.Sprintf("レビュワーリストを設定しました: %s", formatReviewerList(reviewerIDs)))
+		return
+	}
+	
+	// 既存のレビュワーリストをチェック
+	currentReviewers := []string{}
+	if config.ReviewerList != "" {
+		currentReviewers = strings.Split(config.ReviewerList, ",")
+		for i, r := range currentReviewers {
+			currentReviewers[i] = strings.TrimSpace(r)
+		}
+	}
+	
+	// 新しいレビュワーを追加
+	newReviewers := strings.Split(reviewerIDs, ",")
+	for _, newReviewer := range newReviewers {
+		newReviewer = strings.TrimSpace(newReviewer)
+		alreadyExists := false
+		
+		for _, existingReviewer := range currentReviewers {
+			if existingReviewer == newReviewer {
+				alreadyExists = true
+				break
+			}
+		}
+		
+		if !alreadyExists && newReviewer != "" {
+			currentReviewers = append(currentReviewers, newReviewer)
+		}
+	}
+	
+	// 更新したリストを保存
+	config.ReviewerList = strings.Join(currentReviewers, ",")
+	config.UpdatedAt = time.Now()
+	db.Save(&config)
+	
+	c.String(200, fmt.Sprintf("レビュワーリストを更新しました: %s", formatReviewerList(config.ReviewerList)))
+}
+
+// レビュワーリストを表示
+func showReviewers(c *gin.Context, db *gorm.DB, channelID string) {
+	var config models.ChannelConfig
+	
+	err := db.Where("slack_channel_id = ?", channelID).First(&config).Error
+	if err != nil {
+		c.String(200, "このチャンネルの設定はまだありません。/slack-review-notify add-reviewer コマンドで設定を開始してください。")
+		return
+	}
+	
+	if config.ReviewerList == "" {
+		c.String(200, "現在レビュワーは登録されていません。/slack-review-notify add-reviewer コマンドで追加してください。")
+		return
+	}
+	
+	response := fmt.Sprintf("*このチャンネルのレビュワーリスト*\n%s", formatReviewerList(config.ReviewerList))
+	c.String(200, response)
+}
+
+// レビュワーリストをクリア
+func clearReviewers(c *gin.Context, db *gorm.DB, channelID string) {
+	var config models.ChannelConfig
+	
+	err := db.Where("slack_channel_id = ?", channelID).First(&config).Error
+	if err != nil {
+		c.String(200, "このチャンネルの設定はまだありません。")
+		return
+	}
+	
+	config.ReviewerList = ""
+	config.UpdatedAt = time.Now()
+	db.Save(&config)
+	
+	c.String(200, "レビュワーリストをクリアしました。")
 }
 
 // メンション先を設定

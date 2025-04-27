@@ -155,12 +155,10 @@ func main() {
 							continue
 						}
 						
-						// メンションIDを取得
+						// ランダムにレビュワーを選択
 						mentionID := config.DefaultMentionID
-						if mentionID == "" {
-							mentionID = ""
-						}
 						
+						// メッセージ送信後のタスク作成部分
 						slackTs, slackChannelID, err := services.SendSlackMessage(
 							pr.GetHTMLURL(), 
 							pr.GetTitle(), 
@@ -175,6 +173,9 @@ func main() {
 						
 						log.Printf("slack message sent: ts=%s, channel=%s", slackTs, slackChannelID)
 						
+						// ランダムにレビュワーを選択してタスクに設定
+						randomReviewerID := services.SelectRandomReviewer(db, config.SlackChannelID)
+						
 						task := models.ReviewTask{
 							ID:           uuid.NewString(),
 							PRURL:        pr.GetHTMLURL(),
@@ -183,7 +184,8 @@ func main() {
 							Title:        pr.GetTitle(),
 							SlackTS:      slackTs,
 							SlackChannel: slackChannelID,
-							Status:       "pending",
+							Reviewer:     randomReviewerID, // ランダムに選択したレビュワーを設定
+							Status:       "in_review", // ステータスを in_review に変更
 							CreatedAt:    time.Now(),
 							UpdatedAt:    time.Now(),
 						}
@@ -195,6 +197,14 @@ func main() {
 						
 						log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, task.PRURL)
 						notified = true
+						
+						// レビュワーが割り当てられたことをスレッドに通知
+						if randomReviewerID != "" {
+							message := fmt.Sprintf("自動でレビュワーが割り当てられました: <@%s> さん、レビューをお願いします！", randomReviewerID)
+							if err := services.PostToThread(slackChannelID, slackTs, message); err != nil {
+								log.Printf("reviewer assigned notification error: %v", err)
+							}
+						}
 					}
 					
 					if !notified {

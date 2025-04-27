@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"slack-review-notify/models"
@@ -45,7 +46,47 @@ type SlackPostResponse struct {
     Error   string `json:"error,omitempty"`
 }
 
+// メンション先ユーザーIDをランダムに選択する関数
+func SelectRandomReviewer(db *gorm.DB, channelID string) string {
+	var config models.ChannelConfig
+	
+	// チャンネルの設定を取得
+	if err := db.Where("slack_channel_id = ?", channelID).First(&config).Error; err != nil {
+		log.Printf("failed to get channel config: %v", err)
+		return ""
+	}
+	
+	// レビュワーリストが空の場合はデフォルトのメンション先を返す
+	if config.ReviewerList == "" {
+		return config.DefaultMentionID
+	}
+	
+	// レビュワーリストからランダムに選択
+	reviewers := strings.Split(config.ReviewerList, ",")
+	
+	// 空の要素を削除
+	var validReviewers []string
+	for _, r := range reviewers {
+		if trimmed := strings.TrimSpace(r); trimmed != "" {
+			validReviewers = append(validReviewers, trimmed)
+		}
+	}
+	
+	if len(validReviewers) == 0 {
+		return config.DefaultMentionID
+	}
+	
+	// 乱数生成のシードを設定
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	
+	// ランダムなインデックスを生成
+	randomIndex := r.Intn(len(validReviewers))
+	
+	return validReviewers[randomIndex]
+}
+
 func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, error) {
+    // メンション先はそのまま使用する（変更しない）
     blocks := []Block{
         {
             Type: "section",
@@ -57,15 +98,6 @@ func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, 
         {
             Type: "actions",
             Elements: []Button{
-                {
-                    Type: "button",
-                    Text: TextObject{
-                        Type: "plain_text",
-                        Text: "レビューします！",
-                    },
-                    ActionID: "review_take",
-                    Style: "primary",
-                },
                 {
                     Type: "button",
                     Text: TextObject{
@@ -94,10 +126,10 @@ func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, 
     req.Header.Set("Content-Type", "application/json")
 
     resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
+    if err != nil {
+        return "", "", err
+    }
+    defer resp.Body.Close()
 
     bodyBytes, _ := io.ReadAll(resp.Body)
     fmt.Println("slack response:", string(bodyBytes))
@@ -111,8 +143,7 @@ func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, 
         return "", "", fmt.Errorf("Slack error: %s", slackResp.Error)
     }
 
-
-	return slackResp.Ts, slackResp.Channel, nil
+    return slackResp.Ts, slackResp.Channel, nil
 }
 
 // スレッドにメッセージを投稿する関数
