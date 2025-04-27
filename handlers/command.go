@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"regexp"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -43,7 +45,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				ID:               uuid.NewString(),
 				SlackChannelID:   channelID,
 				DefaultMentionID: userID, // コマンド実行者をデフォルトに
-				LabelName:        "needs-review",
+				LabelName:        "needs-review", // デフォルトのラベル名
 				IsActive:         true,
 				CreatedAt:        time.Now(),
 				UpdatedAt:        time.Now(),
@@ -84,7 +86,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				
 			case "set-mention":
 				if params == "" {
-					c.String(200, "メンション先のユーザーIDを指定してください。例: /slack-review-notify set-mention U12345678")
+					c.String(200, "メンション先のユーザーIDを指定してください。例: /slack-review-notify set-mention @user")
 					return
 				}
 				mentionID := strings.TrimSpace(params)
@@ -92,11 +94,15 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				
 			case "add-reviewer":
 				if params == "" {
-					c.String(200, "レビュワーのユーザーIDをカンマ区切りで指定してください。例: /slack-review-notify add-reviewer U12345678,U87654321")
+					c.String(200, "レビュワーのユーザーIDをカンマ区切りで指定してください。例: /slack-review-notify add-reviewer @user1,@user2")
 					return
 				}
-				// カンマとスペースを考慮して整形
-				reviewerIDs := strings.ReplaceAll(params, ", ", ",")
+				// 正規表現を使ってすべてのスペースパターンを処理
+				re := regexp.MustCompile(`\s*,\s*`)
+				reviewerIDs := re.ReplaceAllString(params, ",")
+
+				// 先頭と末尾の空白も削除
+				reviewerIDs = strings.TrimSpace(reviewerIDs)
 				addReviewers(c, db, channelID, reviewerIDs)
 				
 			case "show-reviewers":
@@ -249,7 +255,7 @@ func cleanUserID(userID string) string {
 	// カンマが含まれる場合は削除
 	userID = strings.ReplaceAll(userID, ",", "")
 	
-	// <@で始まり>で終わる場合はそのまま返す（すでに正しい形式）
+	// <@で始まり>で終わる場合はそのまま返す
 	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
 		return strings.TrimPrefix(strings.TrimSuffix(userID, ">"), "<@")
 	}
