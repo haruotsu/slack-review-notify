@@ -550,52 +550,6 @@ func IsChannelRelatedError(err error) bool {
            strings.Contains(errorStr, "channel_not_found")
 }
 
-// チャンネルのボットの参加状態を確認
-func IsBotInChannel(channelID string) (bool, error) {
-    url := fmt.Sprintf("https://slack.com/api/conversations.members?channel=%s", channelID)
-    
-    req, err := http.NewRequest("GET", url, nil)
-    if err != nil {
-        return false, err
-    }
-    
-    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
-    
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil {
-        return false, err
-    }
-    defer resp.Body.Close()
-    
-    var result struct {
-        OK      bool     `json:"ok"`
-        Members []string `json:"members"`
-        Error   string   `json:"error"`
-    }
-    
-    bodyBytes, _ := io.ReadAll(resp.Body)
-    if err := json.Unmarshal(bodyBytes, &result); err != nil {
-        return false, err
-    }
-    
-    if !result.OK {
-        return false, fmt.Errorf("slack error: %s", result.Error)
-    }
-    
-    botUserID := os.Getenv("SLACK_BOT_USER_ID")
-    if botUserID == "" {
-        return false, fmt.Errorf("SLACK_BOT_USER_ID is not set")
-    }
-    
-    for _, member := range result.Members {
-        if member == botUserID {
-            return true, nil
-        }
-    }
-    
-    return false, nil
-}
-
 // チャンネルがアーカイブされているかどうかを確認する関数
 func IsChannelArchived(channelID string) (bool, error) {
     url := fmt.Sprintf("https://slack.com/api/conversations.info?channel=%s", channelID)
