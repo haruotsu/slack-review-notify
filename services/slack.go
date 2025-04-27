@@ -86,13 +86,13 @@ func SelectRandomReviewer(db *gorm.DB, channelID string) string {
 }
 
 func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, error) {
-    // メンション先はそのまま使用する（変更しない）
+    // ユーザーIDの先頭に@を付けてメンション形式に変換
     blocks := []Block{
         {
             Type: "section",
             Text: &TextObject{
                 Type: "mrkdwn",
-                Text: fmt.Sprintf("<%s> *レビュー対象のPRがあります！*\n\n*タイトル*: %s\n*リンク*: <%s>", mentionID, title, prURL),
+                Text: fmt.Sprintf("<@%s> *レビュー対象のPRがあります！*\n\n*タイトル*: %s\n*リンク*: <%s>", mentionID, title, prURL),
             },
         },
         {
