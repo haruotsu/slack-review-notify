@@ -24,7 +24,6 @@ func CheckPendingTasks(db *gorm.DB) {
 	}
  
 	now := time.Now()
-	thirtyMinutesAgo := now.Add(-10 * time.Second)
 	
 	for _, task := range tasks {
 		// リマインダー一時停止中かチェック
@@ -37,8 +36,19 @@ func CheckPendingTasks(db *gorm.DB) {
 			continue
 		}
 		
-		// 30分ごとにリマインダーを送信（最終更新から30分経過しているか確認）
-		if task.UpdatedAt.Before(thirtyMinutesAgo) {
+		// チャンネル設定からリマインド頻度を取得
+		var config models.ChannelConfig
+		var reminderInterval int = 30 // デフォルト値（30分）
+		
+		if err := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config).Error; err == nil {
+			if config.ReminderInterval > 0 {
+				reminderInterval = config.ReminderInterval
+			}
+		}
+		
+		// 設定された頻度でリマインダーを送信
+		reminderTime := now.Add(-time.Duration(reminderInterval) * time.Minute)
+		if task.UpdatedAt.Before(reminderTime) {
 			err := SendReminderMessage(db, task)
 			if err != nil {
 				log.Printf("reminder send error (task id: %s): %v", task.ID, err)
@@ -73,7 +83,6 @@ func CheckInReviewTasks(db *gorm.DB) {
 	}
 	
 	now := time.Now()
-	oneHourAgo := now.Add(-10 * time.Second)
 	
 	for _, task := range tasks {
 		// リマインダー一時停止中かチェック
@@ -86,8 +95,19 @@ func CheckInReviewTasks(db *gorm.DB) {
 			continue
 		}
 		
-		// 1時間ごとにリマインダーを送信（最終更新から1時間経過しているか確認）
-		if task.UpdatedAt.Before(oneHourAgo) {
+		// チャンネル設定からリマインド頻度を取得
+		var config models.ChannelConfig
+		var reminderInterval int = 60 // デフォルト値（60分）
+		
+		if err := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config).Error; err == nil {
+			if config.ReviewerReminderInterval > 0 {
+				reminderInterval = config.ReviewerReminderInterval
+			}
+		}
+		
+		// 設定された頻度でリマインダーを送信
+		reminderTime := now.Add(-time.Duration(reminderInterval) * time.Minute)
+		if task.UpdatedAt.Before(reminderTime) {
 			err := SendReviewerReminderMessage(db, task)
 			if err != nil {
 				log.Printf("reviewer reminder send error (task id: %s): %v", task.ID, err)

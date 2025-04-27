@@ -231,12 +231,12 @@ func main() {
 
 // 定期的にタスクをチェックするバックグラウンド処理
 func runTaskChecker(db *gorm.DB) {
-	taskTicker := time.NewTicker(10 * time.Second) // 10秒ごとにチェック
+	taskTicker := time.NewTicker(60 * time.Second) // 1分ごとにチェック
 	cleanupTicker := time.NewTicker(1 * time.Hour) // 1時間ごとにクリーンアップ
 	defer taskTicker.Stop()
 	defer cleanupTicker.Stop()
 
-	for range time.NewTicker(100 * time.Millisecond).C {
+	for {
 		select {
 		case <-taskTicker.C:
 			log.Println("start task check")
@@ -252,8 +252,6 @@ func runTaskChecker(db *gorm.DB) {
 			
 			// 古いタスクの削除処理
 			services.CleanupOldTasks(db)
-		default:
-			// ティッカーイベントがない場合はスキップ
 		}
 	}
 }

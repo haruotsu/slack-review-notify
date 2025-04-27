@@ -92,7 +92,7 @@ func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, 
             Type: "section",
             Text: &TextObject{
                 Type: "mrkdwn",
-                Text: fmt.Sprintf("<@%s> *レビュー対象のPRがあります！*\n\n*タイトル*: %s\n*リンク*: <%s>", mentionID, title, prURL),
+                Text: fmt.Sprintf("<@%s> *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>", mentionID, title, prURL),
             },
         },
         {

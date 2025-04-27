@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"slack-review-notify/models"
+	"strconv"
 	"strings"
 	"time"
 
@@ -136,6 +137,20 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			case "deactivate":
 				activateChannel(c, db, channelID, false)
 				
+			case "set-reminder-interval":
+				if params == "" {
+					c.String(200, "リマインド頻度を分単位で指定してください。例: /slack-review-notify set-reminder-interval 30")
+					return
+				}
+				setReminderInterval(c, db, channelID, strings.TrimSpace(params), false)
+				
+			case "set-reviewer-reminder-interval":
+				if params == "" {
+					c.String(200, "レビュワー割り当て後のリマインド頻度を分単位で指定してください。例: /slack-review-notify set-reviewer-reminder-interval 60")
+					return
+				}
+				setReminderInterval(c, db, channelID, strings.TrimSpace(params), true)
+				
 			default:
 				c.String(200, "不明なコマンドです。/slack-review-notify help で使い方を確認してください。")
 			}
@@ -158,6 +173,8 @@ func showHelp(c *gin.Context) {
 - /slack-review-notify add-repo owner/repo: 通知対象リポジトリを追加
 - /slack-review-notify remove-repo owner/repo: 通知対象リポジトリを削除
 - /slack-review-notify set-label label-name: 通知対象ラベルを設定
+- /slack-review-notify set-reminder-interval 30: レビュワー募集中のリマインド頻度を設定（分単位）
+- /slack-review-notify set-reviewer-reminder-interval 60: レビュワー割り当て後のリマインド頻度を設定（分単位）
 - /slack-review-notify activate: このチャンネルでの通知を有効化
 - /slack-review-notify deactivate: このチャンネルでの通知を無効化`
 	
@@ -179,13 +196,28 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID string) {
 		status = "有効"
 	}
 	
+	// リマインド頻度のデフォルト値
+	reminderInterval := config.ReminderInterval
+	if reminderInterval <= 0 {
+		reminderInterval = 30
+	}
+	
+	reviewerReminderInterval := config.ReviewerReminderInterval
+	if reviewerReminderInterval <= 0 {
+		reviewerReminderInterval = 60
+	}
+	
 	response := fmt.Sprintf(`*このチャンネルのレビュー通知設定*
 - ステータス: %s
 - メンション先: <@%s>
 - レビュワーリスト: %s
 - 通知対象リポジトリ: %s
-- 通知対象ラベル: %s`, 
-		status, config.DefaultMentionID, formatReviewerList(config.ReviewerList), config.RepositoryList, config.LabelName)
+- 通知対象ラベル: %s
+- レビュワー募集中のリマインド頻度: %d分
+- レビュワー割り当て後のリマインド頻度: %d分`, 
+		status, config.DefaultMentionID, formatReviewerList(config.ReviewerList), 
+		config.RepositoryList, config.LabelName,
+		reminderInterval, reviewerReminderInterval)
 	
 	c.String(200, response)
 }
@@ -503,4 +535,56 @@ func activateChannel(c *gin.Context, db *gorm.DB, channelID string, active bool)
 	} else {
 		c.String(200, "このチャンネルでのレビュー通知を無効化しました。")
 	}
+}
+
+// リマインド頻度を設定
+func setReminderInterval(c *gin.Context, db *gorm.DB, channelID, intervalStr string, isReviewer bool) {
+	var config models.ChannelConfig
+	
+	// 数値に変換
+	interval, err := strconv.Atoi(intervalStr)
+	if err != nil || interval <= 0 {
+		c.String(200, "リマインド頻度は1以上の整数で指定してください。")
+		return
+	}
+	
+	result := db.Where("slack_channel_id = ?", channelID).First(&config)
+	if result.Error != nil {
+		// 設定がまだない場合は新規作成
+		config = models.ChannelConfig{
+			ID:               uuid.NewString(),
+			SlackChannelID:   channelID,
+			LabelName:        "needs-review", // デフォルト値
+			IsActive:         true,
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		}
+		
+		if isReviewer {
+			config.ReviewerReminderInterval = interval
+		} else {
+			config.ReminderInterval = interval
+		}
+		
+		db.Create(&config)
+		
+		if isReviewer {
+			c.String(200, fmt.Sprintf("レビュワー割り当て後のリマインド頻度を %d分 に設定しました。", interval))
+		} else {
+			c.String(200, fmt.Sprintf("レビュワー募集中のリマインド頻度を %d分 に設定しました。", interval))
+		}
+		return
+	}
+	
+	// 既存設定を更新
+	if isReviewer {
+		config.ReviewerReminderInterval = interval
+		c.String(200, fmt.Sprintf("レビュワー割り当て後のリマインド頻度を %d分 に設定しました。", interval))
+	} else {
+		config.ReminderInterval = interval
+		c.String(200, fmt.Sprintf("レビュワー募集中のリマインド頻度を %d分 に設定しました。", interval))
+	}
+	
+	config.UpdatedAt = time.Now()
+	db.Save(&config)
 }
