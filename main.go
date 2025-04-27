@@ -232,7 +232,7 @@ func main() {
 
 // 定期的にタスクをチェックするバックグラウンド処理
 func runTaskChecker(db *gorm.DB) {
-	taskTicker := time.NewTicker(5 * time.Minute) // 5分ごとにチェック
+	taskTicker := time.NewTicker(10 * time.Second) // 10秒ごとにチェック
 	cleanupTicker := time.NewTicker(1 * time.Hour) // 1時間ごとにクリーンアップ
 	defer taskTicker.Stop()
 	defer cleanupTicker.Stop()
