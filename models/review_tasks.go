@@ -16,8 +16,8 @@ type ReviewTask struct {
 	SlackChannel       string
 	Reviewer           string
 	Status             string     // "pending", "in_review", "paused", "archived", "done"
-	WatchingUntil      *time.Time // nullable
-	ReminderPausedUntil *time.Time // リマインダー一時停止期限
+	WatchingUntil      *time.Time
+	ReminderPausedUntil *time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	DeletedAt          gorm.DeletedAt `gorm:"index"`

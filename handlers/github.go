@@ -70,7 +70,7 @@ func (h *GithubHandler) HandleWebhook(c *gin.Context) {
                     pr.GetHTMLURL(), 
                     pr.GetTitle(), 
                     config.SlackChannelID,
-                    config.DefaultMentionID, // 第4引数にメンションIDを追加
+                    config.DefaultMentionID,
                 )
                 
                 if err != nil {

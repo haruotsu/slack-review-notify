@@ -188,7 +188,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
             newReviewerID := services.SelectRandomReviewer(db, taskToUpdate.SlackChannel)
             
             // 新しいレビュワーが前と同じであれば、再度選択
-            // (レビュワーリストが1人しかない場合は同じになるが、その場合は仕方ない)
+            // (レビュワーリストが1人しかない場合は同じになる)
             var config models.ChannelConfig
             if newReviewerID == oldReviewerID && db.Where("slack_channel_id = ?", taskToUpdate.SlackChannel).First(&config).Error == nil {
                 reviewers := strings.Split(config.ReviewerList, ",")
