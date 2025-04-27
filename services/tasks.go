@@ -24,7 +24,7 @@ func CheckPendingTasks(db *gorm.DB) {
 	}
  
 	now := time.Now()
-	thirtyMinutesAgo := now.Add(-5 * time.Second)
+	thirtyMinutesAgo := now.Add(-30 * time.Minute)
 	
 	for _, task := range tasks {
 		// リマインダー一時停止中かチェック
@@ -73,7 +73,7 @@ func CheckInReviewTasks(db *gorm.DB) {
 	}
 	
 	now := time.Now()
-	oneHourAgo := now.Add(-5 * time.Second)
+	oneHourAgo := now.Add(-1 * time.Hour)
 	
 	for _, task := range tasks {
 		// リマインダー一時停止中かチェック

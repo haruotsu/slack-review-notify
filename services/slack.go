@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"slack-review-notify/models"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -49,7 +51,7 @@ func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, 
             Type: "section",
             Text: &TextObject{
                 Type: "mrkdwn",
-                Text: fmt.Sprintf("<@%s> *レビュー対象のPRがあります！*\n\n*タイトル*: %s\n*リンク*: <%s>", mentionID, title, prURL),
+                Text: fmt.Sprintf("<%s> *レビュー対象のPRがあります！*\n\n*タイトル*: %s\n*リンク*: <%s>", mentionID, title, prURL),
             },
         },
         {
@@ -59,10 +61,19 @@ func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, 
                     Type: "button",
                     Text: TextObject{
                         Type: "plain_text",
+                        Text: "レビューします！",
+                    },
+                    ActionID: "review_take",
+                    Style: "primary",
+                },
+                {
+                    Type: "button",
+                    Text: TextObject{
+                        Type: "plain_text",
                         Text: "レビュー完了",
                     },
                     ActionID: "review_done",
-                    Style:    "primary",
+                    Style: "primary",
                 },
             },
         },
@@ -137,202 +148,466 @@ func PostToThread(channel, ts, message string) error {
         return fmt.Errorf("slack API response parse error: %v", err)
     }
     
+    log.Printf("slack thread post response: %s", string(bodyBytes))
+    
     if !result.OK {
         return fmt.Errorf("slack error: %s", result.Error)
     }
+
+    return nil
+}
+
+// リマインダーメッセージを送信する関数
+func SendReminderMessage(db *gorm.DB, task models.ReviewTask) error {
+    // チャンネルがアーカイブされているか確認
+    isArchived, err := IsChannelArchived(task.SlackChannel)
+    if err != nil {
+        log.Printf("channel status check error (channel: %s): %v", task.SlackChannel, err)
+        
+        // Slack APIエラーの場合、エラーの種類を確認
+        if strings.Contains(err.Error(), "not_in_channel") || 
+           strings.Contains(err.Error(), "channel_not_found") {
+            log.Printf("bot is not in channel or channel not found: %s", task.SlackChannel)
+            
+            // タスクを無効化
+            task.Status = "archived"
+            task.UpdatedAt = time.Now()
+            db.Save(&task)
+            
+            // チャンネル設定も無効化
+            var config models.ChannelConfig
+            if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
+                config.IsActive = false
+                config.UpdatedAt = time.Now()
+                db.Save(&config)
+                log.Printf("channel %s config is deactivated", task.SlackChannel)
+            }
+            
+            return fmt.Errorf("channel is archived or not accessible: %s", task.SlackChannel)
+        }
+    }
+    
+    if isArchived {
+        log.Printf("channel %s is archived", task.SlackChannel)
+        
+        // タスクを無効化
+        task.Status = "archived"
+        task.UpdatedAt = time.Now()
+        db.Save(&task)
+        
+        // チャンネル設定も無効化
+        var config models.ChannelConfig
+        if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
+            config.IsActive = false
+            config.UpdatedAt = time.Now()
+            db.Save(&config)
+            log.Printf("channel %s config is deactivated", task.SlackChannel)
+        }
+        
+        return fmt.Errorf("channel is archived: %s", task.SlackChannel)
+    }
+    
+    // リマインダーメッセージ本文
+    message := fmt.Sprintf("PRのレビューが必要です。素早いレビューで速くバリューを届けましょう！対応できる方はメインメッセージのボタンから！\n*タイトル*: %s\n*リンク*: <%s>", 
+        task.Title, task.PRURL)
+    
+    // デバッグログを追加
+    log.Printf("reminder task id: %s", task.ID)
+    
+    // ボタン付きのメッセージブロックを作成
+    blocks := []map[string]interface{}{
+        {
+            "type": "section",
+            "text": map[string]string{
+                "type": "mrkdwn",
+                "text": message,
+            },
+        },
+        {
+            "type": "actions",
+            "elements": []map[string]interface{}{
+                {
+                    "type": "static_select",
+                    "placeholder": map[string]string{
+                        "type": "plain_text",
+                        "text": "リマインダーを停止...",
+                    },
+                    "action_id": "pause_reminder",
+                    "options": []map[string]interface{}{
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "1時間停止",
+                            },
+                            "value": fmt.Sprintf("%s:1h", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "2時間停止",
+                            },
+                            "value": fmt.Sprintf("%s:2h", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "4時間停止",
+                            },
+                            "value": fmt.Sprintf("%s:4h", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "今日は通知しない",
+                            },
+                            "value": fmt.Sprintf("%s:today", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "リマインダーを完全に停止",
+                            },
+                            "value": fmt.Sprintf("%s:stop", task.ID),
+                        },
+                    },
+                },
+            },
+        },
+    }
+    
+    // スレッドにボタン付きメッセージを投稿
+    body := map[string]interface{}{
+        "channel": task.SlackChannel,
+        "thread_ts": task.SlackTS,
+        "blocks": blocks,
+    }
+    
+    jsonData, _ := json.Marshal(body)
+    req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+    if err != nil {
+        return err
+    }
+    
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+    req.Header.Set("Content-Type", "application/json")
+    
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+    
+    // レスポンスをログに記録
+    bodyBytes, _ := io.ReadAll(resp.Body)
+    fmt.Println("slack reminder post response:", string(bodyBytes))
     
     return nil
 }
 
 // レビュー担当者が決まった時のメッセージ
 func SendReviewerAssignedMessage(task models.ReviewTask) error {
-    message := fmt.Sprintf("🤖 レビュアーリストからランダムに選ばれた <@%s> さんが担当になりました！よろしくお願いします！", task.Reviewer)
+    message := fmt.Sprintf("<@%s> さんがレビュー担当になりました！🎉拾ってくれてありがとうございます！", task.Reviewer)
     return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
-// PostLeaveMessage はチャンネル退出前にメッセージを投稿します
-func PostLeaveMessage(channelID string) error {
-    message := "さようなら！また必要になったら呼んでくださいね！👋"
-    body := map[string]interface{}{
-        "channel": channelID,
-        "text":    message,
+// レビュアー向けのリマインダーメッセージ
+func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
+    // チャンネルがアーカイブされているか確認
+    isArchived, err := IsChannelArchived(task.SlackChannel)
+    if err != nil {
+        log.Printf("channel status check error (channel: %s): %v", task.SlackChannel, err)
+        
+        // Slack APIエラーの場合、エラーの種類を確認
+        if strings.Contains(err.Error(), "not_in_channel") || 
+           strings.Contains(err.Error(), "channel_not_found") {
+            log.Printf("bot is not in channel or channel not found: %s", task.SlackChannel)
+            
+            // タスクを無効化
+            task.Status = "archived"
+            task.UpdatedAt = time.Now()
+            db.Save(&task)
+            
+            // チャンネル設定も無効化
+            var config models.ChannelConfig
+            if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
+                config.IsActive = false
+                config.UpdatedAt = time.Now()
+                db.Save(&config)
+                log.Printf("channel %s config is deactivated", task.SlackChannel)
+            }
+            
+            return fmt.Errorf("channel is archived or not accessible: %s", task.SlackChannel)
+        }
     }
-
+    
+    if isArchived {
+        log.Printf("channel %s is archived", task.SlackChannel)
+        
+        // タスクを無効化
+        task.Status = "archived"
+        task.UpdatedAt = time.Now()
+        db.Save(&task)
+        
+        // チャンネル設定も無効化
+        var config models.ChannelConfig
+        if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
+            config.IsActive = false
+            config.UpdatedAt = time.Now()
+            db.Save(&config)
+            log.Printf("channel %s config is deactivated", task.SlackChannel)
+        }
+        
+        return fmt.Errorf("channel is archived: %s", task.SlackChannel)
+    }
+    
+    message := fmt.Sprintf("<@%s> レビューしてくれたら嬉しいな...ってbotが言ってます👀", task.Reviewer)
+    
+    // ボタン付きのメッセージブロックを作成
+    blocks := []map[string]interface{}{
+        {
+            "type": "section",
+            "text": map[string]string{
+                "type": "mrkdwn",
+                "text": message,
+            },
+        },
+        {
+            "type": "actions",
+            "elements": []map[string]interface{}{
+                {
+                    "type": "static_select",
+                    "placeholder": map[string]string{
+                        "type": "plain_text",
+                        "text": "リマインダーを停止...",
+                    },
+                    "action_id": "pause_reminder",
+                    "options": []map[string]interface{}{
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "1時間停止",
+                            },
+                            "value": fmt.Sprintf("%s:1h", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "2時間停止",
+                            },
+                            "value": fmt.Sprintf("%s:2h", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "4時間停止",
+                            },
+                            "value": fmt.Sprintf("%s:4h", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "今日は通知しない",
+                            },
+                            "value": fmt.Sprintf("%s:today", task.ID),
+                        },
+                        {
+                            "text": map[string]string{
+                                "type": "plain_text",
+                                "text": "リマインダーを完全に停止",
+                            },
+                            "value": fmt.Sprintf("%s:stop", task.ID),
+                        },
+                    },
+                },
+            },
+        },
+    }
+    
+    // スレッドにボタン付きメッセージを投稿
+    body := map[string]interface{}{
+        "channel": task.SlackChannel,
+        "thread_ts": task.SlackTS,
+        "blocks": blocks,
+    }
+    
     jsonData, _ := json.Marshal(body)
     req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
     if err != nil {
         return err
     }
-
+    
     req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
     req.Header.Set("Content-Type", "application/json")
-
+    
     resp, err := http.DefaultClient.Do(req)
     if err != nil {
         return err
     }
     defer resp.Body.Close()
-
-    var result struct {
-        OK    bool   `json:"ok"`
-        Error string `json:"error"`
-    }
     
-    bodyBytes, _ := io.ReadAll(resp.Body)
-    if err := json.Unmarshal(bodyBytes, &result); err != nil {
-        return fmt.Errorf("slack API response parse error: %v", err)
-    }
     return nil
 }
 
-// LeaveSlackChannel はボットをチャンネルから退出させます
-func LeaveSlackChannel(channelID string) error {
-    body := map[string]interface{}{
-        "channel": channelID,
-    }
-
-    jsonData, _ := json.Marshal(body)
-    req, err := http.NewRequest("POST", "https://slack.com/api/conversations.leave", bytes.NewBuffer(jsonData))
-    if err != nil {
-        return err
-    }
-
-    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
-    req.Header.Set("Content-Type", "application/json")
-
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
-
-    var result struct {
-        OK    bool   `json:"ok"`
-        Error string `json:"error"`
-    }
-    
-    bodyBytes, _ := io.ReadAll(resp.Body)
-    if err := json.Unmarshal(bodyBytes, &result); err != nil {
-        return fmt.Errorf("slack API response parse error: %v", err)
-    }
-
-    if !result.OK && result.Error != "not_in_channel" {
-        return fmt.Errorf("slack error: %s", result.Error)
-    }
-    return nil
-}
-
-// PostJoinMessage はチャンネル参加時にメッセージを投稿します
-func PostJoinMessage(channelID string) error {
-    message := "こんにちは！レビュー通知botです。`/slack-review-notify help`で使い方を確認できます！"
-    body := map[string]interface{}{
-        "channel": channelID,
-        "text":    message,
-    }
-
-    jsonData, _ := json.Marshal(body)
-    req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
-    if err != nil {
-        return err
-    }
-
-    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
-    req.Header.Set("Content-Type", "application/json")
-
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
-
-    var result struct {
-        OK    bool   `json:"ok"`
-        Error string `json:"error"`
-    }
-    
-    bodyBytes, _ := io.ReadAll(resp.Body)
-    if err := json.Unmarshal(bodyBytes, &result); err != nil {
-        return fmt.Errorf("slack API response parse error: %v", err)
-    }
-    return nil
-}
-
-// PostEphemeralMessage は特定のユーザーにのみ見えるメッセージを投稿します
-func PostEphemeralMessage(channelID, userID, message string) error {
-    body := map[string]interface{}{
-        "channel": channelID,
-        "user":    userID,
-        "text":    message,
-    }
-
-    jsonData, _ := json.Marshal(body)
-    req, err := http.NewRequest("POST", "https://slack.com/api/chat.postEphemeral", bytes.NewBuffer(jsonData))
-    if err != nil {
-        return err
-    }
-
-    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
-    req.Header.Set("Content-Type", "application/json")
-
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
-
-    var result struct {
-        OK    bool   `json:"ok"`
-        Error string `json:"error"`
-    }
-    
-    bodyBytes, _ := io.ReadAll(resp.Body)
-    if err := json.Unmarshal(bodyBytes, &result); err != nil {
-        return fmt.Errorf("slack API response parse error: %v", err)
-    }
-    return nil
-}
-
-// SendReminderPausedMessage はリマインダーが一時停止されたことを通知します
+// リマインダーを一時停止したことを通知する関数
 func SendReminderPausedMessage(task models.ReviewTask, duration string) error {
     var message string
+    
     switch duration {
     case "1h":
-        message = "🔔 リマインダーを1時間停止しました"
+        message = "はい！1時間リマインドをストップします！"
     case "2h":
-        message = "🔔 リマインダーを2時間停止しました"
+        message = "はい！2時間リマインドをストップします！"
     case "4h":
-        message = "🔔 リマインダーを4時間停止しました"
+        message = "はい！4時間リマインドをストップします！"
     case "today":
-        message = "🔔 リマインダーを24時間停止しました"
+        message = "今日はもうリマインドしません。24時間後に再開します！"
     case "stop":
-        message = "🔔 レビュー担当者が決まるまでリマインダーを停止しました"
+        message = "リマインダーを完全に停止しました。レビュー担当者が決まるまで通知しません。"
     default:
-        message = "🔔 リマインダーを一時停止しました"
+        message = "リマインドをストップします！"
     }
+    
     return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
-// SendReviewerReminderMessage はレビュー担当者にリマインダーを送信します
-func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
-	message := fmt.Sprintf("⏰ <@%s> さん、レビューをお願いします！\n<%s|%s>", task.Reviewer, task.PRURL, task.Title)
-	return PostToThread(task.SlackChannel, task.SlackTS, message)
+// ボットが参加しているチャンネルのリストを取得
+func GetBotChannels() ([]string, error) {
+    url := "https://slack.com/api/conversations.list?types=public_channel,private_channel"
+    
+    req, err := http.NewRequest("GET", url, nil)
+    if err != nil {
+        return nil, err
+    }
+    
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+    
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+    
+    var result struct {
+        OK       bool `json:"ok"`
+        Channels []struct {
+            ID   string `json:"id"`
+            Name string `json:"name"`
+        } `json:"channels"`
+    }
+    
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return nil, err
+    }
+    
+    if !result.OK {
+        return nil, fmt.Errorf("failed to get channels")
+    }
+    
+    channelIDs := make([]string, 0, len(result.Channels))
+    for _, ch := range result.Channels {
+        channelIDs = append(channelIDs, ch.ID)
+    }
+    
+    return channelIDs, nil
 }
 
-// SendReminderMessage はレビュー待ちのPRにリマインダーを送信します
-func SendReminderMessage(db *gorm.DB, task models.ReviewTask) error {
-	message := fmt.Sprintf("⏰ レビューをお願いします！\n<%s|%s>", task.PRURL, task.Title)
-	return PostToThread(task.SlackChannel, task.SlackTS, message)
-}
-
-// IsChannelRelatedError はエラーがチャンネル関連のエラーかどうかを判定します
+// SlackのAPIエラーが「チャンネル関連のエラー」かどうかを判定
 func IsChannelRelatedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "channel_not_found") ||
-		strings.Contains(errStr, "not_in_channel") ||
-		strings.Contains(errStr, "is_archived") ||
-		strings.Contains(errStr, "channel is archived") ||
-		strings.Contains(errStr, "not accessible")
+    if err == nil {
+        return false
+    }
+    
+    errorStr := err.Error()
+    return strings.Contains(errorStr, "not_in_channel") || 
+           strings.Contains(errorStr, "channel_not_found") || 
+           strings.Contains(errorStr, "is_archived") || 
+           strings.Contains(errorStr, "missing_scope") ||
+           strings.Contains(errorStr, "channel_not_found")
+}
+
+// チャンネルのボットの参加状態を確認
+func IsBotInChannel(channelID string) (bool, error) {
+    url := fmt.Sprintf("https://slack.com/api/conversations.members?channel=%s", channelID)
+    
+    req, err := http.NewRequest("GET", url, nil)
+    if err != nil {
+        return false, err
+    }
+    
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+    
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return false, err
+    }
+    defer resp.Body.Close()
+    
+    var result struct {
+        OK      bool     `json:"ok"`
+        Members []string `json:"members"`
+        Error   string   `json:"error"`
+    }
+    
+    bodyBytes, _ := io.ReadAll(resp.Body)
+    if err := json.Unmarshal(bodyBytes, &result); err != nil {
+        return false, err
+    }
+    
+    if !result.OK {
+        return false, fmt.Errorf("slack error: %s", result.Error)
+    }
+    
+    botUserID := os.Getenv("SLACK_BOT_USER_ID")
+    if botUserID == "" {
+        return false, fmt.Errorf("SLACK_BOT_USER_ID is not set")
+    }
+    
+    for _, member := range result.Members {
+        if member == botUserID {
+            return true, nil
+        }
+    }
+    
+    return false, nil
+}
+
+// チャンネルがアーカイブされているかどうかを確認する関数
+func IsChannelArchived(channelID string) (bool, error) {
+    url := fmt.Sprintf("https://slack.com/api/conversations.info?channel=%s", channelID)
+    
+    req, err := http.NewRequest("GET", url, nil)
+    if err != nil {
+        return false, err
+    }
+    
+    req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+    
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return false, err
+    }
+    defer resp.Body.Close()
+    
+    var result struct {
+        OK      bool `json:"ok"`
+        Channel struct {
+            ID        string `json:"id"`
+            IsArchived bool   `json:"is_archived"`
+        } `json:"channel"`
+        Error string `json:"error"`
+    }
+    
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return false, err
+    }
+    
+    if !result.OK {
+        if result.Error == "channel_not_found" {
+            // チャンネルが存在しない場合はアーカイブされていると見なす
+            return true, nil
+        }
+        return false, fmt.Errorf("failed to get channel info: %s", result.Error)
+    }
+    
+    return result.Channel.IsArchived, nil
 }

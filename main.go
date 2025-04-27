@@ -3,10 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,9 +22,7 @@ import (
 func main() {
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("WARNING: fail to load .env file, using default env vars if available", err)
-	} else {
-		log.Println("INFO: .env file loaded successfully")
+		log.Println("fail to load .env file")
 	}
 
 	db, err := gorm.Open(sqlite.Open("review_tasks.db"), &gorm.Config{})
@@ -65,125 +61,42 @@ func main() {
 
 		switch e := event.(type) {
 		case *github.PullRequestEvent:
-			if e.Action != nil && (*e.Action == "labeled" || *e.Action == "opened" || *e.Action == "reopened") && e.PullRequest != nil {
+			if e.Action != nil && *e.Action == "labeled" && e.Label != nil {
 				pr := e.PullRequest
 				repo := e.Repo
 				repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
+				labelName := e.Label.GetName()
 				
-				var labelName string
-				if *e.Action == "labeled" && e.Label != nil {
-					labelName = e.Label.GetName()
-				}
-
 				// チャンネル設定を全て取得
 				var configs []models.ChannelConfig
 				db.Where("is_active = ?", true).Find(&configs)
-
+				
 				if len(configs) == 0 {
-					log.Println("no active channel config found.")
-					c.JSON(http.StatusOK, gin.H{"message": "no active channel config"})
-					return
-				}
-
-				notified := false
-
-				for _, config := range configs {
-					// チャンネルがアーカイブされているか確認
-					isArchived, err := services.IsChannelArchived(config.SlackChannelID)
-					if err != nil {
-						log.Printf("channel status check error (channel: %s): %v", config.SlackChannelID, err)
+					log.Println("no active channel config found. use default channel")
+					
+					slackChannel := ""
+					mentionID := ""
+					
+					if slackChannel == "" {
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "no channel configured"})
+						return
 					}
 					
-					if isArchived {
-						log.Printf("channel %s is archived. skip", config.SlackChannelID)
-						
-						// アーカイブされたチャンネルの設定を非アクティブに更新
-						config.IsActive = false
-						config.UpdatedAt = time.Now()
-						if err := db.Save(&config).Error; err != nil {
-							log.Printf("channel config update error: %v", err)
-						} else {
-							log.Printf("✅ archived channel %s config is deactivated", config.SlackChannelID)
-						}
-						continue
-					}
-					
-					// リポジトリフィルタがある場合はチェック
-					if !services.IsRepositoryWatched(&config, repoFullName) {
-						log.Printf("repository %s is not watched (channel: %s, config: %s)",
-							repoFullName, config.SlackChannelID, config.RepositoryList)
-						continue
-					}
-
-					// ラベルをチェック (labeledイベントの場合のみ)
-					if *e.Action == "labeled" && config.LabelName != "" && config.LabelName != labelName {
-						log.Printf("label %s is not watched (channel: %s, config: %s)",
-							labelName, config.SlackChannelID, config.LabelName)
-						continue
-					}
-					// labeled以外のアクションの場合はラベルチェックをスキップ
-					if *e.Action != "labeled" && config.LabelName != "" {
-						log.Printf("action %s does not require label check or label %s not present (channel: %s)", 
-							*e.Action, config.LabelName, config.SlackChannelID)
-					}
-
-					// ★★★ ログ追加①: 取得したconfigのデフォルトメンションIDを確認 ★★★
-					log.Printf("DEBUG: ChannelConfig found for %s. DefaultMentionID: '%s'", config.SlackChannelID, config.DefaultMentionID)
-
-					// レビュアーをランダムに選択
-					reviewerID := ""
-					if config.ReviewerList != "" {
-						reviewers := strings.Split(config.ReviewerList, ",")
-						if len(reviewers) > 0 {
-							// 有効なレビュアー（空文字列でない）のみを抽出
-							validReviewers := []string{}
-							for _, r := range reviewers {
-								trimmed := strings.TrimSpace(r)
-								if trimmed != "" {
-									validReviewers = append(validReviewers, trimmed)
-								}
-							}
-							if len(validReviewers) > 0 {
-								rand.Seed(time.Now().UnixNano()) // 乱数シードを設定
-								randomIndex := rand.Intn(len(validReviewers))
-								reviewerID = validReviewers[randomIndex]
-								log.Printf("randomly selected reviewer: %s from %v", reviewerID, validReviewers)
-							}
-						}
-					}
-
-					// デフォルトメンションを初期値とする
-					mentionID := config.DefaultMentionID
-					initialStatus := "pending" // デフォルトステータス
-
-					// レビュアーがランダム選択された場合の処理
-					if reviewerID != "" {
-						// mentionID = fmt.Sprintf("<@%s>", reviewerID) // ←コメントアウト済み
-						initialStatus = "in_review"
-					}
-
-					// デフォルトメンションも空の場合のフォールバック
-					if mentionID == "" {
-						mentionID = "<!channel>"
-					}
-
-					// ★★★ ログ追加②: SendSlackMessageに渡す最終的なmentionIDを確認 ★★★
-					log.Printf("DEBUG: Sending initial message to %s with MentionID: '%s' (ReviewerID: '%s')", config.SlackChannelID, mentionID, reviewerID)
-
 					slackTs, slackChannelID, err := services.SendSlackMessage(
-						pr.GetHTMLURL(),
-						pr.GetTitle(),
-						config.SlackChannelID,
+						pr.GetHTMLURL(), 
+						pr.GetTitle(), 
+						slackChannel,
 						mentionID,
 					)
-
+					
 					if err != nil {
-						log.Printf("slack message failed (channel: %s): %v", config.SlackChannelID, err)
-						continue // 次の設定へ
+						log.Println("slack message failed:", err)
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "slack message failed"})
+						return
 					}
-
+					
 					log.Printf("slack message sent: ts=%s, channel=%s", slackTs, slackChannelID)
-
+					
 					task := models.ReviewTask{
 						ID:           uuid.NewString(),
 						PRURL:        pr.GetHTMLURL(),
@@ -192,33 +105,103 @@ func main() {
 						Title:        pr.GetTitle(),
 						SlackTS:      slackTs,
 						SlackChannel: slackChannelID,
-						Reviewer:     reviewerID, // 選択されたレビュアーIDを保存
-						Status:       initialStatus, // pending または in_review
+						Status:       "pending",
 						CreatedAt:    time.Now(),
 						UpdatedAt:    time.Now(),
 					}
-
+					
 					if err := db.Create(&task).Error; err != nil {
-						log.Printf("db insert failed (channel: %s): %v", config.SlackChannelID, err)
-						// エラーが発生しても他のチャンネルへの通知は試みる
-						continue
+						log.Println("db insert failed:", err)
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "db insert failed"})
+						return
 					}
-
-					log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, task.PRURL)
-					notified = true
-
-					// レビュアーが自動アサインされた場合、スレッドに通知
-					if reviewerID != "" {
-						if err := services.SendReviewerAssignedMessage(task); err != nil {
-							log.Printf("reviewer assigned notification error (channel: %s, task: %s): %v", config.SlackChannelID, task.ID, err)
+					log.Println("pr registered:", task.PRURL)
+					
+				} else {
+					notified := false
+					
+					for _, config := range configs {
+						// チャンネルがアーカイブされているか確認
+						isArchived, err := services.IsChannelArchived(config.SlackChannelID)
+						if err != nil {
+							log.Printf("channel status check error (channel: %s): %v", config.SlackChannelID, err)
 						}
+						
+						if isArchived {
+							log.Printf("channel %s is archived. skip", config.SlackChannelID)
+							
+							// アーカイブされたチャンネルの設定を非アクティブに更新
+							config.IsActive = false
+							config.UpdatedAt = time.Now()
+							if err := db.Save(&config).Error; err != nil {
+								log.Printf("channel config update error: %v", err)
+							} else {
+								log.Printf("✅ archived channel %s config is deactivated", config.SlackChannelID)
+							}
+							continue
+						}
+						
+						// リポジトリフィルタがある場合はチェック
+						if !services.IsRepositoryWatched(&config, repoFullName) {
+							log.Printf("repository %s is not watched (channel: %s, config: %s)", 
+								repoFullName, config.SlackChannelID, config.RepositoryList)
+							continue
+						}
+						
+						// ラベルをチェック
+						if config.LabelName != "" && config.LabelName != labelName {
+							log.Printf("label %s is not watched (channel: %s, config: %s)", 
+								labelName, config.SlackChannelID, config.LabelName)
+							continue
+						}
+						
+						// メンションIDを取得
+						mentionID := config.DefaultMentionID
+						if mentionID == "" {
+							mentionID = ""
+						}
+						
+						slackTs, slackChannelID, err := services.SendSlackMessage(
+							pr.GetHTMLURL(), 
+							pr.GetTitle(), 
+							config.SlackChannelID,
+							mentionID,
+						)
+						
+						if err != nil {
+							log.Printf("slack message failed (channel: %s): %v", config.SlackChannelID, err)
+							continue
+						}
+						
+						log.Printf("slack message sent: ts=%s, channel=%s", slackTs, slackChannelID)
+						
+						task := models.ReviewTask{
+							ID:           uuid.NewString(),
+							PRURL:        pr.GetHTMLURL(),
+							Repo:         repoFullName,
+							PRNumber:     pr.GetNumber(),
+							Title:        pr.GetTitle(),
+							SlackTS:      slackTs,
+							SlackChannel: slackChannelID,
+							Status:       "pending",
+							CreatedAt:    time.Now(),
+							UpdatedAt:    time.Now(),
+						}
+						
+						if err := db.Create(&task).Error; err != nil {
+							log.Printf("db insert failed (channel: %s): %v", config.SlackChannelID, err)
+							continue
+						}
+						
+						log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, task.PRURL)
+						notified = true
 					}
-				}
-
-				if !notified {
-					log.Println("no matching channel and reviewer assignment")
-					c.JSON(http.StatusOK, gin.H{"message": "no matching channel or assignment rule"})
-					return
+					
+					if !notified {
+						log.Println("no matching channel")
+						c.JSON(http.StatusOK, gin.H{"message": "no matching channel"})
+						return
+					}
 				}
 			}
 		}
@@ -239,7 +222,7 @@ func main() {
 
 // 定期的にタスクをチェックするバックグラウンド処理
 func runTaskChecker(db *gorm.DB) {
-	taskTicker := time.NewTicker(5 * time.Second) // 5秒ごとにチェック
+	taskTicker := time.NewTicker(5 * time.Minute) // 5分ごとにチェック
 	cleanupTicker := time.NewTicker(1 * time.Hour) // 1時間ごとにクリーンアップ
 	defer taskTicker.Stop()
 	defer cleanupTicker.Stop()
