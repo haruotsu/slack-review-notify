@@ -38,6 +38,13 @@ func HandleSlackEvents(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 			return
 		}
+
+		// URL検証リクエストの処理
+		if payload.Type == "url_verification" {
+			c.JSON(http.StatusOK, gin.H{"challenge": payload.Challenge})
+			return
+		}
+		
 		if payload.Event.Type != "" {
 			log.Printf("event details: type=%s, channel=%s, user=%s", 
 				payload.Event.Type, payload.Event.Channel, payload.Event.User)
