@@ -141,35 +141,6 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
         
         // 各アクションに対する処理
         switch actionID {
-        case "review_take":
-            // tsとchannelを使ってタスクを検索
-            var task models.ReviewTask
-            if err := db.Where("slack_ts = ? AND slack_channel = ?", ts, channel).First(&task).Error; err != nil {
-                log.Printf("task not found: ts=%s, channel=%s", ts, channel)
-                c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
-                return
-            }
-            
-            // レビュアーを設定
-            task.Reviewer = slackUserID
-            // ステータスを確実に in_review に設定
-            task.Status = "in_review"
-            
-            // タスクを保存
-            if err := db.Save(&task).Error; err != nil {
-                log.Printf("task save error: %v", err)
-                c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save task"})
-                return
-            }
-            
-            // レビュアーが割り当てられたことをスレッドに通知
-            if err := services.SendReviewerAssignedMessage(task); err != nil {
-                log.Printf("reviewer assigned notification error: %v", err)
-            }
-            
-            c.Status(http.StatusOK)
-            return
-        
         case "review_done":
             // tsとchannelを使ってタスクを検索
             var task models.ReviewTask

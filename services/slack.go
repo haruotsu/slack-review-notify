@@ -335,12 +335,6 @@ func SendReminderMessage(db *gorm.DB, task models.ReviewTask) error {
     return nil
 }
 
-// レビュー担当者が決まった時のメッセージ
-func SendReviewerAssignedMessage(task models.ReviewTask) error {
-    message := fmt.Sprintf("<@%s> さんがレビュー担当になりました！🎉拾ってくれてありがとうございます！", task.Reviewer)
-    return PostToThread(task.SlackChannel, task.SlackTS, message)
-}
-
 // レビュアー向けのリマインダーメッセージ
 func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
     // チャンネルがアーカイブされているか確認
