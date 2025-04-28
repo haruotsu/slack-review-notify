@@ -358,29 +358,32 @@ func clearReviewers(c *gin.Context, db *gorm.DB, channelID string) {
 func setMention(c *gin.Context, db *gorm.DB, channelID, mentionID string) {
 	var config models.ChannelConfig
 	
+	// メンションIDを整形
+	cleanedMentionID := cleanUserID(mentionID)
+	
 	result := db.Where("slack_channel_id = ?", channelID).First(&config)
 	if result.Error != nil {
 		// 新規作成
 		config = models.ChannelConfig{
 			ID:              uuid.NewString(),
 			SlackChannelID:  channelID,
-			DefaultMentionID: mentionID,
+			DefaultMentionID: cleanedMentionID,
 			LabelName:       "needs-review", // デフォルト値
 			IsActive:        true,
 			CreatedAt:       time.Now(),
 			UpdatedAt:       time.Now(),
 		}
 		db.Create(&config)
-		c.String(200, fmt.Sprintf("メンション先を <@%s> に設定しました。", mentionID))
+		c.String(200, fmt.Sprintf("メンション先を <@%s> に設定しました。", cleanedMentionID))
 		return
 	}
 	
 	// 既存設定を更新
-	config.DefaultMentionID = mentionID
+	config.DefaultMentionID = cleanedMentionID
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 	
-	c.String(200, fmt.Sprintf("メンション先を <@%s> に更新しました。", mentionID))
+	c.String(200, fmt.Sprintf("メンション先を <@%s> に更新しました。", cleanedMentionID))
 }
 
 // リポジトリを追加
