@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/slack-go/slack"
 	"gorm.io/gorm"
 )
 
@@ -44,6 +45,34 @@ type SlackPostResponse struct {
     Channel string `json:"channel"`
     Ts      string `json:"ts"`
     Error   string `json:"error,omitempty"`
+}
+
+func ValidateSlackRequest(r *http.Request, body []byte) bool {
+	slackSigningSecret := os.Getenv("SLACK_SIGNING_SECRET")
+	if slackSigningSecret == "" {
+		log.Println("SLACK_SIGNING_SECRET is not set")
+		return false
+	}
+
+	sv, err := slack.NewSecretsVerifier(r.Header, slackSigningSecret)
+	if err != nil {
+		log.Printf("Failed to create secrets verifier: %v", err)
+		return false
+	}
+
+	// bodyをVerifierに書き込む
+	if _, err := sv.Write(body); err != nil {
+		log.Printf("Failed to write body to verifier: %v", err)
+		return false
+	}
+
+	// 署名を検証
+	if err := sv.Ensure(); err != nil {
+		log.Printf("Invalid signature: %v", err)
+		return false
+	}
+
+	return true
 }
 
 // メンション先ユーザーIDをランダムに選択する関数

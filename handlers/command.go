@@ -1,14 +1,19 @@
 package handlers
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"slack-review-notify/models"
 	"strconv"
 	"strings"
 	"time"
 
 	"regexp"
+
+	"slack-review-notify/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -18,6 +23,23 @@ import (
 // Slackのスラッシュコマンドを処理するハンドラ
 func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			log.Printf("failed to read request body: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+			return
+		}
+		
+		// ボディを復元
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		
+		// 署名を検証
+		if !services.ValidateSlackRequest(c.Request, bodyBytes) {
+			log.Println("invalid slack signature")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid slack signature"})
+			return
+		}
+		
 		command := c.PostForm("command")
 		text := c.PostForm("text")
 		channelID := c.PostForm("channel_id")

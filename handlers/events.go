@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 
+	"slack-review-notify/services"
+
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -14,9 +16,22 @@ import (
 // Slackイベントを処理するハンドラ
 func HandleSlackEvents(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		body, _ := io.ReadAll(c.Request.Body)
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			log.Printf("failed to read request body: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+			return
+		}
+		
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 		log.Printf("slack event received: %s", string(body))
+		
+		// 署名を検証
+		if !services.ValidateSlackRequest(c.Request, body) {
+			log.Println("invalid slack signature")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid slack signature"})
+			return
+		}
 		
 		var payload struct {
 			Type      string `json:"type"`
