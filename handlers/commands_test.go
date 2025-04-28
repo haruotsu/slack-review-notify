@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slack-review-notify/models"
+	"slack-review-notify/services"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,9 @@ import (
 )
 
 func setupTestRouter(db *gorm.DB) *gin.Engine {
+	// テストモードを有効化
+	services.IsTestMode = true
+	
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
 	r.POST("/slack/command", HandleSlackCommand(db))

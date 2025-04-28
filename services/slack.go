@@ -17,6 +17,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// テストモードかどうかを示すフラグ
+var IsTestMode bool
+
 type SlackMessage struct {
     Channel string       `json:"channel"`
     Blocks  []Block      `json:"blocks"`
@@ -48,6 +51,11 @@ type SlackPostResponse struct {
 }
 
 func ValidateSlackRequest(r *http.Request, body []byte) bool {
+	// テストモードの場合は常に検証成功とする
+	if IsTestMode {
+		return true
+	}
+
 	slackSigningSecret := os.Getenv("SLACK_SIGNING_SECRET")
 	if slackSigningSecret == "" {
 		log.Println("SLACK_SIGNING_SECRET is not set")
