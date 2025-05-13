@@ -185,6 +185,22 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
                 return
             }
             
+            // チャンネル設定を取得してラベル名を確認
+            var config models.ChannelConfig
+            labelName := "needs-review" // デフォルト値
+            
+            if err := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config).Error; err == nil {
+                // チャンネル設定が見つかった場合は、設定されたラベル名を使用
+                if config.LabelName != "" {
+                    labelName = config.LabelName
+                }
+            }
+            
+            // PRからラベルを削除
+            if err := services.RemoveLabelFromPR(task, labelName); err != nil {
+                log.Printf("failed to remove label from PR: %v", err)
+            }
+            
             c.Status(http.StatusOK)
             return
 
