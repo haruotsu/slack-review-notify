@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
-	"net/url"
 	"os"
 	"regexp"
 	"slack-review-notify/models"
@@ -15,50 +13,27 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// GitHubクライアントを作成する関数（PRのURLからベースURLを自動検出）
-func NewGitHubClientForPR(prURL string) *github.Client {
+// GitHubクライアントを作成する関数
+func NewGitHubClient() *github.Client {
 	// GITHUB_WEBHOOK_SECRETを認証トークンとして使用
 	token := os.Getenv("GITHUB_WEBHOOK_SECRET")
-	
+	if token == "" {
+		log.Println("GITHUB_WEBHOOK_SECRET is not set")
+		return github.NewClient(nil) // 認証なしのクライアント
+	}
+
 	ctx := context.Background()
-	var httpClient *http.Client
-	
-	if token != "" {
-		ts := oauth2.StaticTokenSource(
-			&oauth2.Token{AccessToken: token},
-		)
-		httpClient = oauth2.NewClient(ctx, ts)
-	} else {
-		httpClient = http.DefaultClient
-	}
-	
-	client := github.NewClient(httpClient)
-	
-	// PRのURLからGitHubのベースURLを検出
-	if prURL != "" {
-		parsedURL, err := url.Parse(prURL)
-		if err == nil && parsedURL.Host != "github.com" {
-			// GitHub Enterpriseの場合
-			baseURL := fmt.Sprintf("https://%s/api/v3/", parsedURL.Host)
-			uploadURL := fmt.Sprintf("https://%s/api/uploads/", parsedURL.Host)
-			
-			enterpriseClient, err := client.WithEnterpriseURLs(baseURL, uploadURL)
-			if err != nil {
-				log.Printf("failed to set enterprise URLs: %v", err)
-			} else {
-				log.Printf("using GitHub Enterprise URL: %s", baseURL)
-				client = enterpriseClient
-			}
-		}
-	}
-	
-	return client
+	ts := oauth2.StaticTokenSource(
+		&oauth2.Token{AccessToken: token},
+	)
+	tc := oauth2.NewClient(ctx, ts)
+	return github.NewClient(tc)
 }
 
 // PRのURLからオーナー、リポジトリ名、PR番号を抽出する関数
 func ParseRepoAndPRNumber(prURL string) (owner string, repo string, prNumber int, err error) {
-	// GitHub EnterpriseとGitHub.comの両方に対応するパターン
-	re := regexp.MustCompile(`https?://[^/]+/([^/]+)/([^/]+)/pull/(\d+)`)
+	// https://github.com/owner/repo/pull/123 の形式を想定
+	re := regexp.MustCompile(`https://github\.com/([^/]+)/([^/]+)/pull/(\d+)`)
 	matches := re.FindStringSubmatch(prURL)
 	
 	if len(matches) != 4 {
@@ -89,10 +64,8 @@ func RemoveLabelFromPR(task models.ReviewTask, labelName string) error {
 		return fmt.Errorf("failed to parse PR URL: %v", err)
 	}
 	
-	log.Printf("removing label %s from PR %s/%s#%d", labelName, owner, repo, prNumber)
-	
-	// PRのURLに基づいてGitHubクライアントを作成
-	client := NewGitHubClientForPR(task.PRURL)
+	// GitHubクライアントを作成
+	client := NewGitHubClient()
 	ctx := context.Background()
 	
 	// ラベルを削除
