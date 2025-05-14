@@ -255,16 +255,16 @@ func cleanUserID(userID string) string {
 	// 空白を削除
 	userID = strings.TrimSpace(userID)
 	
+	// <@で始まり>で終わる場合はそのまま返す
+	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
+		return strings.TrimPrefix(strings.TrimSuffix(userID, ">"), "<@")
+	}
+	
 	// @から始まる場合は@を削除
 	userID = strings.TrimPrefix(userID, "@")
 	
 	// カンマが含まれる場合は削除
 	userID = strings.ReplaceAll(userID, ",", "")
-	
-	// <@で始まり>で終わる場合はそのまま返す
-	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
-		return strings.TrimPrefix(strings.TrimSuffix(userID, ">"), "<@")
-	}
 	
 	return userID
 }
