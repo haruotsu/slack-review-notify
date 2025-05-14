@@ -255,7 +255,16 @@ func cleanUserID(userID string) string {
 	// 空白を削除
 	userID = strings.TrimSpace(userID)
 	
-	// <@で始まり>で終わる場合はそのまま返す
+	// チームメンション形式 <!subteam^ID|@name> の処理
+	if strings.HasPrefix(userID, "<!subteam^") && strings.HasSuffix(userID, ">") {
+		parts := strings.Split(userID, "|")
+		if len(parts) > 0 {
+			id := strings.TrimPrefix(parts[0], "<!subteam^")
+			return id
+		}
+	}
+	
+	// 通常のユーザーメンション <@ID> の処理
 	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
 		return strings.TrimPrefix(strings.TrimSuffix(userID, ">"), "<@")
 	}
