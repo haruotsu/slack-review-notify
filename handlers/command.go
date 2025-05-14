@@ -256,10 +256,11 @@ func cleanUserID(userID string) string {
 	userID = strings.TrimSpace(userID)
 	
 	// チームメンション形式 <!subteam^ID|@name> の処理
-	if strings.HasPrefix(userID, "<!subteam^") && strings.HasSuffix(userID, ">") {
+	if strings.HasPrefix(userID, "<!subteam^") && strings.Contains(userID, "|") && strings.HasSuffix(userID, ">") {
 		parts := strings.Split(userID, "|")
 		if len(parts) > 0 {
 			id := strings.TrimPrefix(parts[0], "<!subteam^")
+			// チームIDをそのまま返す
 			return id
 		}
 	}
@@ -405,7 +406,16 @@ func setMention(c *gin.Context, db *gorm.DB, channelID, mentionID string) {
 			UpdatedAt:       time.Now(),
 		}
 		db.Create(&config)
-		c.String(200, fmt.Sprintf("メンション先を <@%s> に設定しました。", cleanedMentionID))
+		
+		// チームメンションかどうかを判定して表示を変える
+		var mentionDisplay string
+		if strings.HasPrefix(mentionID, "<!subteam^") {
+			mentionDisplay = fmt.Sprintf("<!subteam^%s>", cleanedMentionID)
+		} else {
+			mentionDisplay = fmt.Sprintf("<@%s>", cleanedMentionID)
+		}
+		
+		c.String(200, fmt.Sprintf("メンション先を %s に設定しました。", mentionDisplay))
 		return
 	}
 	
@@ -414,7 +424,15 @@ func setMention(c *gin.Context, db *gorm.DB, channelID, mentionID string) {
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 	
-	c.String(200, fmt.Sprintf("メンション先を <@%s> に更新しました。", cleanedMentionID))
+	// チームメンションかどうかを判定して表示を変える
+	var mentionDisplay string
+	if strings.HasPrefix(mentionID, "<!subteam^") {
+		mentionDisplay = fmt.Sprintf("<!subteam^%s>", cleanedMentionID)
+	} else {
+		mentionDisplay = fmt.Sprintf("<@%s>", cleanedMentionID)
+	}
+	
+	c.String(200, fmt.Sprintf("メンション先を %s に更新しました。", mentionDisplay))
 }
 
 // リポジトリを追加

@@ -123,13 +123,22 @@ func SelectRandomReviewer(db *gorm.DB, channelID string) string {
 }
 
 func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, error) {
-    // ユーザーIDの先頭に@を付けてメンション形式に変換
+    // ユーザーIDまたはチームIDのメンション形式を決定
+    var mentionText string
+    if strings.HasPrefix(mentionID, "subteam^") || strings.HasPrefix(mentionID, "S") {
+        // チームIDの場合はsubteam形式で表示
+        mentionText = fmt.Sprintf("<!subteam^%s>", mentionID)
+    } else {
+        // ユーザーIDの場合は通常のメンション形式
+        mentionText = fmt.Sprintf("<@%s>", mentionID)
+    }
+    
     blocks := []Block{
         {
             Type: "section",
             Text: &TextObject{
                 Type: "mrkdwn",
-                Text: fmt.Sprintf("<@%s> *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>", mentionID, title, prURL),
+                Text: fmt.Sprintf("%s *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>", mentionText, title, prURL),
             },
         },
         {
