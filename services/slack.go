@@ -697,3 +697,23 @@ func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) er
     message := fmt.Sprintf("レビュワーを変更しました: <@%s> → <@%s> さん、よろしくお願いします！", oldReviewerID, task.Reviewer)
     return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
+
+// 翌営業日の朝（10:00）の時間を取得する関数
+func GetNextBusinessDayMorning() time.Time {
+    now := time.Now()
+    nextDay := now.AddDate(0, 0, 1) // まず翌日を取得
+
+    // 10:00に設定する
+    nextDayMorning := time.Date(nextDay.Year(), nextDay.Month(), nextDay.Day(), 10, 0, 0, 0, nextDay.Location())
+
+    // 土曜日の場合、月曜日にする（2日進める）
+    if nextDayMorning.Weekday() == time.Saturday {
+        nextDayMorning = nextDayMorning.AddDate(0, 0, 2)
+    }
+    // 日曜日の場合、月曜日にする（1日進める）
+    if nextDayMorning.Weekday() == time.Sunday {
+        nextDayMorning = nextDayMorning.AddDate(0, 0, 1)
+    }
+
+    return nextDayMorning
+}
