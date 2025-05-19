@@ -440,7 +440,7 @@ func TestSendReminderPausedMessage(t *testing.T) {
 		{"1時間", "1h", "はい！1時間リマインドをストップします！"},
 		{"2時間", "2h", "はい！2時間リマインドをストップします！"},
 		{"4時間", "4h", "はい！4時間リマインドをストップします！"},
-		{"今日", "today", "今日はもうリマインドしません。24時間後に再開します！"},
+		{"今日", "today", "今日はもうリマインドしません。翌営業日の朝に再開します！"},
 		{"完全停止", "stop", "リマインダーを完全に停止しました。レビュー担当者が決まるまで通知しません。"},
 		{"デフォルト", "unknown", "リマインドをストップします！"},
 	}
@@ -494,5 +494,57 @@ func TestIsChannelRelatedError(t *testing.T) {
 			result := IsChannelRelatedError(tc.err)
 			assert.Equal(t, tc.expected, result)
 		})
+	}
+}
+
+
+// GetNextBusinessDayMorning関数のテスト
+func TestGetNextBusinessDayMorning(t *testing.T) {
+	result := GetNextBusinessDayMorning()
+	
+	// 結果は必ず翌日以降の日付
+	now := time.Now()
+	tomorrow := now.AddDate(0, 0, 1)
+	
+	// 以下をテスト
+	// 1. 結果は現在時刻より後
+	assert.True(t, result.After(now), "翌営業日は現在時刻より後であること")
+	
+	// 2. 結果は10:00に設定されている
+	assert.Equal(t, 10, result.Hour(), "時刻は10時に設定されていること")
+	assert.Equal(t, 0, result.Minute(), "分は0分に設定されていること")
+	assert.Equal(t, 0, result.Second(), "秒は0秒に設定されていること")
+	
+	// 3. 土日に実行した場合は月曜日になる
+	switch now.Weekday() {
+	case time.Friday:
+		// 金曜日に実行した場合、結果は月曜日（3日後）
+		expectedDate := tomorrow.AddDate(0, 0, 2)
+		assert.Equal(t, time.Monday, result.Weekday(), "金曜日の翌営業日は月曜日")
+		assert.Equal(t, expectedDate.Year(), result.Year())
+		assert.Equal(t, expectedDate.Month(), result.Month()) 
+		assert.Equal(t, expectedDate.Day(), result.Day())
+	case time.Saturday:
+		// 土曜日に実行した場合、結果は月曜日（2日後）
+		expectedDate := tomorrow.AddDate(0, 0, 1)
+		assert.Equal(t, time.Monday, result.Weekday(), "土曜日の翌営業日は月曜日")
+		assert.Equal(t, expectedDate.Year(), result.Year())
+		assert.Equal(t, expectedDate.Month(), result.Month())
+		assert.Equal(t, expectedDate.Day(), result.Day())
+	case time.Sunday:
+		// 日曜日に実行した場合、結果は月曜日（1日後）
+		assert.Equal(t, time.Monday, result.Weekday(), "日曜日の翌営業日は月曜日")
+		assert.Equal(t, tomorrow.Year(), result.Year())
+		assert.Equal(t, tomorrow.Month(), result.Month()) 
+		assert.Equal(t, tomorrow.Day(), result.Day())
+	default:
+		// 平日に実行した場合、結果は翌日
+		assert.Equal(t, tomorrow.Year(), result.Year())
+		assert.Equal(t, tomorrow.Month(), result.Month())
+		assert.Equal(t, tomorrow.Day(), result.Day())
+		
+		// 翌日が平日であること（月〜金）
+		expectedWeekday := (now.Weekday() + 1) % 7
+		assert.Equal(t, expectedWeekday, result.Weekday(), "平日の翌営業日は翌日")
 	}
 }

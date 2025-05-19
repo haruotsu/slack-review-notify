@@ -135,8 +135,8 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
                 pauseUntil = time.Now().Add(4 * time.Hour)
                 taskToUpdate.ReminderPausedUntil = &pauseUntil
             case "today":
-                // 24時間停止
-                pauseUntil = time.Now().Add(24 * time.Hour)
+                // 翌営業日の朝まで停止
+                pauseUntil = services.GetNextBusinessDayMorning()
                 taskToUpdate.ReminderPausedUntil = &pauseUntil
             case "stop":
                 // レビュー担当者が決まるまで通知しない
