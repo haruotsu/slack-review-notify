@@ -531,7 +531,7 @@ func SendReminderPausedMessage(task models.ReviewTask, duration string) error {
 	case "4h":
 		message = "はい！4時間リマインドをストップします！"
 	case "today":
-		message = "今日はもうリマインドしません。24時間後に再開します！"
+		message = "今日はもうリマインドしません。翌営業日の朝に再開します！"
 	case "stop":
 		message = "リマインダーを完全に停止しました。レビュー担当者が決まるまで通知しません。"
 	default:
