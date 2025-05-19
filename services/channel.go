@@ -12,17 +12,17 @@ import (
 func CleanupArchivedChannels(db *gorm.DB) {
 	var configs []models.ChannelConfig
 	db.Where("is_active = ?", true).Find(&configs)
-	
+
 	for _, config := range configs {
 		isArchived, err := IsChannelArchived(config.SlackChannelID)
 		if err != nil {
 			log.Printf("channel status check error (channel: %s): %v", config.SlackChannelID, err)
 			continue
 		}
-		
+
 		if isArchived {
 			log.Printf("channel %s is archived", config.SlackChannelID)
-			
+
 			// 非アクティブに更新
 			config.IsActive = false
 			config.UpdatedAt = time.Now()
@@ -33,4 +33,4 @@ func CleanupArchivedChannels(db *gorm.DB) {
 			}
 		}
 	}
-} 
+}

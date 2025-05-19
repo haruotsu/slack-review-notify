@@ -15,18 +15,18 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("fail to open test db: %v", err)
 	}
-	
+
 	// マイグレーションを実行
 	if err := db.AutoMigrate(&models.ChannelConfig{}, &models.ReviewTask{}); err != nil {
 		t.Fatalf("fail to migrate test db: %v", err)
 	}
-	
+
 	return db
 }
 
 func TestGetChannelConfig(t *testing.T) {
 	db := setupTestDB(t)
-	
+
 	// テストデータ作成
 	testConfig := models.ChannelConfig{
 		ID:               "test-id",
@@ -38,12 +38,12 @@ func TestGetChannelConfig(t *testing.T) {
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
-	
+
 	db.Create(&testConfig)
-	
+
 	// テスト実行
 	config, err := GetChannelConfig(db, "C12345")
-	
+
 	// アサーション
 	assert.NoError(t, err)
 	assert.NotNil(t, config)
@@ -51,7 +51,7 @@ func TestGetChannelConfig(t *testing.T) {
 	assert.Equal(t, "U12345", config.DefaultMentionID)
 	assert.Equal(t, "needs-review", config.LabelName)
 	assert.True(t, config.IsActive)
-	
+
 	// 存在しないチャンネルIDのテスト
 	_, err = GetChannelConfig(db, "nonexistent")
 	assert.Error(t, err)
@@ -59,7 +59,7 @@ func TestGetChannelConfig(t *testing.T) {
 
 func TestHasChannelConfig(t *testing.T) {
 	db := setupTestDB(t)
-	
+
 	// テストデータ作成
 	testConfig := models.ChannelConfig{
 		ID:               "test-id",
@@ -71,9 +71,9 @@ func TestHasChannelConfig(t *testing.T) {
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
-	
+
 	db.Create(&testConfig)
-	
+
 	// テスト実行とアサーション
 	assert.True(t, HasChannelConfig(db, "C12345"))
 	assert.False(t, HasChannelConfig(db, "nonexistent"))
@@ -85,7 +85,7 @@ func TestIsRepositoryWatched(t *testing.T) {
 		SlackChannelID: "C12345",
 		RepositoryList: "owner/repo1,owner/repo2, owner/repo3",
 	}
-	
+
 	// テストケース
 	testCases := []struct {
 		repoName string
@@ -97,21 +97,21 @@ func TestIsRepositoryWatched(t *testing.T) {
 		{"owner/repo4", false},
 		{"different/repo", false},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.repoName, func(t *testing.T) {
 			result := IsRepositoryWatched(config, tc.repoName)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
-	
+
 	// 空のリポジトリリストのテスト
 	emptyConfig := &models.ChannelConfig{
 		SlackChannelID: "C12345",
 		RepositoryList: "",
 	}
 	assert.False(t, IsRepositoryWatched(emptyConfig, "owner/repo1"))
-	
+
 	// nilのconfigのテスト
 	assert.False(t, IsRepositoryWatched(nil, "owner/repo1"))
 }

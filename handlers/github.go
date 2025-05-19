@@ -39,69 +39,68 @@ func (h *GithubHandler) HandleWebhook(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid event"})
 		return
 	}
-	
-	
-	switch e := event.(type) {
-		// プルリクエストのイベント
-    case *github.PullRequestEvent:
-        if e.Action != nil && *e.Action == "labeled" && e.Label != nil && e.PullRequest != nil {
-            // リポジトリ名を取得
-            repo := e.Repo
-            repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
-            pr := e.PullRequest
-            labelName := e.Label.GetName()
-            
-            // チャンネル設定を全て取得
-            var configs []models.ChannelConfig
-            h.DB.Where("is_active = ?", true).Find(&configs)
-            
-            for _, config := range configs {
-                // このチャンネルが通知対象のリポジトリとラベルか確認
-                if !services.IsRepositoryWatched(&config, repoFullName) {
-                    continue // 通知対象外のリポジトリはスキップ
-                }
-                
-                if config.LabelName != "" && config.LabelName != labelName {
-                    continue // 通知対象外のラベルはスキップ
-                }
-                
-                // このチャンネルには通知する
-                slackTS, slackChannelID, err := services.SendSlackMessage(
-                    pr.GetHTMLURL(), 
-                    pr.GetTitle(), 
-                    config.SlackChannelID,
-                    config.DefaultMentionID,
-                )
-                
-                if err != nil {
-                    log.Printf("slack send error (channel: %s): %v", config.SlackChannelID, err)
-                    continue
-                }
-                
-                // タスク作成処理
-                task := models.ReviewTask{
-                    ID:           uuid.NewString(),
-                    PRURL:        pr.GetHTMLURL(),
-                    Repo:         repoFullName,
-                    PRNumber:     pr.GetNumber(),
-                    Title:        pr.GetTitle(),
-                    SlackTS:      slackTS,
-                    SlackChannel: slackChannelID,
-                    Status:       "pending",
-                    CreatedAt:    time.Now(),
-                    UpdatedAt:    time.Now(),
-                }
-                
-                if err := h.DB.Create(&task).Error; err != nil {
-                    log.Printf("db save error: %v", err)
-                    continue
-                }
-                
-                log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, task.PRURL)
-            }
-        }
-    }
 
-    c.Status(http.StatusOK)
-	
+	switch e := event.(type) {
+	// プルリクエストのイベント
+	case *github.PullRequestEvent:
+		if e.Action != nil && *e.Action == "labeled" && e.Label != nil && e.PullRequest != nil {
+			// リポジトリ名を取得
+			repo := e.Repo
+			repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
+			pr := e.PullRequest
+			labelName := e.Label.GetName()
+
+			// チャンネル設定を全て取得
+			var configs []models.ChannelConfig
+			h.DB.Where("is_active = ?", true).Find(&configs)
+
+			for _, config := range configs {
+				// このチャンネルが通知対象のリポジトリとラベルか確認
+				if !services.IsRepositoryWatched(&config, repoFullName) {
+					continue // 通知対象外のリポジトリはスキップ
+				}
+
+				if config.LabelName != "" && config.LabelName != labelName {
+					continue // 通知対象外のラベルはスキップ
+				}
+
+				// このチャンネルには通知する
+				slackTS, slackChannelID, err := services.SendSlackMessage(
+					pr.GetHTMLURL(),
+					pr.GetTitle(),
+					config.SlackChannelID,
+					config.DefaultMentionID,
+				)
+
+				if err != nil {
+					log.Printf("slack send error (channel: %s): %v", config.SlackChannelID, err)
+					continue
+				}
+
+				// タスク作成処理
+				task := models.ReviewTask{
+					ID:           uuid.NewString(),
+					PRURL:        pr.GetHTMLURL(),
+					Repo:         repoFullName,
+					PRNumber:     pr.GetNumber(),
+					Title:        pr.GetTitle(),
+					SlackTS:      slackTS,
+					SlackChannel: slackChannelID,
+					Status:       "pending",
+					CreatedAt:    time.Now(),
+					UpdatedAt:    time.Now(),
+				}
+
+				if err := h.DB.Create(&task).Error; err != nil {
+					log.Printf("db save error: %v", err)
+					continue
+				}
+
+				log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, task.PRURL)
+			}
+		}
+	}
+
+	c.Status(http.StatusOK)
+
 }

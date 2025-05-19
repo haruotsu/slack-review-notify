@@ -11,12 +11,12 @@ import (
 // チャンネル設定を取得する関数
 func GetChannelConfig(db *gorm.DB, channelID string) (*models.ChannelConfig, error) {
 	var config models.ChannelConfig
-	
+
 	err := db.Where("slack_channel_id = ? AND is_active = ?", channelID, true).First(&config).Error
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &config, nil
 }
 
@@ -33,16 +33,16 @@ func IsRepositoryWatched(config *models.ChannelConfig, repoFullName string) bool
 		log.Printf("channel config is nil")
 		return false
 	}
-	
+
 	if config.RepositoryList == "" {
 		log.Printf("channel %s has no repository list", config.SlackChannelID)
 		return false
 	}
-	
+
 	repos := strings.Split(config.RepositoryList, ",")
-	log.Printf("channel %s repository list: %v (target: %s)", 
+	log.Printf("channel %s repository list: %v (target: %s)",
 		config.SlackChannelID, repos, repoFullName)
-	
+
 	for _, repo := range repos {
 		trimmedRepo := strings.TrimSpace(repo)
 		if trimmedRepo == repoFullName {
@@ -50,7 +50,7 @@ func IsRepositoryWatched(config *models.ChannelConfig, repoFullName string) bool
 			return true
 		}
 	}
-	
+
 	log.Printf("repository %s is not watched", repoFullName)
 	return false
-} 
+}

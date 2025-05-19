@@ -15,13 +15,13 @@ func TestSendSlackMessage(t *testing.T) {
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
-	
+
 	// テスト用の環境変数を設定
 	os.Setenv("SLACK_BOT_TOKEN", "test-token")
-	
+
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
-	
+
 	// 成功ケースのモック
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
@@ -33,7 +33,7 @@ func TestSendSlackMessage(t *testing.T) {
 			"channel": "C12345",
 			"ts":      "1234.5678",
 		})
-	
+
 	// 関数を実行
 	ts, channel, err := SendSlackMessage(
 		"https://github.com/owner/repo/pull/1",
@@ -41,13 +41,13 @@ func TestSendSlackMessage(t *testing.T) {
 		"C12345",
 		"U12345",
 	)
-	
+
 	// アサーション
 	assert.NoError(t, err)
 	assert.Equal(t, "1234.5678", ts)
 	assert.Equal(t, "C12345", channel)
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
-	
+
 	// エラーケースのテスト
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
@@ -56,7 +56,7 @@ func TestSendSlackMessage(t *testing.T) {
 			"ok":    false,
 			"error": "channel_not_found",
 		})
-	
+
 	// 関数を実行
 	_, _, err = SendSlackMessage(
 		"https://github.com/owner/repo/pull/1",
@@ -64,7 +64,7 @@ func TestSendSlackMessage(t *testing.T) {
 		"INVALID",
 		"U12345",
 	)
-	
+
 	// アサーション
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "channel_not_found")
@@ -75,13 +75,13 @@ func TestPostToThread(t *testing.T) {
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
-	
+
 	// テスト用の環境変数を設定
 	os.Setenv("SLACK_BOT_TOKEN", "test-token")
-	
+
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
-	
+
 	// 成功ケースのモック
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
@@ -91,14 +91,14 @@ func TestPostToThread(t *testing.T) {
 		JSON(map[string]interface{}{
 			"ok": true,
 		})
-	
+
 	// 関数を実行
 	err := PostToThread("C12345", "1234.5678", "テストメッセージ")
-	
+
 	// アサーション
 	assert.NoError(t, err)
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
-	
+
 	// エラーケースのテスト
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
@@ -107,10 +107,10 @@ func TestPostToThread(t *testing.T) {
 			"ok":    false,
 			"error": "invalid_thread_ts",
 		})
-	
+
 	// 関数を実行
 	err = PostToThread("C12345", "invalid", "テストメッセージ")
-	
+
 	// アサーション
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid_thread_ts")
@@ -121,13 +121,13 @@ func TestIsChannelArchived(t *testing.T) {
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
-	
+
 	// テスト用の環境変数を設定
 	os.Setenv("SLACK_BOT_TOKEN", "test-token")
-	
+
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
-	
+
 	// アーカイブされたチャンネルのモック
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
@@ -140,15 +140,15 @@ func TestIsChannelArchived(t *testing.T) {
 				"is_archived": true,
 			},
 		})
-	
+
 	// 関数を実行
 	isArchived, err := IsChannelArchived("C12345")
-	
+
 	// アサーション
 	assert.NoError(t, err)
 	assert.True(t, isArchived)
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
-	
+
 	// アーカイブされていないチャンネルのモック
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
@@ -161,15 +161,15 @@ func TestIsChannelArchived(t *testing.T) {
 				"is_archived": false,
 			},
 		})
-	
+
 	// 関数を実行
 	isArchived, err = IsChannelArchived("C67890")
-	
+
 	// アサーション
 	assert.NoError(t, err)
 	assert.False(t, isArchived)
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
-	
+
 	// 存在しないチャンネルのモック
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
@@ -179,10 +179,10 @@ func TestIsChannelArchived(t *testing.T) {
 			"ok":    false,
 			"error": "channel_not_found",
 		})
-	
+
 	// 関数を実行
 	isArchived, err = IsChannelArchived("INVALID")
-	
+
 	// アサーション
 	assert.True(t, isArchived) // チャンネルが存在しない場合もアーカイブされているとみなす
 	assert.NoError(t, err)     // エラーではなく、単に結果がtrueになる
@@ -192,17 +192,17 @@ func TestIsChannelArchived(t *testing.T) {
 func TestSendReminderMessage(t *testing.T) {
 	// テスト用DBのセットアップ
 	db := setupTestDB(t)
-	
+
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
-	
+
 	// テスト用の環境変数を設定
 	os.Setenv("SLACK_BOT_TOKEN", "test-token")
-	
+
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
-	
+
 	// チャンネル情報取得のモック
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
@@ -215,7 +215,7 @@ func TestSendReminderMessage(t *testing.T) {
 				"is_archived": false,
 			},
 		})
-	
+
 	// メッセージ送信のモック
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
@@ -223,7 +223,7 @@ func TestSendReminderMessage(t *testing.T) {
 		JSON(map[string]interface{}{
 			"ok": true,
 		})
-	
+
 	// テスト用のタスクを作成
 	task := models.ReviewTask{
 		ID:           "test-id",
@@ -237,14 +237,14 @@ func TestSendReminderMessage(t *testing.T) {
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
-	
+
 	// 関数を実行
 	err := SendReminderMessage(db, task)
-	
+
 	// アサーション
 	assert.NoError(t, err)
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
-	
+
 	// アーカイブされたチャンネルの場合
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
@@ -257,7 +257,7 @@ func TestSendReminderMessage(t *testing.T) {
 				"is_archived": true,
 			},
 		})
-	
+
 	// テスト用のタスクとチャンネル設定を作成
 	task2 := models.ReviewTask{
 		ID:           "test-id-2",
@@ -271,53 +271,53 @@ func TestSendReminderMessage(t *testing.T) {
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
-	
+
 	config := models.ChannelConfig{
-		ID:              "config-id",
-		SlackChannelID:  "C67890",
+		ID:               "config-id",
+		SlackChannelID:   "C67890",
 		DefaultMentionID: "U12345",
-		RepositoryList:  "owner/repo",
-		LabelName:       "needs-review",
-		IsActive:        true,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		RepositoryList:   "owner/repo",
+		LabelName:        "needs-review",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
 	}
-	
+
 	db.Create(&config)
-	
+
 	// 関数を実行
 	err = SendReminderMessage(db, task2)
-	
+
 	// アサーション
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "channel is archived")
-	
+
 	// DBが更新されたことを確認
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-id-2").First(&updatedTask)
 	assert.Equal(t, "archived", updatedTask.Status)
-	
+
 	var updatedConfig models.ChannelConfig
 	db.Where("slack_channel_id = ?", "C67890").First(&updatedConfig)
 	assert.False(t, updatedConfig.IsActive)
-	
+
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
 }
 
 func TestSendReviewerReminderMessage(t *testing.T) {
 	// テスト用DBのセットアップ
 	db := setupTestDB(t)
-	
+
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
-	
+
 	// テスト用の環境変数を設定
 	os.Setenv("SLACK_BOT_TOKEN", "test-token")
-	
+
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
-	
+
 	// チャンネル情報取得のモック
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
@@ -330,7 +330,7 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 				"is_archived": false,
 			},
 		})
-	
+
 	// メッセージ送信のモック
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
@@ -338,7 +338,7 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 		JSON(map[string]interface{}{
 			"ok": true,
 		})
-	
+
 	// テスト用のタスクを作成
 	task := models.ReviewTask{
 		ID:           "test-id",
@@ -353,14 +353,14 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
-	
+
 	// 関数を実行
 	err := SendReviewerReminderMessage(db, task)
-	
+
 	// アサーション
 	assert.NoError(t, err)
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
-	
+
 	// チャンネルがアーカイブされている場合のテスト
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
@@ -373,7 +373,7 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 				"is_archived": true,
 			},
 		})
-	
+
 	// テスト用のタスクとチャンネル設定を作成
 	task2 := models.ReviewTask{
 		ID:           "test-id-2",
@@ -388,7 +388,7 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
-	
+
 	config := models.ChannelConfig{
 		ID:               "config-id",
 		SlackChannelID:   "C67890",
@@ -399,25 +399,25 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
-	
+
 	db.Create(&config)
-	
+
 	// 関数を実行
 	err = SendReviewerReminderMessage(db, task2)
-	
+
 	// アサーション
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "channel is archived")
-	
+
 	// DBが更新されたことを確認
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-id-2").First(&updatedTask)
 	assert.Equal(t, "archived", updatedTask.Status)
-	
+
 	var updatedConfig models.ChannelConfig
 	db.Where("slack_channel_id = ?", "C67890").First(&updatedConfig)
 	assert.False(t, updatedConfig.IsActive)
-	
+
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
 }
 
@@ -425,13 +425,13 @@ func TestSendReminderPausedMessage(t *testing.T) {
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
-	
+
 	// テスト用の環境変数を設定
 	os.Setenv("SLACK_BOT_TOKEN", "test-token")
-	
+
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
-	
+
 	testCases := []struct {
 		name     string
 		duration string
@@ -444,7 +444,7 @@ func TestSendReminderPausedMessage(t *testing.T) {
 		{"完全停止", "stop", "リマインダーを完全に停止しました。レビュー担当者が決まるまで通知しません。"},
 		{"デフォルト", "unknown", "リマインドをストップします！"},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// スレッドメッセージ送信のモック
@@ -455,7 +455,7 @@ func TestSendReminderPausedMessage(t *testing.T) {
 				JSON(map[string]interface{}{
 					"ok": true,
 				})
-			
+
 			// テスト用のタスクを作成
 			task := models.ReviewTask{
 				ID:           "test-id",
@@ -463,10 +463,10 @@ func TestSendReminderPausedMessage(t *testing.T) {
 				SlackChannel: "C12345",
 				Status:       "pending",
 			}
-			
+
 			// 関数を実行
 			err := SendReminderPausedMessage(task, tc.duration)
-			
+
 			// アサーション
 			assert.NoError(t, err)
 			assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
@@ -488,7 +488,7 @@ func TestIsChannelRelatedError(t *testing.T) {
 		{"missing_scope", fmt.Errorf("slack error: missing_scope"), true},
 		{"other error", fmt.Errorf("other error"), false},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := IsChannelRelatedError(tc.err)
@@ -497,24 +497,23 @@ func TestIsChannelRelatedError(t *testing.T) {
 	}
 }
 
-
 // GetNextBusinessDayMorning関数のテスト
 func TestGetNextBusinessDayMorning(t *testing.T) {
 	result := GetNextBusinessDayMorning()
-	
+
 	// 結果は必ず翌日以降の日付
 	now := time.Now()
 	tomorrow := now.AddDate(0, 0, 1)
-	
+
 	// 以下をテスト
 	// 1. 結果は現在時刻より後
 	assert.True(t, result.After(now), "翌営業日は現在時刻より後であること")
-	
+
 	// 2. 結果は10:00に設定されている
 	assert.Equal(t, 10, result.Hour(), "時刻は10時に設定されていること")
 	assert.Equal(t, 0, result.Minute(), "分は0分に設定されていること")
 	assert.Equal(t, 0, result.Second(), "秒は0秒に設定されていること")
-	
+
 	// 3. 土日に実行した場合は月曜日になる
 	switch now.Weekday() {
 	case time.Friday:
@@ -522,7 +521,7 @@ func TestGetNextBusinessDayMorning(t *testing.T) {
 		expectedDate := tomorrow.AddDate(0, 0, 2)
 		assert.Equal(t, time.Monday, result.Weekday(), "金曜日の翌営業日は月曜日")
 		assert.Equal(t, expectedDate.Year(), result.Year())
-		assert.Equal(t, expectedDate.Month(), result.Month()) 
+		assert.Equal(t, expectedDate.Month(), result.Month())
 		assert.Equal(t, expectedDate.Day(), result.Day())
 	case time.Saturday:
 		// 土曜日に実行した場合、結果は月曜日（2日後）
@@ -535,14 +534,14 @@ func TestGetNextBusinessDayMorning(t *testing.T) {
 		// 日曜日に実行した場合、結果は月曜日（1日後）
 		assert.Equal(t, time.Monday, result.Weekday(), "日曜日の翌営業日は月曜日")
 		assert.Equal(t, tomorrow.Year(), result.Year())
-		assert.Equal(t, tomorrow.Month(), result.Month()) 
+		assert.Equal(t, tomorrow.Month(), result.Month())
 		assert.Equal(t, tomorrow.Day(), result.Day())
 	default:
 		// 平日に実行した場合、結果は翌日
 		assert.Equal(t, tomorrow.Year(), result.Year())
 		assert.Equal(t, tomorrow.Month(), result.Month())
 		assert.Equal(t, tomorrow.Day(), result.Day())
-		
+
 		// 翌日が平日であること（月〜金）
 		expectedWeekday := (now.Weekday() + 1) % 7
 		assert.Equal(t, expectedWeekday, result.Weekday(), "平日の翌営業日は翌日")
