@@ -239,7 +239,7 @@ func TestSendReminderMessage(t *testing.T) {
 	}
 
 	// 関数を実行
-	err := SendReminderMessage(db, task)
+	err := SendReviewerReminderMessage(db, task)
 
 	// アサーション
 	assert.NoError(t, err)
@@ -286,7 +286,7 @@ func TestSendReminderMessage(t *testing.T) {
 	db.Create(&config)
 
 	// 関数を実行
-	err = SendReminderMessage(db, task2)
+	err = SendReviewerReminderMessage(db, task2)
 
 	// アサーション
 	assert.Error(t, err)
