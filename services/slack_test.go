@@ -510,8 +510,8 @@ func TestGetNextBusinessDayMorning(t *testing.T) {
 	// 1. 結果は現在時刻より後
 	assert.True(t, result.After(now), "翌営業日は現在時刻より後であること")
 	
-	// 2. 結果は9:00に設定されている
-	assert.Equal(t, 9, result.Hour(), "時刻は9時に設定されていること")
+	// 2. 結果は10:00に設定されている
+	assert.Equal(t, 10, result.Hour(), "時刻は10時に設定されていること")
 	assert.Equal(t, 0, result.Minute(), "分は0分に設定されていること")
 	assert.Equal(t, 0, result.Second(), "秒は0秒に設定されていること")
 	
