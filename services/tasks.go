@@ -59,9 +59,10 @@ func CheckInReviewTasks(db *gorm.DB) {
 					continue
 				}
 			} else {
-				// 更新時間を記録
 				task.UpdatedAt = now
-				db.Save(&task)
+				if err := db.Model(&task).Update("updated_at", now).Error; err != nil {
+					log.Printf("task update error: %v", err)
+				}
 
 				log.Printf("reviewer reminder sent (task id: %s)", task.ID)
 			}
