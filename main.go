@@ -161,14 +161,14 @@ func main() {
 						}
 
 						// ランダムにレビュワーを選択
-						mentionID := config.DefaultMentionID
+						randomReviewerID := services.SelectRandomReviewer(db, config.SlackChannelID, config.LabelName)
 
 						// メッセージ送信後のタスク作成部分
 						slackTs, slackChannelID, err := services.SendSlackMessage(
 							pr.GetHTMLURL(),
 							pr.GetTitle(),
 							config.SlackChannelID,
-							mentionID,
+							config.DefaultMentionID,
 						)
 
 						if err != nil {
@@ -179,8 +179,6 @@ func main() {
 						log.Printf("slack message sent: ts=%s, channel=%s", slackTs, slackChannelID)
 
 						// ランダムにレビュワーを選択してタスクに設定
-						randomReviewerID := services.SelectRandomReviewer(db, config.SlackChannelID)
-
 						task := models.ReviewTask{
 							ID:           uuid.NewString(),
 							PRURL:        pr.GetHTMLURL(),
@@ -189,8 +187,9 @@ func main() {
 							Title:        pr.GetTitle(),
 							SlackTS:      slackTs,
 							SlackChannel: slackChannelID,
-							Reviewer:     randomReviewerID, // ランダムに選択したレビュワーを設定
-							Status:       "in_review",      // ステータスを in_review に変更
+							Reviewer:     randomReviewerID,
+							Status:       "in_review",
+							LabelName:    config.LabelName,
 							CreatedAt:    time.Now(),
 							UpdatedAt:    time.Now(),
 						}

@@ -136,6 +136,7 @@ func TestCheckInReviewTasks(t *testing.T) {
 		SlackChannel: "C12345",
 		Status:       "in_review",
 		Reviewer:     "U12345",
+		LabelName:    "needs-review",
 		CreatedAt:    twoHoursAgo,
 		UpdatedAt:    twoHoursAgo,
 	}

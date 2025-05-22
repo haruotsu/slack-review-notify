@@ -53,47 +53,63 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 		db.Find(&allConfigs)
 		log.Printf("all channel configs in database (%d):", len(allConfigs))
 		for i, cfg := range allConfigs {
-			log.Printf("[%d] ID=%s, Channel=%s", i, cfg.ID, cfg.SlackChannelID)
-		}
-
-		// 現在のチャンネルの設定を確認
-		var config models.ChannelConfig
-		result := db.Where("slack_channel_id = ?", channelID).First(&config)
-		if result.Error != nil {
-			log.Printf("this channel(%s) config not found: %v", channelID, result.Error)
-
-			// 設定がない場合は自動作成
-			newConfig := models.ChannelConfig{
-				ID:               uuid.NewString(),
-				SlackChannelID:   channelID,
-				DefaultMentionID: userID,         // コマンド実行者をデフォルトに
-				LabelName:        "needs-review", // デフォルトのラベル名
-				IsActive:         true,
-				CreatedAt:        time.Now(),
-				UpdatedAt:        time.Now(),
-			}
-
-			createResult := db.Create(&newConfig)
-			if createResult.Error != nil {
-				log.Printf("channel config create error: %v", createResult.Error)
-				c.String(200, "channel config create failed. please contact the administrator.")
-				return
-			}
-			// 作成した設定を使用
-			config = newConfig
+			log.Printf("[%d] ID=%s, Channel=%s, Label=%s", i, cfg.ID, cfg.SlackChannelID, cfg.LabelName)
 		}
 
 		// /slack-review-notify コマンドの処理
 		if command == "/slack-review-notify" {
 			// コマンド部分とパラメータを分離
-			var subCommand, params string
+			var labelName, subCommand, params string
 
-			// 最初の空白でコマンドとパラメータを分割
-			parts := strings.SplitN(text, " ", 2)
-			subCommand = parts[0]
-			if len(parts) > 1 {
-				params = parts[1]
+			// テキストを分割
+			parts := strings.Fields(text)
+			
+			if len(parts) == 0 {
+				// 引数がない場合はヘルプを表示
+				showHelp(c)
+				return
 			}
+			
+			// 最初の引数がサブコマンドかラベル名か判断
+			potentialSubCommands := []string{"show", "help", "set-mention", "add-reviewer", 
+				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo", 
+				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval"}
+			
+			isSubCommand := false
+			for _, cmd := range potentialSubCommands {
+				if parts[0] == cmd {
+					isSubCommand = true
+					break
+				}
+			}
+			
+			if isSubCommand {
+				// 最初の引数がサブコマンドの場合、デフォルトのラベル名を使用
+				subCommand = parts[0]
+				labelName = "needs-review" // デフォルトのラベル名
+				
+				if len(parts) > 1 {
+					params = strings.Join(parts[1:], " ")
+				}
+			} else {
+				// 最初の引数がラベル名の場合
+				labelName = parts[0]
+				
+				if len(parts) > 1 {
+					subCommand = parts[1]
+					
+					if len(parts) > 2 {
+						params = strings.Join(parts[2:], " ")
+					}
+				} else {
+					// ラベル名のみが指定された場合はその設定を表示
+					subCommand = "show"
+				}
+			}
+
+			// ラベル名に関するロギング
+			log.Printf("command parsed: label=%s, subCommand=%s, params=%s", 
+				labelName, subCommand, params)
 
 			if subCommand == "" || subCommand == "help" {
 				// ヘルプを表示
@@ -101,22 +117,34 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 
+			// ラベル名を指定して既存設定を取得
+			var config models.ChannelConfig
+			result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
+			
+			// ラベル名を指定して設定が見つからなかった場合は新しく作成
+			if result.Error != nil {
+				log.Printf("config for channel(%s) and label(%s) not found: %v", 
+					channelID, labelName, result.Error)
+				
+				// 新しい設定の作成は各コマンド処理内で行う
+			}
+
 			switch subCommand {
 			case "show":
 				// 現在の設定を表示
-				showConfig(c, db, channelID)
+				showConfig(c, db, channelID, labelName)
 
 			case "set-mention":
 				if params == "" {
-					c.String(200, "メンション先のユーザーIDを指定してください。例: /slack-review-notify set-mention @user")
+					c.String(200, "メンション先のユーザーIDを指定してください。例: /slack-review-notify " + labelName + " set-mention @user")
 					return
 				}
 				mentionID := strings.TrimSpace(params)
-				setMention(c, db, channelID, mentionID)
+				setMention(c, db, channelID, labelName, mentionID)
 
 			case "add-reviewer":
 				if params == "" {
-					c.String(200, "レビュワーのユーザーIDをカンマ区切りで指定してください。例: /slack-review-notify add-reviewer @user1,@user2")
+					c.String(200, "レビュワーのユーザーIDをカンマ区切りで指定してください。例: /slack-review-notify " + labelName + " add-reviewer @user1,@user2")
 					return
 				}
 				// 正規表現を使ってすべてのスペースパターンを処理
@@ -125,52 +153,53 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 
 				// 先頭と末尾の空白も削除
 				reviewerIDs = strings.TrimSpace(reviewerIDs)
-				addReviewers(c, db, channelID, reviewerIDs)
+				addReviewers(c, db, channelID, labelName, reviewerIDs)
 
 			case "show-reviewers":
 				// レビュワーリストを表示
-				showReviewers(c, db, channelID)
+				showReviewers(c, db, channelID, labelName)
 
 			case "clear-reviewers":
 				// レビュワーリストをクリア
-				clearReviewers(c, db, channelID)
+				clearReviewers(c, db, channelID, labelName)
 
 			case "add-repo":
 				if params == "" {
-					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify add-repo owner/repo")
+					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify " + labelName + " add-repo owner/repo")
 					return
 				}
 				repoName := params
-				addRepository(c, db, channelID, repoName)
+				addRepository(c, db, channelID, labelName, repoName)
 
 			case "remove-repo":
 				if params == "" {
-					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify remove-repo owner/repo")
+					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify " + labelName + " remove-repo owner/repo")
 					return
 				}
 				repoName := params
-				removeRepository(c, db, channelID, repoName)
+				removeRepository(c, db, channelID, labelName, repoName)
 
 			case "set-label":
+				// set-label は実際にはラベル名を変更する操作に変更
 				if params == "" {
-					c.String(200, "ラベル名を指定してください。例: /slack-review-notify set-label needs-review")
+					c.String(200, "新しいラベル名を指定してください。例: /slack-review-notify " + labelName + " set-label new-label-name")
 					return
 				}
-				labelName := params
-				setLabel(c, db, channelID, labelName)
+				newLabelName := params
+				changeLabelName(c, db, channelID, labelName, newLabelName)
 
 			case "activate":
-				activateChannel(c, db, channelID, true)
+				activateChannel(c, db, channelID, labelName, true)
 
 			case "deactivate":
-				activateChannel(c, db, channelID, false)
+				activateChannel(c, db, channelID, labelName, false)
 
 			case "set-reviewer-reminder-interval":
 				if params == "" {
-					c.String(200, "レビュワー割り当て後のリマインド頻度を分単位で指定してください。例: /slack-review-notify set-reviewer-reminder-interval 30")
+					c.String(200, "レビュワー割り当て後のリマインド頻度を分単位で指定してください。例: /slack-review-notify " + labelName + " set-reviewer-reminder-interval 30")
 					return
 				}
-				setReminderInterval(c, db, channelID, strings.TrimSpace(params), true)
+				setReminderInterval(c, db, channelID, labelName, strings.TrimSpace(params), true)
 
 			default:
 				c.String(200, "不明なコマンドです。/slack-review-notify help で使い方を確認してください。")
@@ -186,28 +215,32 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 // ヘルプメッセージを表示
 func showHelp(c *gin.Context) {
 	help := `*Review通知Bot設定コマンド*
-- /slack-review-notify show: 現在の設定を表示
-- /slack-review-notify set-mention @user: メンション先を設定
-- /slack-review-notify add-reviewer @user1,@user2: レビュワーを追加（カンマ区切り）
-- /slack-review-notify show-reviewers: 登録されたレビュワーリストを表示
-- /slack-review-notify clear-reviewers: レビュワーリストをクリア
-- /slack-review-notify add-repo owner/repo: 通知対象リポジトリを追加
-- /slack-review-notify remove-repo owner/repo: 通知対象リポジトリを削除
-- /slack-review-notify set-label label-name: 通知対象ラベルを設定
-- /slack-review-notify set-reviewer-reminder-interval 30: レビュワー割り当て後のリマインド頻度を設定（分単位）
-- /slack-review-notify activate: このチャンネルでの通知を有効化
-- /slack-review-notify deactivate: このチャンネルでの通知を無効化`
+コマンド形式: /slack-review-notify [ラベル名] サブコマンド [引数]
+
+- /slack-review-notify [ラベル名] show: 指定したラベルの設定を表示
+- /slack-review-notify [ラベル名] set-mention @user: メンション先を設定
+- /slack-review-notify [ラベル名] add-reviewer @user1,@user2: レビュワーを追加（カンマ区切り）
+- /slack-review-notify [ラベル名] show-reviewers: 登録されたレビュワーリストを表示
+- /slack-review-notify [ラベル名] clear-reviewers: レビュワーリストをクリア
+- /slack-review-notify [ラベル名] add-repo owner/repo: 通知対象リポジトリを追加
+- /slack-review-notify [ラベル名] remove-repo owner/repo: 通知対象リポジトリを削除
+- /slack-review-notify [ラベル名] set-label 新ラベル名: ラベル名を変更
+- /slack-review-notify [ラベル名] set-reviewer-reminder-interval 30: レビュワー割り当て後のリマインド頻度を設定（分単位）
+- /slack-review-notify [ラベル名] activate: このラベルの通知を有効化
+- /slack-review-notify [ラベル名] deactivate: このラベルの通知を無効化
+
+[ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します`
 
 	c.String(200, help)
 }
 
 // 設定を表示
-func showConfig(c *gin.Context, db *gorm.DB, channelID string) {
+func showConfig(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 	var config models.ChannelConfig
 
-	err := db.Where("slack_channel_id = ?", channelID).First(&config).Error
+	err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config).Error
 	if err != nil {
-		c.String(200, "このチャンネルの設定はまだありません。/slack-review-notify set-mention コマンドで設定を開始してください。")
+		c.String(200, fmt.Sprintf("このチャンネルのラベル「%s」の設定はまだありません。/slack-review-notify %s set-mention コマンドで設定を開始してください。", labelName, labelName))
 		return
 	}
 
@@ -221,15 +254,14 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID string) {
 		reviewerReminderInterval = 30
 	}
 
-	response := fmt.Sprintf(`*このチャンネルのレビュー通知設定*
+	response := fmt.Sprintf(`*このチャンネルのラベル「%s」のレビュー通知設定*
 - ステータス: %s
 - メンション先: <@%s>
 - レビュワーリスト: %s
 - 通知対象リポジトリ: %s
-- 通知対象ラベル: %s
 - レビュワー割り当て後のリマインド頻度: %d分`,
-		status, config.DefaultMentionID, formatReviewerList(config.ReviewerList),
-		config.RepositoryList, config.LabelName, reviewerReminderInterval)
+		labelName, status, config.DefaultMentionID, formatReviewerList(config.ReviewerList),
+		config.RepositoryList, reviewerReminderInterval)
 
 	c.String(200, response)
 }
@@ -295,23 +327,23 @@ func cleanupUserIDs(userIDs string) string {
 }
 
 // レビュワーを追加
-func addReviewers(c *gin.Context, db *gorm.DB, channelID, reviewerIDs string) {
+func addReviewers(c *gin.Context, db *gorm.DB, channelID, labelName, reviewerIDs string) {
 	var config models.ChannelConfig
 
-	result := db.Where("slack_channel_id = ?", channelID).First(&config)
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 	if result.Error != nil {
 		// 設定がまだない場合は新規作成
 		config = models.ChannelConfig{
 			ID:             uuid.NewString(),
 			SlackChannelID: channelID,
+			LabelName:      labelName,
 			ReviewerList:   cleanupUserIDs(reviewerIDs), // ユーザーID形式を整形
-			LabelName:      "needs-review",              // デフォルト値
 			IsActive:       true,
 			CreatedAt:      time.Now(),
 			UpdatedAt:      time.Now(),
 		}
 		db.Create(&config)
-		c.String(200, fmt.Sprintf("レビュワーリストを設定しました: %s", formatReviewerList(config.ReviewerList)))
+		c.String(200, fmt.Sprintf("ラベル「%s」のレビュワーリストを設定しました: %s", labelName, formatReviewerList(config.ReviewerList)))
 		return
 	}
 
@@ -347,35 +379,35 @@ func addReviewers(c *gin.Context, db *gorm.DB, channelID, reviewerIDs string) {
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 
-	c.String(200, fmt.Sprintf("レビュワーリストを更新しました: %s", formatReviewerList(config.ReviewerList)))
+	c.String(200, fmt.Sprintf("ラベル「%s」のレビュワーリストを更新しました: %s", labelName, formatReviewerList(config.ReviewerList)))
 }
 
 // レビュワーリストを表示
-func showReviewers(c *gin.Context, db *gorm.DB, channelID string) {
+func showReviewers(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 	var config models.ChannelConfig
 
-	err := db.Where("slack_channel_id = ?", channelID).First(&config).Error
+	err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config).Error
 	if err != nil {
-		c.String(200, "このチャンネルの設定はまだありません。/slack-review-notify add-reviewer コマンドで設定を開始してください。")
+		c.String(200, fmt.Sprintf("このチャンネルのラベル「%s」の設定はまだありません。/slack-review-notify %s add-reviewer コマンドで設定を開始してください。", labelName, labelName))
 		return
 	}
 
 	if config.ReviewerList == "" {
-		c.String(200, "現在レビュワーは登録されていません。/slack-review-notify add-reviewer コマンドで追加してください。")
+		c.String(200, fmt.Sprintf("現在レビュワーはラベル「%s」に登録されていません。/slack-review-notify %s add-reviewer コマンドで追加してください。", labelName, labelName))
 		return
 	}
 
-	response := fmt.Sprintf("*このチャンネルのレビュワーリスト*\n%s", formatReviewerList(config.ReviewerList))
+	response := fmt.Sprintf("*このチャンネルのラベル「%s」のレビュワーリスト*\n%s", labelName, formatReviewerList(config.ReviewerList))
 	c.String(200, response)
 }
 
 // レビュワーリストをクリア
-func clearReviewers(c *gin.Context, db *gorm.DB, channelID string) {
+func clearReviewers(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 	var config models.ChannelConfig
 
-	err := db.Where("slack_channel_id = ?", channelID).First(&config).Error
+	err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config).Error
 	if err != nil {
-		c.String(200, "このチャンネルの設定はまだありません。")
+		c.String(200, fmt.Sprintf("このチャンネルのラベル「%s」の設定はまだありません。", labelName))
 		return
 	}
 
@@ -383,24 +415,24 @@ func clearReviewers(c *gin.Context, db *gorm.DB, channelID string) {
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 
-	c.String(200, "レビュワーリストをクリアしました。")
+	c.String(200, fmt.Sprintf("ラベル「%s」のレビュワーリストをクリアしました。", labelName))
 }
 
 // メンション先を設定
-func setMention(c *gin.Context, db *gorm.DB, channelID, mentionID string) {
+func setMention(c *gin.Context, db *gorm.DB, channelID, labelName, mentionID string) {
 	var config models.ChannelConfig
 
 	// メンションIDを整形
 	cleanedMentionID := cleanUserID(mentionID)
 
-	result := db.Where("slack_channel_id = ?", channelID).First(&config)
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 	if result.Error != nil {
 		// 新規作成
 		config = models.ChannelConfig{
 			ID:               uuid.NewString(),
 			SlackChannelID:   channelID,
+			LabelName:        labelName,
 			DefaultMentionID: cleanedMentionID,
-			LabelName:        "needs-review", // デフォルト値
 			IsActive:         true,
 			CreatedAt:        time.Now(),
 			UpdatedAt:        time.Now(),
@@ -415,7 +447,7 @@ func setMention(c *gin.Context, db *gorm.DB, channelID, mentionID string) {
 			mentionDisplay = fmt.Sprintf("<@%s>", cleanedMentionID)
 		}
 
-		c.String(200, fmt.Sprintf("メンション先を %s に設定しました。", mentionDisplay))
+		c.String(200, fmt.Sprintf("ラベル「%s」のメンション先を %s に設定しました。", labelName, mentionDisplay))
 		return
 	}
 
@@ -432,28 +464,27 @@ func setMention(c *gin.Context, db *gorm.DB, channelID, mentionID string) {
 		mentionDisplay = fmt.Sprintf("<@%s>", cleanedMentionID)
 	}
 
-	c.String(200, fmt.Sprintf("メンション先を %s に更新しました。", mentionDisplay))
+	c.String(200, fmt.Sprintf("ラベル「%s」のメンション先を %s に更新しました。", labelName, mentionDisplay))
 }
 
 // リポジトリを追加
-func addRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
+func addRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoName string) {
 	var config models.ChannelConfig
 
-	result := db.Where("slack_channel_id = ?", channelID).First(&config)
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 	if result.Error != nil {
 		// 設定がまだない場合は新規作成
 		config = models.ChannelConfig{
 			ID:               uuid.NewString(),
 			SlackChannelID:   channelID,
-			DefaultMentionID: "", // 空のままなのでset-mentionで設定が必要
+			LabelName:        labelName,
 			RepositoryList:   repoName,
-			LabelName:        "needs-review", // デフォルト値
 			IsActive:         true,
 			CreatedAt:        time.Now(),
 			UpdatedAt:        time.Now(),
 		}
 		db.Create(&config)
-		c.String(200, fmt.Sprintf("通知対象リポジトリに `%s` を追加しました。", repoName))
+		c.String(200, fmt.Sprintf("ラベル「%s」の通知対象リポジトリに `%s` を追加しました。", labelName, repoName))
 		return
 	}
 
@@ -464,7 +495,7 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
 		// 既に含まれているかチェック
 		for _, r := range reposList {
 			if strings.TrimSpace(r) == repoName {
-				c.String(200, fmt.Sprintf("リポジトリ `%s` は既に通知対象です。", repoName))
+				c.String(200, fmt.Sprintf("リポジトリ `%s` はラベル「%s」の通知対象です。", repoName, labelName))
 				return
 			}
 		}
@@ -480,21 +511,21 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 
-	c.String(200, fmt.Sprintf("通知対象リポジトリに `%s` を追加しました。", repoName))
+	c.String(200, fmt.Sprintf("ラベル「%s」の通知対象リポジトリに `%s` を追加しました。", labelName, repoName))
 }
 
 // リポジトリを削除
-func removeRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
+func removeRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoName string) {
 	var config models.ChannelConfig
 
-	result := db.Where("slack_channel_id = ?", channelID).First(&config)
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 	if result.Error != nil {
-		c.String(200, "このチャンネルの設定はまだありません。")
+		c.String(200, fmt.Sprintf("このチャンネルのラベル「%s」の設定はまだありません。", labelName))
 		return
 	}
 
 	if config.RepositoryList == "" {
-		c.String(200, "通知対象リポジトリは設定されていません。")
+		c.String(200, fmt.Sprintf("ラベル「%s」の通知対象リポジトリは設定されていません。", labelName))
 		return
 	}
 
@@ -512,7 +543,7 @@ func removeRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
 	}
 
 	if !found {
-		c.String(200, fmt.Sprintf("リポジトリ `%s` は通知対象ではありません。", repoName))
+		c.String(200, fmt.Sprintf("リポジトリ `%s` はラベル「%s」の通知対象ではありません。", repoName, labelName))
 		return
 	}
 
@@ -521,48 +552,46 @@ func removeRepository(c *gin.Context, db *gorm.DB, channelID, repoName string) {
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 
-	c.String(200, fmt.Sprintf("通知対象リポジトリから `%s` を削除しました。", repoName))
+	c.String(200, fmt.Sprintf("ラベル「%s」の通知対象リポジトリから `%s` を削除しました。", labelName, repoName))
 }
 
-// ラベルを設定
-func setLabel(c *gin.Context, db *gorm.DB, channelID, labelName string) {
+// ラベル名を変更する関数
+func changeLabelName(c *gin.Context, db *gorm.DB, channelID, oldLabelName, newLabelName string) {
 	var config models.ChannelConfig
 
-	result := db.Where("slack_channel_id = ?", channelID).First(&config)
+	// 現在の設定を取得
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, oldLabelName).First(&config)
 	if result.Error != nil {
-		// 設定がまだない場合は新規作成
-		config = models.ChannelConfig{
-			ID:               uuid.NewString(),
-			SlackChannelID:   channelID,
-			DefaultMentionID: "",
-			LabelName:        labelName,
-			IsActive:         true,
-			CreatedAt:        time.Now(),
-			UpdatedAt:        time.Now(),
-		}
-		db.Create(&config)
-		c.String(200, fmt.Sprintf("通知対象ラベルを `%s` に設定しました。", labelName))
+		c.String(200, fmt.Sprintf("ラベル「%s」の設定はこのチャンネルに存在しません。", oldLabelName))
+		return
+	}
+	
+	// 新しいラベル名で既に設定が存在するか確認
+	var existingConfig models.ChannelConfig
+	existingResult := db.Where("slack_channel_id = ? AND label_name = ?", channelID, newLabelName).First(&existingConfig)
+	if existingResult.Error == nil {
+		c.String(200, fmt.Sprintf("ラベル「%s」の設定は既に存在します。別のラベル名を指定してください。", newLabelName))
 		return
 	}
 
-	// 既存の設定を更新
-	config.LabelName = labelName
+	// ラベル名を更新
+	config.LabelName = newLabelName
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 
-	c.String(200, fmt.Sprintf("通知対象ラベルを `%s` に更新しました。", labelName))
+	c.String(200, fmt.Sprintf("ラベル名を「%s」から「%s」に変更しました。", oldLabelName, newLabelName))
 }
 
 // チャンネルの有効/無効を切り替え
-func activateChannel(c *gin.Context, db *gorm.DB, channelID string, active bool) {
+func activateChannel(c *gin.Context, db *gorm.DB, channelID, labelName string, active bool) {
 	var config models.ChannelConfig
 
-	result := db.Where("slack_channel_id = ?", channelID).First(&config)
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 	if result.Error != nil {
 		if active {
-			c.String(200, "このチャンネルの設定はまだありません。/slack-review-notify set-mention コマンドで設定を開始してください。")
+			c.String(200, fmt.Sprintf("このチャンネルのラベル「%s」の設定はまだありません。/slack-review-notify %s set-mention コマンドで設定を開始してください。", labelName, labelName))
 		} else {
-			c.String(200, "このチャンネルの設定はまだありません。")
+			c.String(200, fmt.Sprintf("このチャンネルのラベル「%s」の設定はまだありません。", labelName))
 		}
 		return
 	}
@@ -573,14 +602,14 @@ func activateChannel(c *gin.Context, db *gorm.DB, channelID string, active bool)
 	db.Save(&config)
 
 	if active {
-		c.String(200, "このチャンネルでのレビュー通知を有効化しました。")
+		c.String(200, fmt.Sprintf("このチャンネルでのラベル「%s」のレビュー通知を有効化しました。", labelName))
 	} else {
-		c.String(200, "このチャンネルでのレビュー通知を無効化しました。")
+		c.String(200, fmt.Sprintf("このチャンネルでのラベル「%s」のレビュー通知を無効化しました。", labelName))
 	}
 }
 
 // リマインド頻度を設定
-func setReminderInterval(c *gin.Context, db *gorm.DB, channelID, intervalStr string, isReviewer bool) {
+func setReminderInterval(c *gin.Context, db *gorm.DB, channelID, labelName, intervalStr string, isReviewer bool) {
 	var config models.ChannelConfig
 
 	// 数値に変換
@@ -590,13 +619,13 @@ func setReminderInterval(c *gin.Context, db *gorm.DB, channelID, intervalStr str
 		return
 	}
 
-	result := db.Where("slack_channel_id = ?", channelID).First(&config)
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 	if result.Error != nil {
 		// 設定がまだない場合は新規作成
 		config = models.ChannelConfig{
 			ID:             uuid.NewString(),
 			SlackChannelID: channelID,
-			LabelName:      "needs-review", // デフォルト値
+			LabelName:      labelName,
 			IsActive:       true,
 			CreatedAt:      time.Now(),
 			UpdatedAt:      time.Now(),
