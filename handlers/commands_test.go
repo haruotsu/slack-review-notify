@@ -59,6 +59,8 @@ func TestHandleSlackCommand_Help(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "Review通知Bot設定コマンド")
+	assert.Contains(t, w.Body.String(), "複数ラベル設定の使い方")
+	assert.Contains(t, w.Body.String(), "異なるラベルごとに別々のメンション先")
 }
 
 func TestHandleSlackCommand_Show(t *testing.T) {

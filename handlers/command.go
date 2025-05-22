@@ -165,7 +165,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 
 			case "add-repo":
 				if params == "" {
-					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify " + labelName + " add-repo owner/repo")
+					c.String(200, "リポジトリ名をカンマ区切りで指定してください。例: /slack-review-notify " + labelName + " add-repo owner/repo1,owner/repo2")
 					return
 				}
 				repoName := params
@@ -217,12 +217,22 @@ func showHelp(c *gin.Context) {
 	help := `*Review通知Bot設定コマンド*
 コマンド形式: /slack-review-notify [ラベル名] サブコマンド [引数]
 
+*複数ラベル設定の使い方*
+このチャンネル内で複数の異なるラベルごとに独立した設定を持つことができます:
+- 例1: /slack-review-notify bug set-mention @バグチーム → bugラベル用の設定
+- 例2: /slack-review-notify feature set-mention @開発チーム → featureラベル用の設定
+- 例3: /slack-review-notify security-review set-mention @セキュリティチーム → security-reviewラベル用の設定
+
+上記のように、異なるラベルごとに別々のメンション先やレビュワーを設定できます。
+PRにどのラベルが付いているかで、適切な設定が自動的に使われます。
+
+*使用可能なコマンド*
 - /slack-review-notify [ラベル名] show: 指定したラベルの設定を表示
 - /slack-review-notify [ラベル名] set-mention @user: メンション先を設定
 - /slack-review-notify [ラベル名] add-reviewer @user1,@user2: レビュワーを追加（カンマ区切り）
 - /slack-review-notify [ラベル名] show-reviewers: 登録されたレビュワーリストを表示
 - /slack-review-notify [ラベル名] clear-reviewers: レビュワーリストをクリア
-- /slack-review-notify [ラベル名] add-repo owner/repo: 通知対象リポジトリを追加
+- /slack-review-notify [ラベル名] add-repo owner/repo1,owner/repo2: 通知対象リポジトリを追加（カンマ区切り）
 - /slack-review-notify [ラベル名] remove-repo owner/repo: 通知対象リポジトリを削除
 - /slack-review-notify [ラベル名] set-label 新ラベル名: ラベル名を変更
 - /slack-review-notify [ラベル名] set-reviewer-reminder-interval 30: レビュワー割り当て後のリマインド頻度を設定（分単位）
@@ -468,7 +478,7 @@ func setMention(c *gin.Context, db *gorm.DB, channelID, labelName, mentionID str
 }
 
 // リポジトリを追加
-func addRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoName string) {
+func addRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoNames string) {
 	var config models.ChannelConfig
 
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
@@ -478,40 +488,81 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoName s
 			ID:               uuid.NewString(),
 			SlackChannelID:   channelID,
 			LabelName:        labelName,
-			RepositoryList:   repoName,
+			RepositoryList:   repoNames,
 			IsActive:         true,
 			CreatedAt:        time.Now(),
 			UpdatedAt:        time.Now(),
 		}
 		db.Create(&config)
-		c.String(200, fmt.Sprintf("ラベル「%s」の通知対象リポジトリに `%s` を追加しました。", labelName, repoName))
+		c.String(200, fmt.Sprintf("ラベル「%s」の通知対象リポジトリに `%s` を追加しました。", labelName, repoNames))
 		return
 	}
 
-	// 既存のリポジトリリストをチェック
-	if config.RepositoryList != "" {
-		reposList := strings.Split(config.RepositoryList, ",")
+	// 正規表現を使ってすべてのスペースパターンを処理
+	re := regexp.MustCompile(`\s*,\s*`)
+	repoNames = re.ReplaceAllString(repoNames, ",")
 
-		// 既に含まれているかチェック
-		for _, r := range reposList {
-			if strings.TrimSpace(r) == repoName {
-				c.String(200, fmt.Sprintf("リポジトリ `%s` はラベル「%s」の通知対象です。", repoName, labelName))
-				return
-			}
+	// 先頭と末尾の空白も削除
+	repoNames = strings.TrimSpace(repoNames)
+
+	// 既存のリポジトリリストをチェック
+	currentRepos := []string{}
+	if config.RepositoryList != "" {
+		currentRepos = strings.Split(config.RepositoryList, ",")
+		for i, r := range currentRepos {
+			currentRepos[i] = strings.TrimSpace(r)
 		}
 	}
 
-	// リポジトリを追加
-	if config.RepositoryList == "" {
-		config.RepositoryList = repoName
-	} else {
-		config.RepositoryList = config.RepositoryList + "," + repoName
+	// 新しいリポジトリを追加
+	newRepos := strings.Split(repoNames, ",")
+	addedRepos := []string{}
+	alreadyExistsRepos := []string{}
+
+	for _, newRepo := range newRepos {
+		newRepo = strings.TrimSpace(newRepo)
+		if newRepo == "" {
+			continue
+		}
+
+		alreadyExists := false
+		for _, existingRepo := range currentRepos {
+			if existingRepo == newRepo {
+				alreadyExists = true
+				alreadyExistsRepos = append(alreadyExistsRepos, newRepo)
+				break
+			}
+		}
+
+		if !alreadyExists {
+			currentRepos = append(currentRepos, newRepo)
+			addedRepos = append(addedRepos, newRepo)
+		}
 	}
 
+	// 更新したリストを保存
+	config.RepositoryList = strings.Join(currentRepos, ",")
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 
-	c.String(200, fmt.Sprintf("ラベル「%s」の通知対象リポジトリに `%s` を追加しました。", labelName, repoName))
+	// 応答メッセージを作成
+	var response string
+	if len(addedRepos) > 0 {
+		response = fmt.Sprintf("ラベル「%s」の通知対象リポジトリに以下を追加しました:\n`%s`", labelName, strings.Join(addedRepos, "`, `"))
+	}
+	
+	if len(alreadyExistsRepos) > 0 {
+		if response != "" {
+			response += "\n\n"
+		}
+		response += fmt.Sprintf("以下のリポジトリは既に通知対象でした:\n`%s`", strings.Join(alreadyExistsRepos, "`, `"))
+	}
+	
+	if response == "" {
+		response = "有効なリポジトリ名が指定されませんでした。"
+	}
+
+	c.String(200, response)
 }
 
 // リポジトリを削除
