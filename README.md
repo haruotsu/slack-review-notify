@@ -49,18 +49,21 @@ GITHUB_WEBHOOK_SECRET=your-github-webhook-secret
 ### 通知設定
 コマンド一覧 (**この設定は、`/slack-review-notify help`で確認できます。**)
 
-- `/slack-review-notify show`: 現在の設定を表示
-- `/slack-review-notify set-mention @user`: メンション先を設定
-- `/slack-review-notify add-reviewer @user1, @user2`: レビュワーを追加
-- `/slack-review-notify show-reviewers`: 登録済みのレビュワーリストを表示
-- `/slack-review-notify clear-reviewers`: レビュワーリストをクリア
-- `/slack-review-notify add-repo owner/repo`: 通知対象リポジトリを追加
-- `/slack-review-notify remove-repo owner/repo`: 通知対象リポジトリを削除
-- `/slack-review-notify set-label label-name`: 通知対象ラベルを設定
-- `/slack-review-notify set-reviewer-reminder-interval 30`: レビュー中のリマインド間隔（分）
-- `/slack-review-notify activate`: 通知を有効化
-- `/slack-review-notify deactivate`: 通知を無効化
-- `/slack-review-notify help`: ヘルプを表示
+コマンド形式: `/slack-review-notify [ラベル名] サブコマンド [引数]`
+
+**[ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します**
+
+- `/slack-review-notify [ラベル名] show`: 指定したラベルの設定を表示
+- `/slack-review-notify [ラベル名] set-mention @user`: メンション先を設定
+- `/slack-review-notify [ラベル名] add-reviewer @user1,@user2`: レビュワーを追加
+- `/slack-review-notify [ラベル名] show-reviewers`: 登録されたレビュワーリストを表示
+- `/slack-review-notify [ラベル名] clear-reviewers`: レビュワーリストをクリア
+- `/slack-review-notify [ラベル名] add-repo owner/repo`: 通知対象リポジトリを追加
+- `/slack-review-notify [ラベル名] remove-repo owner/repo`: 通知対象リポジトリを削除
+- `/slack-review-notify [ラベル名] set-label 新ラベル名`: ラベル名を変更
+- `/slack-review-notify [ラベル名] set-reviewer-reminder-interval 30`: レビュワー割り当て後のリマインド頻度を設定（分単位）
+- `/slack-review-notify [ラベル名] activate`: このラベルの通知を有効化
+- `/slack-review-notify [ラベル名] deactivate`: このラベルの通知を無効化
 
 ### レビュー管理
 通知メッセージから各種アクションを実行できます:

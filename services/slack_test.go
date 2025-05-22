@@ -547,3 +547,47 @@ func TestGetNextBusinessDayMorning(t *testing.T) {
 		assert.Equal(t, expectedWeekday, result.Weekday(), "平日の翌営業日は翌日")
 	}
 }
+
+func TestSelectRandomReviewer(t *testing.T) {
+	db := setupTestDB(t)
+
+	// テストデータ作成
+	testConfig := models.ChannelConfig{
+		ID:               "test-id",
+		SlackChannelID:   "C12345",
+		LabelName:        "needs-review",
+		DefaultMentionID: "U12345",
+		ReviewerList:     "U23456,U34567",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+
+	db.Create(&testConfig)
+
+	// 関数を実行
+	reviewerID := SelectRandomReviewer(db, "C12345", "needs-review")
+
+	// アサーション
+	assert.Contains(t, []string{"U23456", "U34567"}, reviewerID)
+
+	// レビュワーリストが空の場合のテスト
+	emptyConfig := models.ChannelConfig{
+		ID:               "empty-id",
+		SlackChannelID:   "C67890",
+		LabelName:        "needs-review",
+		DefaultMentionID: "U12345",
+		ReviewerList:     "",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+
+	db.Create(&emptyConfig)
+	defaultReviewer := SelectRandomReviewer(db, "C67890", "needs-review")
+	assert.Equal(t, "U12345", defaultReviewer)
+
+	// 存在しないチャンネル/ラベルのテスト
+	nonExistentReviewer := SelectRandomReviewer(db, "nonexistent", "needs-review")
+	assert.Equal(t, "", nonExistentReviewer)
+}

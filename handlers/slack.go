@@ -204,7 +204,15 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			oldReviewerID := taskToUpdate.Reviewer
 
 			// 新しいレビュワーをランダムに選択
-			newReviewerID := services.SelectRandomReviewer(db, taskToUpdate.SlackChannel)
+			newReviewerID := services.SelectRandomReviewer(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName)
+
+			// もしLabelNameが設定されていない既存のタスクの場合はデフォルト値を使用
+			if taskToUpdate.LabelName == "" {
+				// 既存のタスクのためデフォルト値を設定
+				taskToUpdate.LabelName = "needs-review"
+				// DBに保存（次回のために）
+				db.Save(&taskToUpdate)
+			}
 
 			// 新しいレビュワーが前と同じであれば、再度選択
 			// (レビュワーリストが1人しかない場合は同じになる)

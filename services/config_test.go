@@ -31,9 +31,9 @@ func TestGetChannelConfig(t *testing.T) {
 	testConfig := models.ChannelConfig{
 		ID:               "test-id",
 		SlackChannelID:   "C12345",
+		LabelName:        "needs-review",
 		DefaultMentionID: "U12345",
 		RepositoryList:   "owner/repo1,owner/repo2",
-		LabelName:        "needs-review",
 		IsActive:         true,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
@@ -42,7 +42,7 @@ func TestGetChannelConfig(t *testing.T) {
 	db.Create(&testConfig)
 
 	// テスト実行
-	config, err := GetChannelConfig(db, "C12345")
+	config, err := GetChannelConfig(db, "C12345", "needs-review")
 
 	// アサーション
 	assert.NoError(t, err)
@@ -53,7 +53,7 @@ func TestGetChannelConfig(t *testing.T) {
 	assert.True(t, config.IsActive)
 
 	// 存在しないチャンネルIDのテスト
-	_, err = GetChannelConfig(db, "nonexistent")
+	_, err = GetChannelConfig(db, "nonexistent", "needs-review")
 	assert.Error(t, err)
 }
 
@@ -64,9 +64,9 @@ func TestHasChannelConfig(t *testing.T) {
 	testConfig := models.ChannelConfig{
 		ID:               "test-id",
 		SlackChannelID:   "C12345",
+		LabelName:        "needs-review",
 		DefaultMentionID: "U12345",
 		RepositoryList:   "owner/repo1,owner/repo2",
-		LabelName:        "needs-review",
 		IsActive:         true,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
@@ -75,8 +75,9 @@ func TestHasChannelConfig(t *testing.T) {
 	db.Create(&testConfig)
 
 	// テスト実行とアサーション
-	assert.True(t, HasChannelConfig(db, "C12345"))
-	assert.False(t, HasChannelConfig(db, "nonexistent"))
+	assert.True(t, HasChannelConfig(db, "C12345", "needs-review"))
+	assert.False(t, HasChannelConfig(db, "nonexistent", "needs-review"))
+	assert.False(t, HasChannelConfig(db, "C12345", "other-label"))
 }
 
 func TestIsRepositoryWatched(t *testing.T) {

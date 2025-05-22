@@ -9,10 +9,10 @@ import (
 )
 
 // チャンネル設定を取得する関数
-func GetChannelConfig(db *gorm.DB, channelID string) (*models.ChannelConfig, error) {
+func GetChannelConfig(db *gorm.DB, channelID string, labelName string) (*models.ChannelConfig, error) {
 	var config models.ChannelConfig
 
-	err := db.Where("slack_channel_id = ? AND is_active = ?", channelID, true).First(&config).Error
+	err := db.Where("slack_channel_id = ? AND label_name = ? AND is_active = ?", channelID, labelName, true).First(&config).Error
 	if err != nil {
 		return nil, err
 	}
@@ -21,9 +21,9 @@ func GetChannelConfig(db *gorm.DB, channelID string) (*models.ChannelConfig, err
 }
 
 // チャンネル設定が存在するか確認する関数
-func HasChannelConfig(db *gorm.DB, channelID string) bool {
+func HasChannelConfig(db *gorm.DB, channelID string, labelName string) bool {
 	var count int64
-	db.Model(&models.ChannelConfig{}).Where("slack_channel_id = ? AND is_active = ?", channelID, true).Count(&count)
+	db.Model(&models.ChannelConfig{}).Where("slack_channel_id = ? AND label_name = ? AND is_active = ?", channelID, labelName, true).Count(&count)
 	return count > 0
 }
 

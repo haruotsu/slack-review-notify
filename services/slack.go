@@ -84,11 +84,11 @@ func ValidateSlackRequest(r *http.Request, body []byte) bool {
 }
 
 // メンション先ユーザーIDをランダムに選択する関数
-func SelectRandomReviewer(db *gorm.DB, channelID string) string {
+func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) string {
 	var config models.ChannelConfig
 
-	// チャンネルの設定を取得
-	if err := db.Where("slack_channel_id = ?", channelID).First(&config).Error; err != nil {
+	// チャンネルとラベルの設定を取得
+	if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config).Error; err != nil {
 		log.Printf("failed to get channel config: %v", err)
 		return ""
 	}
