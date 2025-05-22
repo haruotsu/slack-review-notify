@@ -50,7 +50,8 @@ func (h *GithubHandler) HandleWebhook(c *gin.Context) {
 			pr := e.PullRequest
 			labelName := e.Label.GetName()
 
-			// チャンネル設定を全て取得
+			// 有効なチャンネル設定を全て取得
+			// 複数ラベル対応: 同じチャンネルに複数の設定が存在する可能性がある
 			var configs []models.ChannelConfig
 			h.DB.Where("is_active = ?", true).Find(&configs)
 
@@ -60,6 +61,8 @@ func (h *GithubHandler) HandleWebhook(c *gin.Context) {
 					continue // 通知対象外のリポジトリはスキップ
 				}
 
+				// 設定のラベル名とPRに付けられたラベル名が一致するか確認
+				// 複数ラベル対応: 各設定はSlackChannelIDとLabelNameの複合ユニーク制約を持つ
 				if config.LabelName != "" && config.LabelName != labelName {
 					continue // 通知対象外のラベルはスキップ
 				}

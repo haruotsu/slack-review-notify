@@ -208,8 +208,10 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 
 			// 新しいレビュワーが前と同じであれば、再度選択
 			// (レビュワーリストが1人しかない場合は同じになる)
-			var config models.ChannelConfig
-			if newReviewerID == oldReviewerID && db.Where("slack_channel_id = ?", taskToUpdate.SlackChannel).First(&config).Error == nil {
+			configs, err := services.GetAllChannelConfigs(db, taskToUpdate.SlackChannel)
+			if newReviewerID == oldReviewerID && err == nil && len(configs) > 0 {
+				// 最初の設定を使用（後方互換性のため）
+				config := configs[0]
 				reviewers := strings.Split(config.ReviewerList, ",")
 				if len(reviewers) > 1 {
 					// リストから古いレビュワー以外を選ぶ
@@ -240,8 +242,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			db.Save(&taskToUpdate)
 
 			// レビュワーが変更されたことを通知
-			err := services.SendReviewerChangedMessage(taskToUpdate, oldReviewerID)
-			if err != nil {
+			if err = services.SendReviewerChangedMessage(taskToUpdate, oldReviewerID); err != nil {
 				log.Printf("reviewer change notification error: %v", err)
 			}
 

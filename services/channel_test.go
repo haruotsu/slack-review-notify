@@ -83,13 +83,15 @@ func TestCleanupArchivedChannels(t *testing.T) {
 	CleanupArchivedChannels(db)
 
 	// DBが更新されたことを確認
-	var config1 models.ChannelConfig
-	db.Where("slack_channel_id = ?", "C12345").First(&config1)
-	assert.True(t, config1.IsActive, "アクティブなチャンネルは有効のままであるべき")
+	var config1 []models.ChannelConfig
+	db.Where("slack_channel_id = ?", "C12345").Find(&config1)
+	assert.Equal(t, 1, len(config1), "アクティブなチャンネルの設定が1つあるべき")
+	assert.True(t, config1[0].IsActive, "アクティブなチャンネルは有効のままであるべき")
 
-	var config2 models.ChannelConfig
-	db.Where("slack_channel_id = ?", "C67890").First(&config2)
-	assert.False(t, config2.IsActive, "アーカイブされたチャンネルは無効になるべき")
+	var config2 []models.ChannelConfig
+	db.Where("slack_channel_id = ?", "C67890").Find(&config2)
+	assert.Equal(t, 1, len(config2), "アーカイブされたチャンネルの設定が1つあるべき")
+	assert.False(t, config2[0].IsActive, "アーカイブされたチャンネルは無効になるべき")
 
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
 

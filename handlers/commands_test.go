@@ -153,7 +153,7 @@ func TestHandleSlackCommand_AddRepo(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "通知対象リポジトリに")
+	assert.Contains(t, w.Body.String(), "リポジトリ `owner/repo2` を通知対象に")
 
 	// データベース内の値を確認
 	var config models.ChannelConfig
