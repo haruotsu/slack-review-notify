@@ -140,6 +140,36 @@ func TestCheckInReviewTasks(t *testing.T) {
 		UpdatedAt:    twoHoursAgo,
 	}
 
+	// チャンネル設定を作成（複数の設定）
+	configs := []models.ChannelConfig{
+		{
+			ID:                     "config-id-1",
+			SlackChannelID:         "C12345",
+			DefaultMentionID:       "U67890",
+			RepositoryList:         "owner/repo",
+			LabelName:              "needs-review",
+			IsActive:               true,
+			ReviewerReminderInterval: 30,
+			CreatedAt:              time.Now(),
+			UpdatedAt:              time.Now(),
+		},
+		{
+			ID:                     "config-id-2",
+			SlackChannelID:         "C12345",
+			DefaultMentionID:       "U67890",
+			RepositoryList:         "owner/repo2",
+			LabelName:              "priority-high",
+			IsActive:               true,
+			ReviewerReminderInterval: 60,
+			CreatedAt:              time.Now(),
+			UpdatedAt:              time.Now(),
+		},
+	}
+
+	for _, config := range configs {
+		db.Create(&config)
+	}
+
 	db.Create(&task)
 
 	// モックの設定

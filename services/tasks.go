@@ -37,12 +37,13 @@ func CheckInReviewTasks(db *gorm.DB) {
 		}
 
 		// チャンネル設定からリマインド頻度を取得
-		var config models.ChannelConfig
 		var reminderInterval int = 30 // デフォルト値（30分）
 
-		if err := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config).Error; err == nil {
-			if config.ReviewerReminderInterval > 0 {
-				reminderInterval = config.ReviewerReminderInterval
+		// すべての設定を取得して、最初の設定を使用（後方互換性のため）
+		var configs []models.ChannelConfig
+		if err := db.Where("slack_channel_id = ? AND is_active = ?", task.SlackChannel, true).Find(&configs).Error; err == nil && len(configs) > 0 {
+			if configs[0].ReviewerReminderInterval > 0 {
+				reminderInterval = configs[0].ReviewerReminderInterval
 			}
 		}
 

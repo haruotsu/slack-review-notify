@@ -297,9 +297,10 @@ func TestSendReminderMessage(t *testing.T) {
 	db.Where("id = ?", "test-id-2").First(&updatedTask)
 	assert.Equal(t, "archived", updatedTask.Status)
 
-	var updatedConfig models.ChannelConfig
-	db.Where("slack_channel_id = ?", "C67890").First(&updatedConfig)
-	assert.False(t, updatedConfig.IsActive)
+	var updatedConfigs []models.ChannelConfig
+	db.Where("slack_channel_id = ?", "C67890").Find(&updatedConfigs)
+	assert.Equal(t, 1, len(updatedConfigs))
+	assert.False(t, updatedConfigs[0].IsActive)
 
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
 }
@@ -414,9 +415,10 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 	db.Where("id = ?", "test-id-2").First(&updatedTask)
 	assert.Equal(t, "archived", updatedTask.Status)
 
-	var updatedConfig models.ChannelConfig
-	db.Where("slack_channel_id = ?", "C67890").First(&updatedConfig)
-	assert.False(t, updatedConfig.IsActive)
+	var updatedConfigs []models.ChannelConfig
+	db.Where("slack_channel_id = ?", "C67890").Find(&updatedConfigs)
+	assert.Equal(t, 1, len(updatedConfigs))
+	assert.False(t, updatedConfigs[0].IsActive)
 
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
 }
@@ -472,6 +474,69 @@ func TestSendReminderPausedMessage(t *testing.T) {
 			assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
 		})
 	}
+}
+
+// SelectRandomReviewerのテスト
+func TestSelectRandomReviewer(t *testing.T) {
+	// テスト用DBのセットアップ
+	db := setupTestDB(t)
+
+	// テストデータ作成
+	testConfig1 := models.ChannelConfig{
+		ID:               "test-id-1",
+		SlackChannelID:   "C12345",
+		DefaultMentionID: "U99999",
+		ReviewerList:     "U11111,U22222",
+		RepositoryList:   "owner/repo1",
+		LabelName:        "needs-review",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+
+	testConfig2 := models.ChannelConfig{
+		ID:               "test-id-2",
+		SlackChannelID:   "C12345",
+		DefaultMentionID: "U88888",
+		ReviewerList:     "U33333,U44444",
+		RepositoryList:   "owner/repo2",
+		LabelName:        "priority-high",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+
+	db.Create(&testConfig1)
+	db.Create(&testConfig2)
+
+	// 関数を実行
+	reviewerID := SelectRandomReviewer(db, "C12345")
+
+	// アサーション
+	// 最初の設定のレビュワーリストから選ばれているはず（後方互換性のため）
+	validReviewers := []string{"U11111", "U22222"}
+	assert.Contains(t, validReviewers, reviewerID, "レビュワーは最初の設定のリストから選ばれるべき")
+
+	// レビュワーリストが空の場合のテスト
+	testConfig3 := models.ChannelConfig{
+		ID:               "test-id-3",
+		SlackChannelID:   "C67890",
+		DefaultMentionID: "U55555",
+		ReviewerList:     "",
+		RepositoryList:   "owner/repo3",
+		LabelName:        "needs-review",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	db.Create(&testConfig3)
+
+	reviewerID = SelectRandomReviewer(db, "C67890")
+	assert.Equal(t, "U55555", reviewerID, "レビュワーリストが空の場合はデフォルトのメンション先が返される")
+
+	// 存在しないチャンネルIDのテスト
+	reviewerID = SelectRandomReviewer(db, "nonexistent")
+	assert.Equal(t, "", reviewerID, "存在しないチャンネルIDの場合は空文字が返される")
 }
 
 // IsChannelRelatedErrorのテスト

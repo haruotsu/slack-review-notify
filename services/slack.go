@@ -85,13 +85,14 @@ func ValidateSlackRequest(r *http.Request, body []byte) bool {
 
 // メンション先ユーザーIDをランダムに選択する関数
 func SelectRandomReviewer(db *gorm.DB, channelID string) string {
-	var config models.ChannelConfig
-
-	// チャンネルの設定を取得
-	if err := db.Where("slack_channel_id = ?", channelID).First(&config).Error; err != nil {
-		log.Printf("failed to get channel config: %v", err)
+	configs, err := GetAllChannelConfigs(db, channelID)
+	if err != nil || len(configs) == 0 {
+		log.Printf("failed to get channel configs: %v", err)
 		return ""
 	}
+
+	// 後方互換性のため、最初の設定を使用
+	config := configs[0]
 
 	// レビュワーリストが空の場合はデフォルトのメンション先を返す
 	if config.ReviewerList == "" {
@@ -252,12 +253,14 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 			db.Save(&task)
 
 			// チャンネル設定も無効化
-			var config models.ChannelConfig
-			if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
-				config.IsActive = false
-				config.UpdatedAt = time.Now()
-				db.Save(&config)
-				log.Printf("channel %s config is deactivated", task.SlackChannel)
+			var configs []models.ChannelConfig
+			if result := db.Where("slack_channel_id = ?", task.SlackChannel).Find(&configs); result.Error == nil && len(configs) > 0 {
+				for i := range configs {
+					configs[i].IsActive = false
+					configs[i].UpdatedAt = time.Now()
+					db.Save(&configs[i])
+				}
+				log.Printf("channel %s configs are deactivated (%d configs)", task.SlackChannel, len(configs))
 			}
 
 			return fmt.Errorf("channel is archived or not accessible: %s", task.SlackChannel)
@@ -273,12 +276,14 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 		db.Save(&task)
 
 		// チャンネル設定も無効化
-		var config models.ChannelConfig
-		if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
-			config.IsActive = false
-			config.UpdatedAt = time.Now()
-			db.Save(&config)
-			log.Printf("channel %s config is deactivated", task.SlackChannel)
+		var configs []models.ChannelConfig
+		if result := db.Where("slack_channel_id = ?", task.SlackChannel).Find(&configs); result.Error == nil && len(configs) > 0 {
+			for i := range configs {
+				configs[i].IsActive = false
+				configs[i].UpdatedAt = time.Now()
+				db.Save(&configs[i])
+			}
+			log.Printf("channel %s configs are deactivated (%d configs)", task.SlackChannel, len(configs))
 		}
 
 		return fmt.Errorf("channel is archived: %s", task.SlackChannel)
