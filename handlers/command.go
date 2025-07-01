@@ -132,7 +132,13 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			switch subCommand {
 			case "show":
 				// 現在の設定を表示
-				showConfig(c, db, channelID, labelName)
+				if isSubCommand && len(parts) == 1 {
+					// ラベル名が指定されていない場合はすべてのラベルを表示
+					showAllLabels(c, db, channelID)
+				} else {
+					// 特定のラベルの設定を表示
+					showConfig(c, db, channelID, labelName)
+				}
 
 			case "set-mention":
 				if params == "" {
@@ -242,6 +248,37 @@ PRにどのラベルが付いているかで、適切な設定が自動的に使
 [ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します`
 
 	c.String(200, help)
+}
+
+// すべてのラベル設定を表示
+func showAllLabels(c *gin.Context, db *gorm.DB, channelID string) {
+	var configs []models.ChannelConfig
+	
+	err := db.Where("slack_channel_id = ?", channelID).Find(&configs).Error
+	if err != nil {
+		c.String(200, "設定の取得中にエラーが発生しました。")
+		return
+	}
+	
+	if len(configs) == 0 {
+		c.String(200, "このチャンネルにはまだ設定がありません。/slack-review-notify [ラベル名] set-mention コマンドで設定を開始してください。")
+		return
+	}
+	
+	response := "*このチャンネルで設定済みのラベル*\n"
+	
+	for _, config := range configs {
+		status := "無効"
+		if config.IsActive {
+			status = "有効"
+		}
+		
+		response += fmt.Sprintf("• `%s` - %s (<@%s>)\n", config.LabelName, status, config.DefaultMentionID)
+	}
+	
+	response += "\n特定のラベルの詳細設定を確認するには: `/slack-review-notify [ラベル名] show`"
+	
+	c.String(200, response)
 }
 
 // 設定を表示
