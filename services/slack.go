@@ -20,11 +20,6 @@ import (
 // テストモードかどうかを示すフラグ
 var IsTestMode bool
 
-// SetTestMode sets the test mode flag
-func SetTestMode(enabled bool) {
-	IsTestMode = enabled
-}
-
 type SlackMessage struct {
 	Channel string  `json:"channel"`
 	Blocks  []Block `json:"blocks"`
@@ -183,7 +178,6 @@ func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, 
 	defer resp.Body.Close()
 
 	bodyBytes, _ := io.ReadAll(resp.Body)
-	fmt.Println("slack response:", string(bodyBytes))
 
 	var slackResp SlackPostResponse
 	if err := json.Unmarshal(bodyBytes, &slackResp); err != nil {
