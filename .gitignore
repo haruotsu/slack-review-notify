@@ -9,3 +9,4 @@
 *.log.*.*.*.*.*
 slack-review-notify
 CLAUDE.local.md
+coverage.html
