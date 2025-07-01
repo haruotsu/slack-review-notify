@@ -553,20 +553,46 @@ func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) er
 
 // 翌営業日の朝（10:00）の時間を取得する関数
 func GetNextBusinessDayMorning() time.Time {
-	now := time.Now()
-	nextDay := now.AddDate(0, 0, 1) // まず翌日を取得
+	return GetNextBusinessDayMorningWithTime(time.Now())
+}
 
-	// 10:00に設定する
-	nextDayMorning := time.Date(nextDay.Year(), nextDay.Month(), nextDay.Day(), 10, 0, 0, 0, nextDay.Location())
+// 指定された時刻から翌営業日の朝（10:00）の時間を取得する関数
+func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
+	// 今日の10:00を作成
+	todayMorning := time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, now.Location())
 
-	// 土曜日の場合、月曜日にする（2日進める）
-	if nextDayMorning.Weekday() == time.Saturday {
-		nextDayMorning = nextDayMorning.AddDate(0, 0, 2)
+	// 現在の曜日と時刻を確認
+	weekday := now.Weekday()
+	
+	// 結果を格納する変数
+	var nextBusinessDayMorning time.Time
+
+	switch weekday {
+	case time.Monday, time.Tuesday, time.Wednesday, time.Thursday:
+		// 月〜木の場合
+		if now.Before(todayMorning) {
+			// 10:00前なら今日の10:00
+			nextBusinessDayMorning = todayMorning
+		} else {
+			// 10:00以降なら翌日の10:00
+			nextBusinessDayMorning = todayMorning.AddDate(0, 0, 1)
+		}
+	case time.Friday:
+		// 金曜日の場合
+		if now.Before(todayMorning) {
+			// 10:00前なら今日の10:00
+			nextBusinessDayMorning = todayMorning
+		} else {
+			// 10:00以降なら月曜日の10:00（3日後）
+			nextBusinessDayMorning = todayMorning.AddDate(0, 0, 3)
+		}
+	case time.Saturday:
+		// 土曜日の場合、月曜日の10:00（2日後）
+		nextBusinessDayMorning = todayMorning.AddDate(0, 0, 2)
+	case time.Sunday:
+		// 日曜日の場合、月曜日の10:00（1日後）
+		nextBusinessDayMorning = todayMorning.AddDate(0, 0, 1)
 	}
-	// 日曜日の場合、月曜日にする（1日進める）
-	if nextDayMorning.Weekday() == time.Sunday {
-		nextDayMorning = nextDayMorning.AddDate(0, 0, 1)
-	}
 
-	return nextDayMorning
+	return nextBusinessDayMorning
 }
