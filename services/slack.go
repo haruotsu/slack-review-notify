@@ -20,6 +20,11 @@ import (
 // テストモードかどうかを示すフラグ
 var IsTestMode bool
 
+// SetTestMode sets the test mode flag
+func SetTestMode(enabled bool) {
+	IsTestMode = enabled
+}
+
 type SlackMessage struct {
 	Channel string  `json:"channel"`
 	Blocks  []Block `json:"blocks"`
@@ -595,4 +600,53 @@ func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
 	}
 
 	return nextBusinessDayMorning
+}
+
+// UpdateSlackMessageForCompletedTask はタスクが完了したことを示すようにSlackメッセージを更新する
+func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
+	if IsTestMode {
+		log.Printf("test mode: would update slack message for completed task: %s", task.ID)
+		return nil
+	}
+
+	// 完了メッセージのブロックを作成
+	blocks := []map[string]interface{}{
+		{
+			"type": "section",
+			"text": map[string]string{
+				"type": "mrkdwn",
+				"text": fmt.Sprintf("✅ *%s*\n🔗 %s\n\n*レビュー完了*: このPRのラベルが外れたため、レビュータスクを終了しました。", task.Title, task.PRURL),
+			},
+		},
+	}
+
+	// メッセージ更新API呼び出し
+	body := map[string]interface{}{
+		"channel": task.SlackChannel,
+		"ts":      task.SlackTS,
+		"blocks":  blocks,
+	}
+
+	jsonData, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", "https://slack.com/api/chat.update", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("slack API error: %s", string(body))
+	}
+
+	log.Printf("slack message updated for completed task: %s", task.ID)
+	return nil
 }
