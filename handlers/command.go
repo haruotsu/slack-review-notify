@@ -233,7 +233,8 @@ func showHelp(c *gin.Context) {
 PRにどのラベルが付いているかで、適切な設定が自動的に使われます。
 
 *使用可能なコマンド*
-- /slack-review-notify [ラベル名] show: 指定したラベルの設定を表示
+- /slack-review-notify show: このチャンネルで設定済みのすべてのラベルを一覧表示
+- /slack-review-notify [ラベル名] show: 指定したラベルの詳細設定を表示
 - /slack-review-notify [ラベル名] set-mention @user: メンション先を設定
 - /slack-review-notify [ラベル名] add-reviewer @user1,@user2: レビュワーを追加（カンマ区切り）
 - /slack-review-notify [ラベル名] show-reviewers: 登録されたレビュワーリストを表示
