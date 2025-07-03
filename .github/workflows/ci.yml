@@ -2,9 +2,14 @@ name: Go CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   lint:
@@ -44,13 +49,17 @@ jobs:
         run: go mod download
 
       - name: Run tests
-        run: go test -v -coverprofile=coverage.out ./...
+        run: |
+          go test -v -coverprofile=coverage.out ./...
+          go tool cover -html=coverage.out -o coverage.html
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: coverage.out
+          path: |
+            coverage.out
+            coverage.html
 
   build:
     name: Build
@@ -81,7 +90,7 @@ jobs:
     name: Create Tag and Release
     runs-on: ubuntu-latest
     needs: [build]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
       packages: write
@@ -95,7 +104,7 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          release_branches: main,master
+          release_branches: main
           default_bump: patch
           tag_prefix: v
 

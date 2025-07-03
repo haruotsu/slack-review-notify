@@ -61,6 +61,8 @@ func TestHandleSlackCommand_Help(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "Review通知Bot設定コマンド")
 	assert.Contains(t, w.Body.String(), "複数ラベル設定の使い方")
 	assert.Contains(t, w.Body.String(), "異なるラベルごとに別々のメンション先")
+	assert.Contains(t, w.Body.String(), "このチャンネルで設定済みのすべてのラベルを一覧表示")
+	assert.Contains(t, w.Body.String(), "指定したラベルの詳細設定を表示")
 }
 
 func TestHandleSlackCommand_Show(t *testing.T) {
@@ -94,8 +96,45 @@ func TestHandleSlackCommand_Show(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "このチャンネルで設定済みのラベル")
+	assert.Contains(t, w.Body.String(), "needs-review")
+	assert.Contains(t, w.Body.String(), "有効")
+}
+
+func TestHandleSlackCommand_ShowSpecificLabel(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupTestRouter(db)
+
+	// テスト用のチャンネル設定を作成
+	testConfig := models.ChannelConfig{
+		ID:               "test-id",
+		SlackChannelID:   "C12345",
+		LabelName:        "needs-review",
+		DefaultMentionID: "U12345",
+		RepositoryList:   "owner/repo1,owner/repo2",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	db.Create(&testConfig)
+
+	// 特定のラベルの詳細設定を表示するテスト
+	form := url.Values{}
+	form.Add("command", "/slack-review-notify")
+	form.Add("text", "needs-review show")
+	form.Add("channel_id", "C12345")
+	form.Add("user_id", "U12345")
+
+	req, _ := http.NewRequest("POST", "/slack/command", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "このチャンネルのラベル「needs-review」のレビュー通知設定")
 	assert.Contains(t, w.Body.String(), "有効")
+	assert.Contains(t, w.Body.String(), "owner/repo1,owner/repo2")
 }
 
 func TestHandleSlackCommand_SetMention(t *testing.T) {
@@ -197,4 +236,80 @@ func TestHandleSlackCommand_WithLabel(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "このチャンネルのラベル「bug」のレビュー通知設定")
+}
+
+func TestHandleSlackCommand_ShowAllLabels(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupTestRouter(db)
+
+	// テスト用の複数のチャンネル設定を作成
+	testConfigs := []models.ChannelConfig{
+		{
+			ID:               "test-id-1",
+			SlackChannelID:   "C12345",
+			LabelName:        "needs-review",
+			DefaultMentionID: "U12345",
+			IsActive:         true,
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		},
+		{
+			ID:               "test-id-2",
+			SlackChannelID:   "C12345",
+			LabelName:        "bug",
+			DefaultMentionID: "U67890",
+			IsActive:         false,
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		},
+		{
+			ID:               "test-id-3",
+			SlackChannelID:   "C12345",
+			LabelName:        "feature",
+			DefaultMentionID: "U11111",
+			IsActive:         true,
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		},
+		{
+			ID:               "test-id-4",
+			SlackChannelID:   "C67890", // 別のチャンネル
+			LabelName:        "security",
+			DefaultMentionID: "U22222",
+			IsActive:         true,
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		},
+	}
+
+	for _, config := range testConfigs {
+		db.Create(&config)
+	}
+
+	// 引数なしのshowコマンドのテスト（すべてのラベルを表示）
+	form := url.Values{}
+	form.Add("command", "/slack-review-notify")
+	form.Add("text", "show")
+	form.Add("channel_id", "C12345")
+	form.Add("user_id", "U12345")
+
+	req, _ := http.NewRequest("POST", "/slack/command", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+	responseBody := w.Body.String()
+	
+	// 現在のチャンネルのラベルのみが表示されることを確認
+	assert.Contains(t, responseBody, "このチャンネルで設定済みのラベル")
+	assert.Contains(t, responseBody, "needs-review")
+	assert.Contains(t, responseBody, "bug")
+	assert.Contains(t, responseBody, "feature")
+	assert.Contains(t, responseBody, "有効")
+	assert.Contains(t, responseBody, "無効")
+	
+	// 他のチャンネルのラベルは表示されないことを確認
+	assert.NotContains(t, responseBody, "security")
 }
