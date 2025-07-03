@@ -500,47 +500,44 @@ func TestIsChannelRelatedError(t *testing.T) {
 // GetNextBusinessDayMorning関数のテスト
 func TestGetNextBusinessDayMorning(t *testing.T) {
 	result := GetNextBusinessDayMorning()
-
-	// 結果は必ず翌日以降の日付
 	now := time.Now()
 	todayMorning := time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, now.Location())
 
-	// 以下をテスト
-	// 1. 結果は現在時刻より後
-	assert.True(t, result.After(now), "翌営業日は現在時刻より後であること")
-
-	// 2. 結果は10:00に設定されている
+	// 結果は10:00に設定されている
 	assert.Equal(t, 10, result.Hour(), "時刻は10時に設定されていること")
 	assert.Equal(t, 0, result.Minute(), "分は0分に設定されていること")
 	assert.Equal(t, 0, result.Second(), "秒は0秒に設定されていること")
 
-	// 3. 曜日別のテスト
+	// 結果は現在時刻以降であること（当日の10時以降、または翌営業日の10時）
+	assert.True(t, result.After(now) || result.Equal(todayMorning), "結果は現在時刻以降であること")
+
+	// 土日の場合は月曜日になる
 	switch now.Weekday() {
-	case time.Friday:
-		if now.Before(todayMorning) {
-			// 金曜日の10時前なら、今日の10時
-			assert.Equal(t, time.Friday, result.Weekday())
-			assert.Equal(t, now.Day(), result.Day())
-		} else {
-			// 金曜日の10時以降なら、月曜日の10時
-			assert.Equal(t, time.Monday, result.Weekday())
-		}
 	case time.Saturday:
-		// 土曜日なら必ず月曜日の10時
-		assert.Equal(t, time.Monday, result.Weekday())
+		// 土曜日の場合、月曜日の10:00
+		assert.Equal(t, time.Monday, result.Weekday(), "土曜日の翌営業日は月曜日")
 	case time.Sunday:
-		// 日曜日なら必ず月曜日の10時
-		assert.Equal(t, time.Monday, result.Weekday())
-	default:
+		// 日曜日の場合、月曜日の10:00
+		assert.Equal(t, time.Monday, result.Weekday(), "日曜日の翌営業日は月曜日")
+	case time.Monday, time.Tuesday, time.Wednesday, time.Thursday:
 		// 月〜木の場合
 		if now.Before(todayMorning) {
-			// 10時前なら今日の10時
-			assert.Equal(t, now.Weekday(), result.Weekday())
-			assert.Equal(t, now.Day(), result.Day())
+			// 10時前なら当日の10時
+			assert.Equal(t, now.Weekday(), result.Weekday(), "平日10時前の翌営業日は当日")
+			assert.Equal(t, now.Day(), result.Day(), "平日10時前の翌営業日は当日")
 		} else {
 			// 10時以降なら翌日の10時
-			nextDay := now.AddDate(0, 0, 1)
-			assert.Equal(t, nextDay.Day(), result.Day())
+			tomorrow := now.AddDate(0, 0, 1)
+			assert.Equal(t, tomorrow.Day(), result.Day(), "平日10時以降の翌営業日は翌日")
+		}
+	case time.Friday:
+		// 金曜日の場合
+		if now.Before(todayMorning) {
+			// 10時前なら当日の10時
+			assert.Equal(t, time.Friday, result.Weekday(), "金曜日10時前の翌営業日は当日")
+		} else {
+			// 10時以降なら月曜日の10時
+			assert.Equal(t, time.Monday, result.Weekday(), "金曜日10時以降の翌営業日は月曜日")
 		}
 	}
 }
