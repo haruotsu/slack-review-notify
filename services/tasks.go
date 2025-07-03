@@ -40,7 +40,13 @@ func CheckInReviewTasks(db *gorm.DB) {
 		var config models.ChannelConfig
 		var reminderInterval int = 30 // デフォルト値（30分）
 
-		if err := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config).Error; err == nil {
+		// LabelNameも考慮して設定を取得
+		labelName := task.LabelName
+		if labelName == "" {
+			labelName = "needs-review" // デフォルトのラベル名
+		}
+
+		if err := db.Where("slack_channel_id = ? AND label_name = ?", task.SlackChannel, labelName).First(&config).Error; err == nil {
 			if config.ReviewerReminderInterval > 0 {
 				reminderInterval = config.ReviewerReminderInterval
 			}
