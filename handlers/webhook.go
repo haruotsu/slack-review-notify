@@ -7,30 +7,37 @@ import (
 	"os"
 	"time"
 
+	"slack-review-notify/models"
+	"slack-review-notify/services"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-github/v71/github"
 	"github.com/google/uuid"
-	"slack-review-notify/models"
-	"slack-review-notify/services"
 	"gorm.io/gorm"
 )
 
 func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		eventType := c.GetHeader("X-GitHub-Event")
+		log.Printf("GitHub Webhook received: event_type=%s", eventType)
+
 		payload, err := github.ValidatePayload(c.Request, []byte(os.Getenv("GITHUB_WEBHOOK_SECRET")))
 		if err != nil {
+			log.Printf("Webhook validation error: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 			return
 		}
 
 		event, err := github.ParseWebHook(github.WebHookType(c.Request), payload)
 		if err != nil {
+			log.Printf("Webhook parse error: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot parse webhook"})
 			return
 		}
 
 		switch e := event.(type) {
 		case *github.PullRequestEvent:
+			log.Printf("PullRequestEvent received: action=%s", e.GetAction())
 			if e.Action != nil && e.Label != nil {
 				switch *e.Action {
 				case "labeled":
@@ -40,13 +47,17 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 				}
 			}
 		case *github.PullRequestReviewEvent:
+			log.Printf("PullRequestReviewEvent received: action=%s", e.GetAction())
 			if e.Action != nil && *e.Action == "submitted" {
 				handleReviewSubmittedEvent(c, db, e)
 			}
 		case *github.PullRequestReviewCommentEvent:
+			log.Printf("PullRequestReviewCommentEvent received: action=%s", e.GetAction())
 			if e.Action != nil && *e.Action == "created" {
 				handleReviewCommentCreatedEvent(c, db, e)
 			}
+		default:
+			log.Printf("Unknown event type received: %T", e)
 		}
 
 		c.Status(http.StatusOK)
@@ -87,7 +98,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 			if err := db.Save(&config).Error; err != nil {
 				log.Printf("channel config update error: %v", err)
 			} else {
-				log.Printf("✅ archived channel %s config is deactivated", config.SlackChannelID)
+				log.Printf("archived channel %s config is deactivated", config.SlackChannelID)
 			}
 			continue
 		}
