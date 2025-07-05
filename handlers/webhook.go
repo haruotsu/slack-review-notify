@@ -51,11 +51,6 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 			if e.Action != nil && *e.Action == "submitted" {
 				handleReviewSubmittedEvent(c, db, e)
 			}
-		case *github.PullRequestReviewCommentEvent:
-			log.Printf("PullRequestReviewCommentEvent received: action=%s", e.GetAction())
-			if e.Action != nil && *e.Action == "created" {
-				handleReviewCommentCreatedEvent(c, db, e)
-			}
 		default:
 			log.Printf("Unknown event type received: %T", e)
 		}
@@ -211,6 +206,7 @@ func handleUnlabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEven
 	}
 }
 
+
 // レビューが提出された際の処理
 func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestReviewEvent) {
 	pr := e.PullRequest
@@ -264,54 +260,5 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 		log.Printf("task auto-completed due to review: id=%s, repo=%s, pr=%d, reviewer=%s",
 			task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
-	}
-}
-
-// レビューコメントが作成された際の処理
-func handleReviewCommentCreatedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestReviewCommentEvent) {
-	pr := e.PullRequest
-	repo := e.Repo
-	comment := e.Comment
-	repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
-
-	log.Printf("handling review comment created event: repo=%s, pr=%d, commenter=%s",
-		repoFullName, pr.GetNumber(), comment.GetUser().GetLogin())
-
-	// 該当するタスクを検索
-	var tasks []models.ReviewTask
-	result := db.Where("repo = ? AND pr_number = ? AND status IN ?",
-		repoFullName, pr.GetNumber(), []string{"in_review", "pending"}).Find(&tasks)
-
-	if result.Error != nil {
-		log.Printf("review comment task search error: %v", result.Error)
-		return
-	}
-
-	if len(tasks) == 0 {
-		log.Printf("no active tasks found for review comment event: repo=%s, pr=%d", repoFullName, pr.GetNumber())
-		return
-	}
-
-	// 各タスクについて完了通知を送信
-	for _, task := range tasks {
-		// レビューコメント完了通知をスレッドに投稿
-		if err := services.SendReviewCompletedAutoNotification(task, comment.GetUser().GetLogin(), "commented"); err != nil {
-			log.Printf("failed to send review comment notification: %v", err)
-			// チャンネル関連のエラー（アーカイブ済み、権限なしなど）の場合はタスクを完了にする
-			if !services.IsChannelRelatedError(err) {
-				continue
-			}
-		}
-
-		// タスクのステータスを完了に更新
-		task.Status = "completed"
-		task.UpdatedAt = time.Now()
-		if err := db.Save(&task).Error; err != nil {
-			log.Printf("failed to update task status to completed: %v", err)
-			continue
-		}
-
-		log.Printf("task auto-completed due to review comment: id=%s, repo=%s, pr=%d, commenter=%s",
-			task.ID, repoFullName, pr.GetNumber(), comment.GetUser().GetLogin())
 	}
 }
