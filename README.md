@@ -28,8 +28,7 @@ GitHubのリポジトリのSettingsのWebhooksから、以下を設定してく�
 - Enable SSL verification: チェックを入れる
 - Let me select individual eventsにチェックを入れて、以下のイベントを有効化:
   - **Pull requests**: PRのラベル付け/削除を検知
-  - **Pull request reviews**: レビューの承認/変更要求を検知（自動完了通知機能）
-  - **Pull request review comments**: レビューコメントを検知（自動完了通知機能）
+  - **Pull request reviews**: レビューの承認/変更要求/コメントを検知（自動完了通知機能）
 
 ### 環境変数
 `.env`ファイルを作成し、以下の値を設定します:
