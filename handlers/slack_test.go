@@ -236,3 +236,98 @@ func TestHandleSlackAction_PauseReminder_Hours(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleSlackAction_PauseReminderInitial(t *testing.T) {
+	// テストモードを有効化（署名検証をスキップ）
+	services.IsTestMode = true
+	
+	// テスト用のDB作成
+	db := setupTestDB(t)
+
+	// テスト用のタスクを作成
+	task := models.ReviewTask{
+		ID:           "test-task-initial",
+		PRURL:        "https://github.com/test/test/pull/1",
+		Repo:         "test/test",
+		PRNumber:     1,
+		Title:        "Test PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		Reviewer:     "U54321",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	// モックSlackペイロード
+	payload := SlackActionPayload{
+		Type: "block_actions",
+		User: struct {
+			ID string `json:"id"`
+		}{ID: "U12345"},
+		Actions: []struct {
+			ActionID string `json:"action_id"`
+			Value    string `json:"value,omitempty"`
+			SelectedOption struct {
+				Value string `json:"value"`
+				Text  struct {
+					Text string `json:"text"`
+				} `json:"text"`
+			} `json:"selected_option,omitempty"`
+		}{
+			{
+				ActionID: "pause_reminder_initial",
+				SelectedOption: struct {
+					Value string `json:"value"`
+					Text  struct {
+						Text string `json:"text"`
+					} `json:"text"`
+				}{
+					Value: "test-task-initial:4h",
+					Text: struct {
+						Text string `json:"text"`
+					}{
+						Text: "4時間停止",
+					},
+				},
+			},
+		},
+		Container: struct {
+			ChannelID string `json:"channel_id"`
+		}{ChannelID: "C12345"},
+	}
+
+	// JSON化
+	payloadJSON, _ := json.Marshal(payload)
+
+	// リクエスト作成
+	form := url.Values{}
+	form.Add("payload", string(payloadJSON))
+
+	req, _ := http.NewRequest("POST", "/slack/actions", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	// レスポンス記録
+	w := httptest.NewRecorder()
+
+	// ハンドラー実行
+	handler := HandleSlackAction(db)
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+	handler(c)
+
+	// ステータスコード確認
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// DBが更新されたことを確認
+	var updatedTask models.ReviewTask
+	err := db.Where("id = ?", "test-task-initial").First(&updatedTask).Error
+	assert.NoError(t, err)
+	assert.NotNil(t, updatedTask.ReminderPausedUntil)
+
+	// 4時間後に設定されているか確認
+	expected := time.Now().Add(4 * time.Hour)
+	actual := *updatedTask.ReminderPausedUntil
+	assert.WithinDuration(t, expected, actual, 10*time.Second)
+}
