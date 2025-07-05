@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-github/v71/github"
+	"github.com/h2non/gock"
 	"slack-review-notify/models"
 	"slack-review-notify/services"
 	"github.com/stretchr/testify/assert"
@@ -149,4 +152,167 @@ func TestUnlabeledEventWithoutExistingTask(t *testing.T) {
 	var taskCount int64
 	db.Model(&models.ReviewTask{}).Where("pr_number = ?", 456).Count(&taskCount)
 	assert.Equal(t, int64(0), taskCount)
+}
+
+func TestHandleReviewSubmittedEvent(t *testing.T) {
+	// テスト用DB
+	db := setupTestDB(t)
+	
+	// テスト前の環境変数を保存し、テスト後に復元
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+
+	// テスト用の環境変数を設定
+	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	// モックの設定
+	defer gock.Off() // テスト終了時にモックをクリア
+
+	// Slack API成功レスポンスのモック
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		MatchHeader("Authorization", "Bearer test-token").
+		Reply(200).
+		JSON(map[string]interface{}{
+			"ok": true,
+		})
+
+	// テスト用タスクを作成
+	task := models.ReviewTask{
+		ID:           "test-task-review",
+		PRURL:        "https://github.com/owner/repo/pull/123",
+		Repo:         "owner/repo",
+		PRNumber:     123,
+		Title:        "Test PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	// テスト用の PullRequestReviewEvent JSON
+	payload := `{
+		"action": "submitted",
+		"pull_request": {
+			"number": 123,
+			"html_url": "https://github.com/owner/repo/pull/123"
+		},
+		"repository": {
+			"full_name": "owner/repo",
+			"owner": {
+				"login": "owner"
+			},
+			"name": "repo"
+		},
+		"review": {
+			"state": "approved",
+			"user": {
+				"login": "reviewer123"
+			}
+		}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+
+	r := gin.Default()
+	r.POST("/webhook", HandleGitHubWebhook(db))
+	r.ServeHTTP(w, req)
+
+	// ステータスコード確認
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// DBが更新されたことを確認
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "test-task-review").First(&updatedTask)
+	assert.Equal(t, "completed", updatedTask.Status)
+	
+	// モックが使用されたことを確認
+	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+}
+
+func TestHandleReviewCommentCreatedEvent(t *testing.T) {
+	// テスト用DB
+	db := setupTestDB(t)
+	
+	// テスト前の環境変数を保存し、テスト後に復元
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+
+	// テスト用の環境変数を設定
+	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	// モックの設定
+	defer gock.Off() // テスト終了時にモックをクリア
+
+	// Slack API成功レスポンスのモック
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		MatchHeader("Authorization", "Bearer test-token").
+		Reply(200).
+		JSON(map[string]interface{}{
+			"ok": true,
+		})
+
+	// テスト用タスクを作成
+	task := models.ReviewTask{
+		ID:           "test-task-comment",
+		PRURL:        "https://github.com/owner/repo/pull/456",
+		Repo:         "owner/repo",
+		PRNumber:     456,
+		Title:        "Test PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	// テスト用の PullRequestReviewCommentEvent JSON
+	payload := `{
+		"action": "created",
+		"pull_request": {
+			"number": 456,
+			"html_url": "https://github.com/owner/repo/pull/456"
+		},
+		"repository": {
+			"full_name": "owner/repo",
+			"owner": {
+				"login": "owner"
+			},
+			"name": "repo"
+		},
+		"comment": {
+			"user": {
+				"login": "commenter456"
+			}
+		}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review_comment")
+
+	w := httptest.NewRecorder()
+
+	r := gin.Default()
+	r.POST("/webhook", HandleGitHubWebhook(db))
+	r.ServeHTTP(w, req)
+
+	// ステータスコード確認
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// DBが更新されたことを確認
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "test-task-comment").First(&updatedTask)
+	assert.Equal(t, "completed", updatedTask.Status)
+	
+	// モックが使用されたことを確認
+	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
 }

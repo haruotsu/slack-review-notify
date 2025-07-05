@@ -756,3 +756,26 @@ func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
 	log.Printf("slack message updated for completed task: %s", task.ID)
 	return nil
 }
+
+// レビュー完了の自動通知を送信する関数
+func SendReviewCompletedAutoNotification(task models.ReviewTask, reviewerLogin string, reviewState string) error {
+	var message string
+	var emoji string
+
+	switch reviewState {
+	case "approved":
+		emoji = "✅"
+		message = fmt.Sprintf("%s %sさんがレビューを承認しました！", emoji, reviewerLogin)
+	case "changes_requested":
+		emoji = "🔄"
+		message = fmt.Sprintf("%s %sさんが変更を要求しました", emoji, reviewerLogin)
+	case "commented":
+		emoji = "💬"
+		message = fmt.Sprintf("%s %sさんがレビューコメントを残しました", emoji, reviewerLogin)
+	default:
+		emoji = "👀"
+		message = fmt.Sprintf("%s %sさんがレビューしました", emoji, reviewerLogin)
+	}
+
+	return PostToThread(task.SlackChannel, task.SlackTS, message)
+}

@@ -585,3 +585,55 @@ func TestSelectRandomReviewer(t *testing.T) {
 	nonExistentReviewer := SelectRandomReviewer(db, "nonexistent", "needs-review")
 	assert.Equal(t, "", nonExistentReviewer)
 }
+
+func TestSendReviewCompletedAutoNotification(t *testing.T) {
+	// テスト前の環境変数を保存し、テスト後に復元
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+
+	// テスト用の環境変数を設定
+	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	// モックの設定
+	defer gock.Off() // テスト終了時にモックをクリア
+
+	testCases := []struct {
+		name         string
+		reviewerLogin string
+		reviewState  string
+		expectedMsg  string
+	}{
+		{"承認", "reviewer1", "approved", "✅ reviewer1さんがレビューを承認しました！"},
+		{"変更要求", "reviewer2", "changes_requested", "🔄 reviewer2さんが変更を要求しました"},
+		{"コメント", "reviewer3", "commented", "💬 reviewer3さんがレビューコメントを残しました"},
+		{"その他", "reviewer4", "other", "👀 reviewer4さんがレビューしました"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// スレッドメッセージ送信のモック
+			gock.New("https://slack.com").
+				Post("/api/chat.postMessage").
+				MatchHeader("Authorization", "Bearer test-token").
+				Reply(200).
+				JSON(map[string]interface{}{
+					"ok": true,
+				})
+
+			// テスト用のタスクを作成
+			task := models.ReviewTask{
+				ID:           "test-id",
+				SlackTS:      "1234.5678",
+				SlackChannel: "C12345",
+				Status:       "in_review",
+			}
+
+			// 関数を実行
+			err := SendReviewCompletedAutoNotification(task, tc.reviewerLogin, tc.reviewState)
+
+			// アサーション
+			assert.NoError(t, err)
+			assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+		})
+	}
+}
