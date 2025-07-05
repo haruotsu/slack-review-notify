@@ -87,7 +87,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 		actionID := payload.Actions[0].ActionID
 
 		// 「リマインダー停止」の選択メニュー処理
-		if actionID == "pause_reminder" {
+		if actionID == "pause_reminder" || actionID == "pause_reminder_initial" {
 			// 選択メニューからの値を取得
 			var selectedValue string
 			if payload.Actions[0].SelectedOption.Value != "" {

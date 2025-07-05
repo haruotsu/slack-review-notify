@@ -233,6 +233,73 @@ func PostToThread(channel, ts, message string) error {
 	return nil
 }
 
+// スレッドにボタン付きメッセージを投稿する関数
+func PostToThreadWithButtons(channel, ts, message string, taskID string) error {
+	blocks := []map[string]interface{}{
+		{
+			"type": "section",
+			"text": map[string]interface{}{
+				"type": "mrkdwn",
+				"text": message,
+			},
+		},
+		{
+			"type": "actions",
+			"elements": []map[string]interface{}{
+				{
+					"type": "button",
+					"text": map[string]interface{}{
+						"type": "plain_text",
+						"text": "リマインドを一時停止",
+					},
+					"action_id": "pause_reminder_thread",
+					"value":     taskID,
+					"style":     "danger",
+				},
+			},
+		},
+	}
+
+	body := map[string]interface{}{
+		"channel":   channel,
+		"thread_ts": ts,
+		"blocks":    blocks,
+	}
+
+	jsonData, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return fmt.Errorf("slack API response parse error: %v", err)
+	}
+
+	log.Printf("slack thread post response: %s", string(bodyBytes))
+
+	if !result.OK {
+		return fmt.Errorf("slack error: %s", result.Error)
+	}
+
+	return nil
+}
+
 // レビュアー向けのリマインダーメッセージ
 func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	// チャンネルがアーカイブされているか確認
@@ -514,6 +581,51 @@ func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
 					"action_id": "change_reviewer",
 					"value":     task.ID,
 					"style":     "danger",
+				},
+				{
+					"type": "static_select",
+					"placeholder": map[string]string{
+						"type": "plain_text",
+						"text": "リマインダーを一時停止",
+					},
+					"action_id": "pause_reminder_initial",
+					"options": []map[string]interface{}{
+						{
+							"text": map[string]string{
+								"type": "plain_text",
+								"text": "1時間停止",
+							},
+							"value": fmt.Sprintf("%s:1h", task.ID),
+						},
+						{
+							"text": map[string]string{
+								"type": "plain_text",
+								"text": "2時間停止",
+							},
+							"value": fmt.Sprintf("%s:2h", task.ID),
+						},
+						{
+							"text": map[string]string{
+								"type": "plain_text",
+								"text": "4時間停止",
+							},
+							"value": fmt.Sprintf("%s:4h", task.ID),
+						},
+						{
+							"text": map[string]string{
+								"type": "plain_text",
+								"text": "今日は通知しない",
+							},
+							"value": fmt.Sprintf("%s:today", task.ID),
+						},
+						{
+							"text": map[string]string{
+								"type": "plain_text",
+								"text": "完全に停止",
+							},
+							"value": fmt.Sprintf("%s:stop", task.ID),
+						},
+					},
 				},
 			},
 		},
