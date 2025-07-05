@@ -603,10 +603,10 @@ func TestSendReviewCompletedAutoNotification(t *testing.T) {
 		reviewState  string
 		expectedMsg  string
 	}{
-		{"承認", "reviewer1", "approved", "✅ reviewer1さんがレビューを承認しました！"},
-		{"変更要求", "reviewer2", "changes_requested", "🔄 reviewer2さんが変更を要求しました"},
-		{"コメント", "reviewer3", "commented", "💬 reviewer3さんがレビューコメントを残しました"},
-		{"その他", "reviewer4", "other", "👀 reviewer4さんがレビューしました"},
+		{"承認", "reviewer1", "approved", "✅ reviewer1さんがレビューを承認しました！感謝！👏"},
+		{"変更要求", "reviewer2", "changes_requested", "🔄 reviewer2さんが変更を要求しました 感謝！👏"},
+		{"コメント", "reviewer3", "commented", "💬 reviewer3さんがレビューコメントを残しました 感謝！👏"},
+		{"その他", "reviewer4", "other", "👀 reviewer4さんがレビューしました 感謝！👏"},
 	}
 
 	for _, tc := range testCases {

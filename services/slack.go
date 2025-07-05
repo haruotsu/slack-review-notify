@@ -765,16 +765,16 @@ func SendReviewCompletedAutoNotification(task models.ReviewTask, reviewerLogin s
 	switch reviewState {
 	case "approved":
 		emoji = "✅"
-		message = fmt.Sprintf("%s %sさんがレビューを承認しました！", emoji, reviewerLogin)
+		message = fmt.Sprintf("%s %sさんがレビューを承認しました！感謝！👏", emoji, reviewerLogin)
 	case "changes_requested":
 		emoji = "🔄"
-		message = fmt.Sprintf("%s %sさんが変更を要求しました", emoji, reviewerLogin)
+		message = fmt.Sprintf("%s %sさんが変更を要求しました 感謝！👏", emoji, reviewerLogin)
 	case "commented":
 		emoji = "💬"
-		message = fmt.Sprintf("%s %sさんがレビューコメントを残しました", emoji, reviewerLogin)
+		message = fmt.Sprintf("%s %sさんがレビューコメントを残しました 感謝！👏", emoji, reviewerLogin)
 	default:
 		emoji = "👀"
-		message = fmt.Sprintf("%s %sさんがレビューしました", emoji, reviewerLogin)
+		message = fmt.Sprintf("%s %sさんがレビューしました 感謝！👏", emoji, reviewerLogin)
 	}
 
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
