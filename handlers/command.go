@@ -61,8 +61,8 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			// コマンド部分とパラメータを分離
 			var labelName, subCommand, params string
 
-			// テキストを分割
-			parts := strings.Fields(text)
+			// テキストをクォート対応で分割
+			parts := parseCommand(text)
 			
 			if len(parts) == 0 {
 				// 引数がない場合はヘルプを表示
@@ -218,10 +218,68 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// parseCommand はコマンドテキストをクォート対応で解析する
+func parseCommand(text string) []string {
+	var parts []string
+	var current strings.Builder
+	inQuote := false
+	quoteChar := byte(0)
+	
+	for i := 0; i < len(text); i++ {
+		char := text[i]
+		
+		switch {
+		case char == '"' || char == '\'':
+			if !inQuote {
+				// クォート開始
+				inQuote = true
+				quoteChar = char
+			} else if char == quoteChar {
+				// クォート終了
+				inQuote = false
+				quoteChar = 0
+			} else {
+				// 異なるクォート文字は普通の文字として扱う
+				current.WriteByte(char)
+			}
+		case char == ' ' && !inQuote:
+			// スペースで分割（クォート内でない場合のみ）
+			if current.Len() > 0 {
+				parts = append(parts, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteByte(char)
+		}
+	}
+	
+	// 最後の部分を追加
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+	
+	return parts
+}
+
 // ヘルプメッセージを表示
 func showHelp(c *gin.Context) {
 	help := `*Review通知Bot設定コマンド*
 コマンド形式: /slack-review-notify [ラベル名] サブコマンド [引数]
+
+*スペースを含むラベル名について*
+スペースを含むラベル名を使用する場合は、クォート（"または'）で囲んでください:
+- 例: /slack-review-notify "needs review" set-mention @team
+- 例: /slack-review-notify 'security review' add-reviewer @security
+
+*初期設定（必須）*
+通知を受けるには最低限以下の設定が必要です：
+:point_right: *1. メンション先の設定*
+   /slack-review-notify [ラベル名] set-mention @user
+
+:point_right: *2. 対象リポジトリの追加（重要！）*
+   /slack-review-notify [ラベル名] add-repo owner/repo
+
+:information_source: この2つを設定しないと通知は送信されません
 
 *複数ラベル設定の使い方*
 このチャンネル内で複数の異なるラベルごとに独立した設定を持つことができます:
@@ -229,22 +287,26 @@ func showHelp(c *gin.Context) {
 - 例2: /slack-review-notify feature set-mention @開発チーム → featureラベル用の設定
 - 例3: /slack-review-notify security-review set-mention @セキュリティチーム → security-reviewラベル用の設定
 
-上記のように、異なるラベルごとに別々のメンション先やレビュワーを設定できます。
-PRにどのラベルが付いているかで、適切な設定が自動的に使われます。
+*全コマンド一覧*
+*基本操作:*
+• /slack-review-notify show - このチャンネルの全ラベル設定を表示
+• /slack-review-notify [ラベル名] show - 指定ラベルの詳細設定を表示
 
-*使用可能なコマンド*
-- /slack-review-notify show: このチャンネルで設定済みのすべてのラベルを一覧表示
-- /slack-review-notify [ラベル名] show: 指定したラベルの詳細設定を表示
-- /slack-review-notify [ラベル名] set-mention @user: メンション先を設定
-- /slack-review-notify [ラベル名] add-reviewer @user1,@user2: レビュワーを追加（カンマ区切り）
-- /slack-review-notify [ラベル名] show-reviewers: 登録されたレビュワーリストを表示
-- /slack-review-notify [ラベル名] clear-reviewers: レビュワーリストをクリア
-- /slack-review-notify [ラベル名] add-repo owner/repo1,owner/repo2: 通知対象リポジトリを追加（カンマ区切り）
-- /slack-review-notify [ラベル名] remove-repo owner/repo: 通知対象リポジトリを削除
-- /slack-review-notify [ラベル名] set-label 新ラベル名: ラベル名を変更
-- /slack-review-notify [ラベル名] set-reviewer-reminder-interval 30: レビュワー割り当て後のリマインド頻度を設定（分単位）
-- /slack-review-notify [ラベル名] activate: このラベルの通知を有効化
-- /slack-review-notify [ラベル名] deactivate: このラベルの通知を無効化
+*必須設定:*
+• /slack-review-notify [ラベル名] set-mention @user - メンション先を設定
+• /slack-review-notify [ラベル名] add-repo owner/repo1,owner/repo2 - 対象リポジトリを追加
+
+*レビュワー管理:*
+• /slack-review-notify [ラベル名] add-reviewer @user1,@user2 - レビュワーを追加
+• /slack-review-notify [ラベル名] show-reviewers - レビュワー一覧を表示
+• /slack-review-notify [ラベル名] clear-reviewers - レビュワーをクリア
+
+*高度な設定:*
+• /slack-review-notify [ラベル名] remove-repo owner/repo - リポジトリを削除
+• /slack-review-notify [ラベル名] set-label 新ラベル名 - ラベル名を変更
+• /slack-review-notify [ラベル名] set-reviewer-reminder-interval 30 - リマインド頻度設定（分）
+• /slack-review-notify [ラベル名] activate - 通知を有効化
+• /slack-review-notify [ラベル名] deactivate - 通知を無効化
 
 [ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します`
 
