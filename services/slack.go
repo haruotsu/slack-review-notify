@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-github/v71/github"
+
 	"github.com/slack-go/slack"
 	"gorm.io/gorm"
 )
@@ -758,23 +760,24 @@ func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
 }
 
 // レビュー完了の自動通知を送信する関数
-func SendReviewCompletedAutoNotification(task models.ReviewTask, reviewerLogin string, reviewState string) error {
+func SendReviewCompletedAutoNotification(task models.ReviewTask, reviewer *github.User, reviewState string) error {
+	displayName := GetDisplayName(reviewer)
 	var message string
 	var emoji string
 
 	switch reviewState {
 	case "approved":
 		emoji = "✅"
-		message = fmt.Sprintf("%s %sさんがレビューを承認しました！感謝！👏", emoji, reviewerLogin)
+		message = fmt.Sprintf("%s %sさんがレビューを承認しました！感謝！👏", emoji, displayName)
 	case "changes_requested":
 		emoji = "🔄"
-		message = fmt.Sprintf("%s %sさんが変更を要求しました 感謝！👏", emoji, reviewerLogin)
+		message = fmt.Sprintf("%s %sさんが変更を要求しました 感謝！👏", emoji, displayName)
 	case "commented":
 		emoji = "💬"
-		message = fmt.Sprintf("%s %sさんがレビューコメントを残しました 感謝！👏", emoji, reviewerLogin)
+		message = fmt.Sprintf("%s %sさんがレビューコメントを残しました 感謝！👏", emoji, displayName)
 	default:
 		emoji = "👀"
-		message = fmt.Sprintf("%s %sさんがレビューしました 感謝！👏", emoji, reviewerLogin)
+		message = fmt.Sprintf("%s %sさんがレビューしました 感謝！👏", emoji, displayName)
 	}
 
 	return PostToThread(task.SlackChannel, task.SlackTS, message)

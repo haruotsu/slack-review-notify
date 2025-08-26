@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-github/v71/github"
 	"github.com/h2non/gock"
 	"github.com/stretchr/testify/assert"
 )
@@ -599,14 +600,34 @@ func TestSendReviewCompletedAutoNotification(t *testing.T) {
 
 	testCases := []struct {
 		name         string
-		reviewerLogin string
+		reviewerUser *github.User
 		reviewState  string
 		expectedMsg  string
 	}{
-		{"承認", "reviewer1", "approved", "✅ reviewer1さんがレビューを承認しました！感謝！👏"},
-		{"変更要求", "reviewer2", "changes_requested", "🔄 reviewer2さんが変更を要求しました 感謝！👏"},
-		{"コメント", "reviewer3", "commented", "💬 reviewer3さんがレビューコメントを残しました 感謝！👏"},
-		{"その他", "reviewer4", "other", "👀 reviewer4さんがレビューしました 感謝！👏"},
+		{
+			"承認 - display nameありの場合",
+			&github.User{Login: github.Ptr("reviewer1"), Name: github.Ptr("Test Reviewer 1")},
+			"approved",
+			"✅ Test Reviewer 1さんがレビューを承認しました！感謝！👏",
+		},
+		{
+			"変更要求 - display nameなしの場合",
+			&github.User{Login: github.Ptr("reviewer2"), Name: nil},
+			"changes_requested",
+			"🔄 reviewer2さんが変更を要求しました 感謝！👏",
+		},
+		{
+			"コメント - 空のdisplay nameの場合",
+			&github.User{Login: github.Ptr("reviewer3"), Name: github.Ptr("")},
+			"commented",
+			"💬 reviewer3さんがレビューコメントを残しました 感謝！👏",
+		},
+		{
+			"その他 - display nameありの場合",
+			&github.User{Login: github.Ptr("reviewer4"), Name: github.Ptr("Test Reviewer 4")},
+			"other",
+			"👀 Test Reviewer 4さんがレビューしました 感謝！👏",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -629,7 +650,7 @@ func TestSendReviewCompletedAutoNotification(t *testing.T) {
 			}
 
 			// 関数を実行
-			err := SendReviewCompletedAutoNotification(task, tc.reviewerLogin, tc.reviewState)
+			err := SendReviewCompletedAutoNotification(task, tc.reviewerUser, tc.reviewState)
 
 			// アサーション
 			assert.NoError(t, err)

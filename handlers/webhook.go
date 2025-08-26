@@ -242,7 +242,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	// 各タスクについて完了通知を送信
 	for _, task := range tasks {
 		// レビュー完了通知をスレッドに投稿
-		if err := services.SendReviewCompletedAutoNotification(task, review.GetUser().GetLogin(), reviewState); err != nil {
+		if err := services.SendReviewCompletedAutoNotification(task, review.GetUser(), reviewState); err != nil {
 			log.Printf("failed to send review completed notification: %v", err)
 			// チャンネル関連のエラー（アーカイブ済み、権限なしなど）の場合はタスクを完了にする
 			if !services.IsChannelRelatedError(err) {
