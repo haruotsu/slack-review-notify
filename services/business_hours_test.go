@@ -49,6 +49,12 @@ func TestIsOutsideBusinessHours(t *testing.T) {
 			description: "日曜日は営業時間外",
 		},
 		{
+			name:        "平日朝9時59分",
+			testTime:    time.Date(2024, 8, 26, 9, 59, 0, 0, jst), // 月曜日 9:59 JST
+			expected:    true,
+			description: "平日朝9時59分は営業時間外",
+		},
+		{
 			name:        "平日朝10時",
 			testTime:    time.Date(2024, 8, 26, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
 			expected:    false,

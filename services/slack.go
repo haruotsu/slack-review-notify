@@ -199,10 +199,10 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 	// レビュワーが設定されている場合は追加
 	var reviewerText string
 	if task.Reviewer != "" {
-		reviewerText = fmt.Sprintf("\n\n🎯 **レビュワー**: <@%s> さん、よろしくお願いします！", task.Reviewer)
+		reviewerText = fmt.Sprintf("\n\n🎯 *レビュワー*: <@%s> さん、よろしくお願いします！", task.Reviewer)
 	}
 
-	message := fmt.Sprintf("🌅 **おはようございます！** %s\n\n📋 こちらのPRのレビューをお願いします。%s", mentionText, reviewerText)
+	message := fmt.Sprintf("🌅 *おはようございます！* %s\n\n📋 こちらのPRのレビューをお願いします。%s", mentionText, reviewerText)
 	
 	blocks := []map[string]interface{}{
 		{
@@ -793,7 +793,7 @@ func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) er
 }
 
 // 営業時間外かどうかを判定する関数
-// 営業時間外の条件：19時以降かつ土日
+// 営業時間：平日の10:00〜18:59、それ以外は営業時間外
 func IsOutsideBusinessHours(t time.Time) bool {
 	// JST タイムゾーンを取得
 	jst, err := time.LoadLocation("Asia/Tokyo")
@@ -811,8 +811,9 @@ func IsOutsideBusinessHours(t time.Time) bool {
 		return true
 	}
 	
-	// 平日の19時以降は営業時間外
-	if timeInJST.Hour() >= 19 {
+	// 平日の営業時間は10:00〜18:59
+	hour := timeInJST.Hour()
+	if hour < 10 || hour >= 19 {
 		return true
 	}
 	
