@@ -72,6 +72,9 @@ func runTaskChecker(db *gorm.DB) {
 		case <-taskTicker.C:
 			log.Println("start task check")
 
+			// 営業時間外待機タスクのチェック
+			services.CheckBusinessHoursTasks(db)
+
 			// レビュー中タスク（レビュアー割り当て済み）のチェック
 			services.CheckInReviewTasks(db)
 

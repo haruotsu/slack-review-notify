@@ -10,6 +10,64 @@ import (
 	"slack-review-notify/models"
 )
 
+// CheckBusinessHoursTasks は営業時間外待機タスクを営業時間内になったときに処理する
+func CheckBusinessHoursTasks(db *gorm.DB) {
+	// 営業時間外の場合は何もしない
+	if IsOutsideBusinessHours(time.Now()) {
+		return
+	}
+
+	var tasks []models.ReviewTask
+	result := db.Where("status = ?", "waiting_business_hours").Find(&tasks)
+	
+	if result.Error != nil {
+		log.Printf("waiting_business_hours task check error: %v", result.Error)
+		return
+	}
+
+	for _, task := range tasks {
+		// チャンネル設定を取得してメンションIDを取得
+		var config models.ChannelConfig
+		labelName := task.LabelName
+		if labelName == "" {
+			labelName = "needs-review"
+		}
+		
+		if err := db.Where("slack_channel_id = ? AND label_name = ?", task.SlackChannel, labelName).First(&config).Error; err != nil {
+			log.Printf("channel config not found for waiting task: %s, error: %v", task.ID, err)
+			continue
+		}
+
+		// レビュワーをランダム選択
+		reviewerID := SelectRandomReviewer(db, task.SlackChannel, labelName)
+		
+		// スレッドに営業時間通知を送信
+		if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
+			log.Printf("business hours notification error (task: %s): %v", task.ID, err)
+			continue
+		}
+
+		// タスクの状態を更新
+		task.Status = "in_review"
+		task.Reviewer = reviewerID
+		task.UpdatedAt = time.Now()
+		
+		if err := db.Save(&task).Error; err != nil {
+			log.Printf("task status update error (task: %s): %v", task.ID, err)
+			continue
+		}
+
+		log.Printf("waiting_business_hours task activated: %s", task.ID)
+
+		// レビュワーが設定された場合は変更ボタン付きの通知も送信
+		if reviewerID != "" {
+			if err := PostReviewerAssignedMessageWithChangeButton(task); err != nil {
+				log.Printf("reviewer assigned notification error: %v", err)
+			}
+		}
+	}
+}
+
 // CheckInReviewTasks 関数も同様に修正
 func CheckInReviewTasks(db *gorm.DB) {
 	var tasks []models.ReviewTask
