@@ -202,7 +202,7 @@ func handleUnlabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEven
 	// 該当するレビュータスクを検索
 	var tasks []models.ReviewTask
 	db.Where("repo = ? AND pr_number = ? AND label_name = ? AND status IN (?)", 
-		repoFullName, pr.GetNumber(), labelName, []string{"pending", "in_review", "snoozed"}).Find(&tasks)
+		repoFullName, pr.GetNumber(), labelName, []string{"pending", "in_review", "snoozed", "waiting_business_hours"}).Find(&tasks)
 
 	if len(tasks) == 0 {
 		log.Printf("no active tasks found for unlabeled event: repo=%s, pr=%d, label=%s", repoFullName, pr.GetNumber(), labelName)
@@ -249,7 +249,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	// 該当するタスクを検索
 	var tasks []models.ReviewTask
 	result := db.Where("repo = ? AND pr_number = ? AND status IN ?",
-		repoFullName, pr.GetNumber(), []string{"in_review", "pending"}).Find(&tasks)
+		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "waiting_business_hours"}).Find(&tasks)
 
 	if result.Error != nil {
 		log.Printf("review submitted task search error: %v", result.Error)
