@@ -669,11 +669,21 @@ func GetNextBusinessDayMorning() time.Time {
 
 // 指定された時刻から翌営業日の朝（10:00）の時間を取得する関数
 func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
-	// 今日の10:00を作成
-	todayMorning := time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, now.Location())
+	// JST タイムゾーンを取得
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		// フォールバック：現在のタイムゾーンを使用
+		jst = now.Location()
+	}
 
-	// 現在の曜日と時刻を確認
-	weekday := now.Weekday()
+	// 現在時刻をJSTに変換
+	nowInJST := now.In(jst)
+	
+	// 今日の10:00（JST）を作成
+	todayMorning := time.Date(nowInJST.Year(), nowInJST.Month(), nowInJST.Day(), 10, 0, 0, 0, jst)
+
+	// 現在の曜日と時刻を確認（JST基準）
+	weekday := nowInJST.Weekday()
 	
 	// 結果を格納する変数
 	var nextBusinessDayMorning time.Time
@@ -681,7 +691,7 @@ func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
 	switch weekday {
 	case time.Monday, time.Tuesday, time.Wednesday, time.Thursday:
 		// 月〜木の場合
-		if now.Before(todayMorning) {
+		if nowInJST.Before(todayMorning) {
 			// 10:00前なら今日の10:00
 			nextBusinessDayMorning = todayMorning
 		} else {
@@ -690,7 +700,7 @@ func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
 		}
 	case time.Friday:
 		// 金曜日の場合
-		if now.Before(todayMorning) {
+		if nowInJST.Before(todayMorning) {
 			// 10:00前なら今日の10:00
 			nextBusinessDayMorning = todayMorning
 		} else {
