@@ -203,9 +203,6 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			// 古いレビュワーIDを保存
 			oldReviewerID := taskToUpdate.Reviewer
 
-			// 新しいレビュワーをランダムに選択
-			newReviewerID := services.SelectRandomReviewer(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName)
-
 			// もしLabelNameが設定されていない既存のタスクの場合はデフォルト値を使用
 			if taskToUpdate.LabelName == "" {
 				// 既存のタスクのためデフォルト値を設定
@@ -214,10 +211,13 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				db.Save(&taskToUpdate)
 			}
 
+			// 新しいレビュワーをランダムに選択
+			newReviewerID := services.SelectRandomReviewer(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName)
+
 			// 新しいレビュワーが前と同じであれば、再度選択
 			// (レビュワーリストが1人しかない場合は同じになる)
 			var config models.ChannelConfig
-			if newReviewerID == oldReviewerID && db.Where("slack_channel_id = ?", taskToUpdate.SlackChannel).First(&config).Error == nil {
+			if newReviewerID == oldReviewerID && db.Where("slack_channel_id = ? AND label_name = ?", taskToUpdate.SlackChannel, taskToUpdate.LabelName).First(&config).Error == nil {
 				reviewers := strings.Split(config.ReviewerList, ",")
 				if len(reviewers) > 1 {
 					// リストから古いレビュワー以外を選ぶ
