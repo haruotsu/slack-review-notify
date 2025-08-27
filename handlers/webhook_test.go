@@ -374,7 +374,7 @@ func TestHandleReviewSubmittedEventWithWaitingBusinessHoursTask(t *testing.T) {
 	reviewBody := "LGTM!"
 	
 	payload := github.PullRequestReviewEvent{
-		Action: github.String("submitted"),
+		Action: github.Ptr("submitted"),
 		PullRequest: &github.PullRequest{
 			Number: &prNumber,
 		},
