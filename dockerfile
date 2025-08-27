@@ -16,7 +16,7 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o slack-review-notify
 FROM alpine:latest
 
 # 必要なライブラリをインストール（SQLite実行に必要）
-RUN apk --no-cache add ca-certificates sqlite
+RUN apk --no-cache add ca-certificates sqlite tzdata
 
 WORKDIR /app
 
