@@ -129,7 +129,18 @@ func SendSlackMessageOffHours(prURL, title, channel string) (string, string, err
 			Type: "section",
 			Text: &TextObject{
 				Type: "mrkdwn",
-				Text: fmt.Sprintf("📝 *新しいレビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n⏰ レビューのメンションは翌営業日の朝（10時）にお送りします", title, prURL),
+				Text: fmt.Sprintf("📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n (営業時間を過ぎているので、レビューのメンションは翌営業日の朝（10時）にお送りします)", title, prURL),
+			},
+		},
+		{
+			Type: "actions",
+			Elements: []Button{
+				{
+					Type:     "button",
+					Text:     TextObject{Type: "plain_text", Text: "レビュー完了"},
+					ActionID: "review_done",
+					Style:    "primary",
+				},
 			},
 		},
 	}
