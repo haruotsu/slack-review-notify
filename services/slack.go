@@ -122,6 +122,136 @@ func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) strin
 	return validReviewers[randomIndex]
 }
 
+// SendSlackMessageOffHours は営業時間外用のメンション抜きメッセージを送信する
+func SendSlackMessageOffHours(prURL, title, channel string) (string, string, error) {
+	blocks := []Block{
+		{
+			Type: "section",
+			Text: &TextObject{
+				Type: "mrkdwn",
+				Text: fmt.Sprintf("📝 *新しいレビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n⏰ レビューのメンションは翌営業日の朝（10時）にお送りします", title, prURL),
+			},
+		},
+	}
+
+	message := SlackMessage{
+		Channel: channel,
+		Blocks:  blocks,
+	}
+
+	jsonData, _ := json.Marshal(message)
+	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", "", err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		OK      bool   `json:"ok"`
+		TS      string `json:"ts"`
+		Channel string `json:"channel"`
+		Error   string `json:"error"`
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return "", "", fmt.Errorf("slack API response parse error: %v", err)
+	}
+
+	if !result.OK {
+		return "", "", fmt.Errorf("slack error: %s", result.Error)
+	}
+
+	return result.TS, result.Channel, nil
+}
+
+// PostBusinessHoursNotificationToThread は営業時間になったときにスレッドにメンション付き通知を送信する
+func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID string) error {
+	// ユーザーIDまたはチームIDのメンション形式を決定
+	var mentionText string
+	if strings.HasPrefix(mentionID, "subteam^") || strings.HasPrefix(mentionID, "S") {
+		// チームIDの場合はsubteam形式で表示
+		mentionText = fmt.Sprintf("<!subteam^%s>", mentionID)
+	} else {
+		// ユーザーIDの場合は通常のメンション形式
+		mentionText = fmt.Sprintf("<@%s>", mentionID)
+	}
+	
+	// レビュワーが設定されている場合は追加
+	var reviewerText string
+	if task.Reviewer != "" {
+		reviewerText = fmt.Sprintf("\n\n🎯 **レビュワー**: <@%s> さん、よろしくお願いします！", task.Reviewer)
+	}
+
+	message := fmt.Sprintf("🌅 **おはようございます！** %s\n\n📋 こちらのPRのレビューをお願いします。%s", mentionText, reviewerText)
+	
+	blocks := []map[string]interface{}{
+		{
+			"type": "section",
+			"text": map[string]interface{}{
+				"type": "mrkdwn",
+				"text": message,
+			},
+		},
+		{
+			"type": "actions",
+			"elements": []map[string]interface{}{
+				{
+					"type":      "button",
+					"text":      map[string]string{"type": "plain_text", "text": "レビュー完了"},
+					"action_id": "review_done",
+					"style":     "primary",
+				},
+			},
+		},
+	}
+
+	body := map[string]interface{}{
+		"channel":   task.SlackChannel,
+		"thread_ts": task.SlackTS,
+		"blocks":    blocks,
+	}
+
+	jsonData, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return fmt.Errorf("slack API response parse error: %v", err)
+	}
+
+	if !result.OK {
+		return fmt.Errorf("slack error: %s", result.Error)
+	}
+
+	return nil
+}
+
 func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, error) {
 	// ユーザーIDまたはチームIDのメンション形式を決定
 	var mentionText string
@@ -660,6 +790,33 @@ func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
 func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) error {
 	message := fmt.Sprintf("レビュワーを変更しました: <@%s> → <@%s> さん、よろしくお願いします！", oldReviewerID, task.Reviewer)
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
+}
+
+// 営業時間外かどうかを判定する関数
+// 営業時間外の条件：19時以降かつ土日
+func IsOutsideBusinessHours(t time.Time) bool {
+	// JST タイムゾーンを取得
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		// フォールバック：元のタイムゾーンを使用
+		jst = t.Location()
+	}
+
+	// 時刻をJSTに変換
+	timeInJST := t.In(jst)
+	
+	// 土日は営業時間外
+	weekday := timeInJST.Weekday()
+	if weekday == time.Saturday || weekday == time.Sunday {
+		return true
+	}
+	
+	// 平日の19時以降は営業時間外
+	if timeInJST.Hour() >= 19 {
+		return true
+	}
+	
+	return false
 }
 
 // 翌営業日の朝（10:00）の時間を取得する関数

@@ -112,25 +112,47 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 			continue
 		}
 
-		// ランダムにレビュワーを選択
-		randomReviewerID := services.SelectRandomReviewer(db, config.SlackChannelID, config.LabelName)
+		var slackTs, slackChannelID string
+		var taskStatus string
+		var reviewerID string
 
-		// メッセージ送信後のタスク作成部分
-		slackTs, slackChannelID, err := services.SendSlackMessage(
-			pr.GetHTMLURL(),
-			pr.GetTitle(),
-			config.SlackChannelID,
-			config.DefaultMentionID,
-		)
-
-		if err != nil {
-			log.Printf("slack message failed (channel: %s): %v", config.SlackChannelID, err)
-			continue
+		// 営業時間外判定
+		if services.IsOutsideBusinessHours(time.Now()) {
+			// 営業時間外の場合：メンション抜きメッセージを送信
+			var err error
+			slackTs, slackChannelID, err = services.SendSlackMessageOffHours(
+				pr.GetHTMLURL(),
+				pr.GetTitle(),
+				config.SlackChannelID,
+			)
+			taskStatus = "waiting_business_hours"
+			// レビュワーは翌営業日朝に設定する
+			reviewerID = ""
+			if err != nil {
+				log.Printf("off-hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
+				continue
+			}
+			log.Printf("off-hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
+		} else {
+			// 営業時間内の場合：通常のメンション付きメッセージを送信
+			var err error
+			slackTs, slackChannelID, err = services.SendSlackMessage(
+				pr.GetHTMLURL(),
+				pr.GetTitle(),
+				config.SlackChannelID,
+				config.DefaultMentionID,
+			)
+			taskStatus = "in_review"
+			// ランダムにレビュワーを選択
+			reviewerID = services.SelectRandomReviewer(db, config.SlackChannelID, config.LabelName)
+			if err != nil {
+				log.Printf("business hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
+				continue
+			}
+			log.Printf("business hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
 		}
 
-		log.Printf("slack message sent: ts=%s, channel=%s", slackTs, slackChannelID)
-
-		// ランダムにレビュワーを選択してタスクに設定
+		// タスク作成
 		task := models.ReviewTask{
 			ID:           uuid.NewString(),
 			PRURL:        pr.GetHTMLURL(),
@@ -139,8 +161,8 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 			Title:        pr.GetTitle(),
 			SlackTS:      slackTs,
 			SlackChannel: slackChannelID,
-			Reviewer:     randomReviewerID,
-			Status:       "in_review",
+			Reviewer:     reviewerID,
+			Status:       taskStatus,
 			LabelName:    config.LabelName,
 			CreatedAt:    time.Now(),
 			UpdatedAt:    time.Now(),
@@ -154,8 +176,8 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 		log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, task.PRURL)
 		notified = true
 
-		// レビュワーが割り当てられたことをスレッドに通知
-		if randomReviewerID != "" {
+		// 営業時間内で、レビュワーが割り当てられた場合のみスレッドに通知
+		if taskStatus == "in_review" && reviewerID != "" {
 			if err := services.PostReviewerAssignedMessageWithChangeButton(task); err != nil {
 				log.Printf("reviewer assigned notification error: %v", err)
 			}
