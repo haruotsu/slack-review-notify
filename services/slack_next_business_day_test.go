@@ -8,6 +8,10 @@ import (
 )
 
 func TestGetNextBusinessDayMorning_Detailed(t *testing.T) {
+	// JST タイムゾーンを取得
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	assert.NoError(t, err)
+
 	testCases := []struct {
 		name        string
 		currentTime time.Time
@@ -15,33 +19,33 @@ func TestGetNextBusinessDayMorning_Detailed(t *testing.T) {
 	}{
 		{
 			name:        "月曜日の午前9時 → 月曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 9, 0, 0, 0, time.Local), // 2024年1月8日は月曜日
-			expected:    time.Date(2024, 1, 8, 10, 0, 0, 0, time.Local),
+			currentTime: time.Date(2024, 1, 8, 9, 0, 0, 0, jst), // 2024年1月8日は月曜日
+			expected:    time.Date(2024, 1, 8, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "月曜日の午後2時 → 火曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 14, 0, 0, 0, time.Local),
-			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, time.Local),
+			currentTime: time.Date(2024, 1, 8, 14, 0, 0, 0, jst),
+			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "金曜日の午後2時 → 月曜日の10時",
-			currentTime: time.Date(2024, 1, 12, 14, 0, 0, 0, time.Local), // 2024年1月12日は金曜日
-			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, time.Local), // 2024年1月15日は月曜日
+			currentTime: time.Date(2024, 1, 12, 14, 0, 0, 0, jst), // 2024年1月12日は金曜日
+			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 2024年1月15日は月曜日
 		},
 		{
 			name:        "土曜日の午後2時 → 月曜日の10時",
-			currentTime: time.Date(2024, 1, 13, 14, 0, 0, 0, time.Local), // 2024年1月13日は土曜日
-			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, time.Local), // 2024年1月15日は月曜日
+			currentTime: time.Date(2024, 1, 13, 14, 0, 0, 0, jst), // 2024年1月13日は土曜日
+			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 2024年1月15日は月曜日
 		},
 		{
 			name:        "日曜日の午後2時 → 月曜日の10時",
-			currentTime: time.Date(2024, 1, 14, 14, 0, 0, 0, time.Local), // 2024年1月14日は日曜日
-			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, time.Local), // 2024年1月15日は月曜日
+			currentTime: time.Date(2024, 1, 14, 14, 0, 0, 0, jst), // 2024年1月14日は日曜日
+			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 2024年1月15日は月曜日
 		},
 		{
 			name:        "木曜日の午後11時59分 → 金曜日の10時",
-			currentTime: time.Date(2024, 1, 11, 23, 59, 0, 0, time.Local), // 2024年1月11日は木曜日
-			expected:    time.Date(2024, 1, 12, 10, 0, 0, 0, time.Local),
+			currentTime: time.Date(2024, 1, 11, 23, 59, 0, 0, jst), // 2024年1月11日は木曜日
+			expected:    time.Date(2024, 1, 12, 10, 0, 0, 0, jst),
 		},
 	}
 
@@ -64,6 +68,10 @@ func TestGetNextBusinessDayMorning_Detailed(t *testing.T) {
 }
 
 func TestGetNextBusinessDayMorningWithTime(t *testing.T) {
+	// JST タイムゾーンを取得
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	assert.NoError(t, err)
+
 	testCases := []struct {
 		name        string
 		currentTime time.Time
@@ -71,48 +79,48 @@ func TestGetNextBusinessDayMorningWithTime(t *testing.T) {
 	}{
 		{
 			name:        "月曜日の午前9時 → 月曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 9, 0, 0, 0, time.Local), // 2024年1月8日は月曜日
-			expected:    time.Date(2024, 1, 8, 10, 0, 0, 0, time.Local),
+			currentTime: time.Date(2024, 1, 8, 9, 0, 0, 0, jst), // 2024年1月8日は月曜日
+			expected:    time.Date(2024, 1, 8, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "月曜日の午前10時ちょうど → 火曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 10, 0, 0, 0, time.Local),
-			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, time.Local),
+			currentTime: time.Date(2024, 1, 8, 10, 0, 0, 0, jst),
+			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "月曜日の午前10時1分 → 火曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 10, 1, 0, 0, time.Local),
-			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, time.Local),
+			currentTime: time.Date(2024, 1, 8, 10, 1, 0, 0, jst),
+			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "月曜日の午後2時 → 火曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 14, 0, 0, 0, time.Local),
-			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, time.Local),
+			currentTime: time.Date(2024, 1, 8, 14, 0, 0, 0, jst),
+			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "金曜日の午前9時 → 金曜日の10時",
-			currentTime: time.Date(2024, 1, 12, 9, 0, 0, 0, time.Local), // 2024年1月12日は金曜日
-			expected:    time.Date(2024, 1, 12, 10, 0, 0, 0, time.Local),
+			currentTime: time.Date(2024, 1, 12, 9, 0, 0, 0, jst), // 2024年1月12日は金曜日
+			expected:    time.Date(2024, 1, 12, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "金曜日の午後2時 → 月曜日の10時",
-			currentTime: time.Date(2024, 1, 12, 14, 0, 0, 0, time.Local),
-			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, time.Local), // 2024年1月15日は月曜日
+			currentTime: time.Date(2024, 1, 12, 14, 0, 0, 0, jst),
+			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 2024年1月15日は月曜日
 		},
 		{
 			name:        "土曜日の午後2時 → 月曜日の10時",
-			currentTime: time.Date(2024, 1, 13, 14, 0, 0, 0, time.Local), // 2024年1月13日は土曜日
-			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, time.Local), // 2024年1月15日は月曜日
+			currentTime: time.Date(2024, 1, 13, 14, 0, 0, 0, jst), // 2024年1月13日は土曜日
+			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 2024年1月15日は月曜日
 		},
 		{
 			name:        "日曜日の午後2時 → 月曜日の10時",
-			currentTime: time.Date(2024, 1, 14, 14, 0, 0, 0, time.Local), // 2024年1月14日は日曜日
-			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, time.Local), // 2024年1月15日は月曜日
+			currentTime: time.Date(2024, 1, 14, 14, 0, 0, 0, jst), // 2024年1月14日は日曜日
+			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 2024年1月15日は月曜日
 		},
 		{
 			name:        "木曜日の午後11時59分 → 金曜日の10時",
-			currentTime: time.Date(2024, 1, 11, 23, 59, 0, 0, time.Local), // 2024年1月11日は木曜日
-			expected:    time.Date(2024, 1, 12, 10, 0, 0, 0, time.Local),
+			currentTime: time.Date(2024, 1, 11, 23, 59, 0, 0, jst), // 2024年1月11日は木曜日
+			expected:    time.Date(2024, 1, 12, 10, 0, 0, 0, jst),
 		},
 	}
 
