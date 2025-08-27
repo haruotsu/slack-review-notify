@@ -212,17 +212,6 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 				"text": message,
 			},
 		},
-		{
-			"type": "actions",
-			"elements": []map[string]interface{}{
-				{
-					"type":      "button",
-					"text":      map[string]string{"type": "plain_text", "text": "レビュー完了"},
-					"action_id": "review_done",
-					"style":     "primary",
-				},
-			},
-		},
 	}
 
 	body := map[string]interface{}{
