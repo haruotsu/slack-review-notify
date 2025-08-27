@@ -131,7 +131,7 @@ func TestIsOutsideBusinessHoursEdgeCases(t *testing.T) {
 		{
 			name:     "月曜日00時00分00秒",
 			testTime: time.Date(2024, 8, 26, 0, 0, 0, 0, jst),
-			expected: false, // 平日の深夜は営業時間内扱い（19時未満）
+			expected: true, // 平日の深夜は営業時間外（10時未満）
 		},
 		{
 			name:     "土曜日00時00分00秒",
