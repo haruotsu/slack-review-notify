@@ -199,10 +199,10 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 	// レビュワーが設定されている場合は追加
 	var reviewerText string
 	if task.Reviewer != "" {
-		reviewerText = fmt.Sprintf("\n\n🎯 **レビュワー**: <@%s> さん、よろしくお願いします！", task.Reviewer)
+		reviewerText = fmt.Sprintf("\n\n🎯 *レビュワー*: <@%s> さん、よろしくお願いします！", task.Reviewer)
 	}
 
-	message := fmt.Sprintf("🌅 **おはようございます！** %s\n\n📋 こちらのPRのレビューをお願いします。%s", mentionText, reviewerText)
+	message := fmt.Sprintf("🌅 *おはようございます！* %s\n\n📋 こちらのPRのレビューをお願いします。%s", mentionText, reviewerText)
 	
 	blocks := []map[string]interface{}{
 		{
