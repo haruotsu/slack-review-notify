@@ -19,6 +19,7 @@ type ReviewTask struct {
 	LabelName           string
 	WatchingUntil       *time.Time
 	ReminderPausedUntil *time.Time
+	OutOfHoursReminded  bool // 営業時間外に自動でリマインドを一時停止したかのフラグ
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	DeletedAt           gorm.DeletedAt `gorm:"index"`
