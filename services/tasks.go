@@ -110,25 +110,70 @@ func CheckInReviewTasks(db *gorm.DB) {
 			}
 		}
 
-		// 設定された頻度でリマインダーを送信
-		reminderTime := now.Add(-time.Duration(reminderInterval) * time.Minute)
-		if task.UpdatedAt.Before(reminderTime) {
-			err := SendReviewerReminderMessage(db, task)
-			if err != nil {
-				log.Printf("reviewer reminder send error (task id: %s): %v", task.ID, err)
+		// 営業時間外かチェック
+		if IsOutsideBusinessHours(now) {
+			// 営業時間外で、まだ営業時間外リマインドを送っていない場合
+			if !task.OutOfHoursReminded {
+				// 設定された頻度でリマインダーを送信（初回のみ）
+				reminderTime := now.Add(-time.Duration(reminderInterval) * time.Minute)
+				if task.UpdatedAt.Before(reminderTime) {
+					// 営業時間外用のリマインドメッセージを送信
+					err := SendOutOfHoursReminderMessage(db, task)
+					if err != nil {
+						log.Printf("out of hours reminder send error (task id: %s): %v", task.ID, err)
 
-				// チャンネル関連のエラーの場合はループ継続せずスキップ
-				if strings.Contains(err.Error(), "channel is archived") ||
-					strings.Contains(err.Error(), "not accessible") {
-					continue
-				}
-			} else {
-				task.UpdatedAt = now
-				if err := db.Model(&task).Update("updated_at", now).Error; err != nil {
-					log.Printf("task update error: %v", err)
-				}
+						// チャンネル関連のエラーの場合はループ継続せずスキップ
+						if strings.Contains(err.Error(), "channel is archived") ||
+							strings.Contains(err.Error(), "not accessible") {
+							continue
+						}
+					} else {
+						// 翌営業日10時まで一時停止
+						nextBusinessDay := GetNextBusinessDayMorning()
+						task.ReminderPausedUntil = &nextBusinessDay
+						task.OutOfHoursReminded = true
+						task.UpdatedAt = now
+						
+						if err := db.Save(&task).Error; err != nil {
+							log.Printf("task update error: %v", err)
+						}
 
-				log.Printf("reviewer reminder sent (task id: %s)", task.ID)
+						log.Printf("out of hours reminder sent and paused until next business day (task id: %s)", task.ID)
+					}
+				}
+			}
+			// 既に営業時間外リマインドを送信済みの場合はスキップ（ReminderPausedUntilで制御される）
+		} else {
+			// 営業時間内の場合
+			
+			// 営業時間外リマインドフラグをリセット
+			if task.OutOfHoursReminded {
+				task.OutOfHoursReminded = false
+				if err := db.Model(&task).Update("out_of_hours_reminded", false).Error; err != nil {
+					log.Printf("task out_of_hours_reminded reset error: %v", err)
+				}
+			}
+
+			// 通常のリマインド処理
+			reminderTime := now.Add(-time.Duration(reminderInterval) * time.Minute)
+			if task.UpdatedAt.Before(reminderTime) {
+				err := SendReviewerReminderMessage(db, task)
+				if err != nil {
+					log.Printf("reviewer reminder send error (task id: %s): %v", task.ID, err)
+
+					// チャンネル関連のエラーの場合はループ継続せずスキップ
+					if strings.Contains(err.Error(), "channel is archived") ||
+						strings.Contains(err.Error(), "not accessible") {
+						continue
+					}
+				} else {
+					task.UpdatedAt = now
+					if err := db.Model(&task).Update("updated_at", now).Error; err != nil {
+						log.Printf("task update error: %v", err)
+					}
+
+					log.Printf("reviewer reminder sent (task id: %s)", task.ID)
+				}
 			}
 		}
 	}
