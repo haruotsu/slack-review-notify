@@ -170,6 +170,24 @@ func TestCreateButton_NoStyle(t *testing.T) {
 	}
 }
 
+func TestCreateButton_EmptyValue(t *testing.T) {
+	button := CreateButton("Click Me", "click_action", "", "")
+
+	expected := map[string]interface{}{
+		"type": "button",
+		"text": map[string]interface{}{
+			"type": "plain_text",
+			"text": "Click Me",
+		},
+		"action_id": "click_action",
+		"value":     "default",
+	}
+
+	if !reflect.DeepEqual(button, expected) {
+		t.Errorf("expected %+v, got %+v", expected, button)
+	}
+}
+
 func TestCreatePauseReminderSelect(t *testing.T) {
 	options := []PauseOption{
 		{Text: "1時間停止", Value: "1h"},
@@ -322,5 +340,43 @@ func TestCreateMessageWithActionsBlocks(t *testing.T) {
 
 	if !reflect.DeepEqual(blocks, expected) {
 		t.Errorf("expected %+v, got %+v", expected, blocks)
+	}
+}
+
+func TestCreateMessageBlocks_EmptyMessage(t *testing.T) {
+	blocks := CreateMessageBlocks("")
+
+	expected := []map[string]interface{}{
+		{
+			"type": "section",
+			"text": map[string]interface{}{
+				"type": "mrkdwn",
+				"text": " ",
+			},
+		},
+	}
+
+	if !reflect.DeepEqual(blocks, expected) {
+		t.Errorf("expected %+v, got %+v", expected, blocks)
+	}
+}
+
+func TestCreatePauseReminderSelect_EmptyValues(t *testing.T) {
+	options := []PauseOption{
+		{Text: "停止", Value: "stop"},
+	}
+	
+	selectElement := CreatePauseReminderSelect("", "", "", options)
+
+	// taskIDとplaceholderにデフォルト値が設定されることを確認
+	placeholderObj := selectElement["placeholder"].(map[string]interface{})
+	if placeholderObj["text"] != "選択してください" {
+		t.Errorf("expected default placeholder, got %v", placeholderObj["text"])
+	}
+
+	optionsArray := selectElement["options"].([]map[string]interface{})
+	expectedValue := "unknown:stop"
+	if optionsArray[0]["value"] != expectedValue {
+		t.Errorf("expected %s, got %v", expectedValue, optionsArray[0]["value"])
 	}
 }

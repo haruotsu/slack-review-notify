@@ -125,7 +125,7 @@ func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) strin
 // SendSlackMessageOffHours は営業時間外用のメンション抜きメッセージを送信する
 func SendSlackMessageOffHours(prURL, title, channel string) (string, string, error) {
 	message := fmt.Sprintf("📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n (レビューのメンションは翌営業日の朝（10時）にお送りします)", title, prURL)
-	doneButton := CreateButton("レビュー完了", "review_done", "", "primary")
+	doneButton := CreateButton("レビュー完了", "review_done", "done", "primary")
 	blocks := CreateMessageWithActionBlocks(message, doneButton)
 
 	body := map[string]interface{}{
@@ -239,7 +239,7 @@ func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, 
 	}
 
 	message := fmt.Sprintf("%s *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>", mentionText, title, prURL)
-	doneButton := CreateButton("レビュー完了", "review_done", "", "primary")
+	doneButton := CreateButton("レビュー完了", "review_done", "done", "primary")
 	blocks := CreateMessageWithActionBlocks(message, doneButton)
 
 	body := map[string]interface{}{
