@@ -72,6 +72,10 @@ func (b *SlackBlockBuilder) Build() []map[string]interface{} {
 
 // CreateButton ボタン要素を作成
 func CreateButton(text, actionID, value, style string) map[string]interface{} {
+	if value == "" {
+		value = "default"
+	}
+	
 	button := map[string]interface{}{
 		"type": "button",
 		"text": map[string]interface{}{
@@ -91,6 +95,13 @@ func CreateButton(text, actionID, value, style string) map[string]interface{} {
 
 // CreatePauseReminderSelect リマインダー停止セレクトを作成
 func CreatePauseReminderSelect(taskID, actionID, placeholder string, options []PauseOption) map[string]interface{} {
+	if taskID == "" {
+		taskID = "unknown"
+	}
+	if placeholder == "" {
+		placeholder = "選択してください"
+	}
+	
 	selectOptions := make([]map[string]interface{}, len(options))
 	for i, option := range options {
 		selectOptions[i] = map[string]interface{}{
@@ -130,6 +141,9 @@ func CreateStopOnlyPauseReminderSelect(taskID, actionID, placeholder string) map
 
 // CreateMessageBlocks メッセージのみのブロックを作成
 func CreateMessageBlocks(message string) []map[string]interface{} {
+	if message == "" {
+		message = " "
+	}
 	return NewSlackBlockBuilder().
 		AddSection(message).
 		Build()
@@ -137,6 +151,9 @@ func CreateMessageBlocks(message string) []map[string]interface{} {
 
 // CreateMessageWithActionBlocks メッセージと1つのアクションのブロックを作成
 func CreateMessageWithActionBlocks(message string, action map[string]interface{}) []map[string]interface{} {
+	if message == "" {
+		message = " "
+	}
 	return NewSlackBlockBuilder().
 		AddSection(message).
 		AddActions(action).
@@ -145,6 +162,9 @@ func CreateMessageWithActionBlocks(message string, action map[string]interface{}
 
 // CreateMessageWithActionsBlocks メッセージと複数のアクションのブロックを作成
 func CreateMessageWithActionsBlocks(message string, actions ...map[string]interface{}) []map[string]interface{} {
+	if message == "" {
+		message = " "
+	}
 	return NewSlackBlockBuilder().
 		AddSection(message).
 		AddActions(actions...).
