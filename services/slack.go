@@ -124,33 +124,16 @@ func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) strin
 
 // SendSlackMessageOffHours は営業時間外用のメンション抜きメッセージを送信する
 func SendSlackMessageOffHours(prURL, title, channel string) (string, string, error) {
-	blocks := []Block{
-		{
-			Type: "section",
-			Text: &TextObject{
-				Type: "mrkdwn",
-				Text: fmt.Sprintf("📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n (レビューのメンションは翌営業日の朝（10時）にお送りします)", title, prURL),
-			},
-		},
-		{
-			Type: "actions",
-			Elements: []Button{
-				{
-					Type:     "button",
-					Text:     TextObject{Type: "plain_text", Text: "レビュー完了"},
-					ActionID: "review_done",
-					Style:    "primary",
-				},
-			},
-		},
+	message := fmt.Sprintf("📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n (レビューのメンションは翌営業日の朝（10時）にお送りします)", title, prURL)
+	doneButton := CreateButton("レビュー完了", "review_done", "done", "primary")
+	blocks := CreateMessageWithActionBlocks(message, doneButton)
+
+	body := map[string]interface{}{
+		"channel": channel,
+		"blocks":  blocks,
 	}
 
-	message := SlackMessage{
-		Channel: channel,
-		Blocks:  blocks,
-	}
-
-	jsonData, _ := json.Marshal(message)
+	jsonData, _ := json.Marshal(body)
 	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", "", err
@@ -204,15 +187,7 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 
 	message := fmt.Sprintf("🌅 *おはようございます！* %s\n\n📋 こちらのPRのレビューをお願いします。%s", mentionText, reviewerText)
 	
-	blocks := []map[string]interface{}{
-		{
-			"type": "section",
-			"text": map[string]interface{}{
-				"type": "mrkdwn",
-				"text": message,
-			},
-		},
-	}
+	blocks := CreateMessageBlocks(message)
 
 	body := map[string]interface{}{
 		"channel":   task.SlackChannel,
@@ -263,36 +238,16 @@ func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, 
 		mentionText = fmt.Sprintf("<@%s>", mentionID)
 	}
 
-	blocks := []Block{
-		{
-			Type: "section",
-			Text: &TextObject{
-				Type: "mrkdwn",
-				Text: fmt.Sprintf("%s *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>", mentionText, title, prURL),
-			},
-		},
-		{
-			Type: "actions",
-			Elements: []Button{
-				{
-					Type: "button",
-					Text: TextObject{
-						Type: "plain_text",
-						Text: "レビュー完了",
-					},
-					ActionID: "review_done",
-					Style:    "primary",
-				},
-			},
-		},
+	message := fmt.Sprintf("%s *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>", mentionText, title, prURL)
+	doneButton := CreateButton("レビュー完了", "review_done", "done", "primary")
+	blocks := CreateMessageWithActionBlocks(message, doneButton)
+
+	body := map[string]interface{}{
+		"channel": channel,
+		"blocks":  blocks,
 	}
 
-	message := SlackMessage{
-		Channel: channel,
-		Blocks:  blocks,
-	}
-
-	jsonData, _ := json.Marshal(message)
+	jsonData, _ := json.Marshal(body)
 	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", "", err
@@ -365,30 +320,8 @@ func PostToThread(channel, ts, message string) error {
 
 // スレッドにボタン付きメッセージを投稿する関数
 func PostToThreadWithButtons(channel, ts, message string, taskID string) error {
-	blocks := []map[string]interface{}{
-		{
-			"type": "section",
-			"text": map[string]interface{}{
-				"type": "mrkdwn",
-				"text": message,
-			},
-		},
-		{
-			"type": "actions",
-			"elements": []map[string]interface{}{
-				{
-					"type": "button",
-					"text": map[string]interface{}{
-						"type": "plain_text",
-						"text": "リマインドを一時停止",
-					},
-					"action_id": "pause_reminder_thread",
-					"value":     taskID,
-					"style":     "danger",
-				},
-			},
-		},
-	}
+	pauseButton := CreateButton("リマインドを一時停止", "pause_reminder_thread", taskID, "danger")
+	blocks := CreateMessageWithActionBlocks(message, pauseButton)
 
 	body := map[string]interface{}{
 		"channel":   channel,
@@ -482,66 +415,8 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 
 	message := fmt.Sprintf("<@%s> レビューしてくれたら嬉しいです...👀", task.Reviewer)
 
-	// ボタン付きのメッセージブロックを作成
-	blocks := []map[string]interface{}{
-		{
-			"type": "section",
-			"text": map[string]string{
-				"type": "mrkdwn",
-				"text": message,
-			},
-		},
-		{
-			"type": "actions",
-			"elements": []map[string]interface{}{
-				{
-					"type": "static_select",
-					"placeholder": map[string]string{
-						"type": "plain_text",
-						"text": "リマインダーを停止...",
-					},
-					"action_id": "pause_reminder",
-					"options": []map[string]interface{}{
-						{
-							"text": map[string]string{
-								"type": "plain_text",
-								"text": "1時間停止",
-							},
-							"value": fmt.Sprintf("%s:1h", task.ID),
-						},
-						{
-							"text": map[string]string{
-								"type": "plain_text",
-								"text": "2時間停止",
-							},
-							"value": fmt.Sprintf("%s:2h", task.ID),
-						},
-						{
-							"text": map[string]string{
-								"type": "plain_text",
-								"text": "4時間停止",
-							},
-							"value": fmt.Sprintf("%s:4h", task.ID),
-						},
-						{
-							"text": map[string]string{
-								"type": "plain_text",
-								"text": "今日は通知しない (翌営業日の朝まで停止)",
-							},
-							"value": fmt.Sprintf("%s:today", task.ID),
-						},
-						{
-							"text": map[string]string{
-								"type": "plain_text",
-								"text": "リマインダーを完全に停止",
-							},
-							"value": fmt.Sprintf("%s:stop", task.ID),
-						},
-					},
-				},
-			},
-		},
-	}
+	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder", "リマインダーを停止")
+	blocks := CreateMessageWithActionBlocks(message, pauseSelect)
 
 	// スレッドにボタン付きメッセージを投稿
 	body := map[string]interface{}{
@@ -688,78 +563,11 @@ func IsChannelArchived(channelID string) (bool, error) {
 
 // 自動割り当てされたレビュワーを表示し、変更ボタンを表示する関数
 func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
-	message := fmt.Sprintf("自動でレビュワーが割り当てられました: <@%s> さん、レビューをお願いします！", task.Reviewer)
+	message := fmt.Sprintf("<@%s> レビューしてくれたら嬉しいです...👀", task.Reviewer)
 
-	// ボタン付きのメッセージブロックを作成
-	blocks := []map[string]interface{}{
-		{
-			"type": "section",
-			"text": map[string]string{
-				"type": "mrkdwn",
-				"text": message,
-			},
-		},
-		{
-			"type": "actions",
-			"elements": []map[string]interface{}{
-				{
-					"type": "button",
-					"text": map[string]string{
-						"type": "plain_text",
-						"text": "変わってほしい！",
-					},
-					"action_id": "change_reviewer",
-					"value":     task.ID,
-					"style":     "danger",
-				},
-				{
-					"type": "static_select",
-					"placeholder": map[string]string{
-						"type": "plain_text",
-						"text": "リマインダーを一時停止",
-					},
-					"action_id": "pause_reminder_initial",
-					"options": []map[string]interface{}{
-						{
-							"text": map[string]string{
-								"type": "plain_text",
-								"text": "1時間停止",
-							},
-							"value": fmt.Sprintf("%s:1h", task.ID),
-						},
-						{
-							"text": map[string]string{
-								"type": "plain_text",
-								"text": "2時間停止",
-							},
-							"value": fmt.Sprintf("%s:2h", task.ID),
-						},
-						{
-							"text": map[string]string{
-								"type": "plain_text",
-								"text": "4時間停止",
-							},
-							"value": fmt.Sprintf("%s:4h", task.ID),
-						},
-						{
-							"text": map[string]string{
-								"type": "plain_text",
-								"text": "今日は通知しない",
-							},
-							"value": fmt.Sprintf("%s:today", task.ID),
-						},
-						{
-							"text": map[string]string{
-								"type": "plain_text",
-								"text": "完全に停止",
-							},
-							"value": fmt.Sprintf("%s:stop", task.ID),
-						},
-					},
-				},
-			},
-		},
-	}
+	changeButton := CreateChangeReviewerButton(task.ID)
+	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder_initial", "リマインダーを停止")
+	blocks := CreateMessageWithActionsBlocks(message, changeButton, pauseSelect)
 
 	// スレッドにボタン付きメッセージを投稿
 	body := map[string]interface{}{
@@ -880,38 +688,8 @@ func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
 func SendOutOfHoursReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	message := fmt.Sprintf("<@%s> レビューしてくれたら嬉しいです...👀\n\n営業時間外のため、次回のリマインドは翌営業日に送信します。", task.Reviewer)
 
-	// ボタン付きのメッセージブロックを作成
-	blocks := []map[string]interface{}{
-		{
-			"type": "section",
-			"text": map[string]string{
-				"type": "mrkdwn",
-				"text": message,
-			},
-		},
-		{
-			"type": "actions",
-			"elements": []map[string]interface{}{
-				{
-					"type": "static_select",
-					"placeholder": map[string]string{
-						"type": "plain_text",
-						"text": "リマインダーを停止...",
-					},
-					"action_id": "pause_reminder",
-					"options": []map[string]interface{}{
-						{
-							"text": map[string]string{
-								"type": "plain_text",
-								"text": "完全に停止",
-							},
-							"value": fmt.Sprintf("%s:stop", task.ID),
-						},
-					},
-				},
-			},
-		},
-	}
+	pauseSelect := CreateStopOnlyPauseReminderSelect(task.ID, "pause_reminder", "リマインダーを停止")
+	blocks := CreateMessageWithActionBlocks(message, pauseSelect)
 
 	// スレッドにボタン付きメッセージを投稿
 	body := map[string]interface{}{
@@ -945,16 +723,8 @@ func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
 		return nil
 	}
 
-	// 完了メッセージのブロックを作成
-	blocks := []map[string]interface{}{
-		{
-			"type": "section",
-			"text": map[string]string{
-				"type": "mrkdwn",
-				"text": fmt.Sprintf("✅ *%s*\n🔗 %s\n\n*レビュー完了*: このPRのラベルが外れたため、レビュータスクを終了しました。", task.Title, task.PRURL),
-			},
-		},
-	}
+	message := fmt.Sprintf("✅ *%s*\n🔗 %s\n\n*レビュー完了*: このPRのラベルが外れたため、レビュータスクを終了しました。", task.Title, task.PRURL)
+	blocks := CreateMessageBlocks(message)
 
 	// メッセージ更新API呼び出し
 	body := map[string]interface{}{
