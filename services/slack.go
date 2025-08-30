@@ -876,6 +876,68 @@ func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
 	return nextBusinessDayMorning
 }
 
+// SendOutOfHoursReminderMessage は営業時間外のリマインドメッセージを送信する
+func SendOutOfHoursReminderMessage(db *gorm.DB, task models.ReviewTask) error {
+	message := fmt.Sprintf("<@%s> レビューしてくれたら嬉しいです...👀\n\n営業時間外のため、次回のリマインドは翌営業日に送信します。", task.Reviewer)
+
+	// ボタン付きのメッセージブロックを作成
+	blocks := []map[string]interface{}{
+		{
+			"type": "section",
+			"text": map[string]string{
+				"type": "mrkdwn",
+				"text": message,
+			},
+		},
+		{
+			"type": "actions",
+			"elements": []map[string]interface{}{
+				{
+					"type": "static_select",
+					"placeholder": map[string]string{
+						"type": "plain_text",
+						"text": "リマインダーを停止...",
+					},
+					"action_id": "pause_reminder",
+					"options": []map[string]interface{}{
+						{
+							"text": map[string]string{
+								"type": "plain_text",
+								"text": "完全に停止",
+							},
+							"value": fmt.Sprintf("%s:stop", task.ID),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// スレッドにボタン付きメッセージを投稿
+	body := map[string]interface{}{
+		"channel":   task.SlackChannel,
+		"thread_ts": task.SlackTS,
+		"blocks":    blocks,
+	}
+
+	jsonData, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
 // UpdateSlackMessageForCompletedTask はタスクが完了したことを示すようにSlackメッセージを更新する
 func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
 	if IsTestMode {
