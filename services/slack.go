@@ -563,7 +563,7 @@ func IsChannelArchived(channelID string) (bool, error) {
 
 // 自動割り当てされたレビュワーを表示し、変更ボタンを表示する関数
 func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
-	message := fmt.Sprintf("<@%s> レビューしてくれたら嬉しいです...👀", task.Reviewer)
+	message := fmt.Sprintf("自動でレビュワーが割り当てられました: <@%s> レビューをお願いします！", task.Reviewer)
 
 	changeButton := CreateChangeReviewerButton(task.ID)
 	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder_initial", "リマインダーを停止")
