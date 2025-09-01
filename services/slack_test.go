@@ -499,47 +499,57 @@ func TestIsChannelRelatedError(t *testing.T) {
 
 // GetNextBusinessDayMorning関数のテスト
 func TestGetNextBusinessDayMorning(t *testing.T) {
-	result := GetNextBusinessDayMorning()
-	now := time.Now()
-	todayMorning := time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, now.Location())
+	// JST タイムゾーンを定義
+	jst, _ := time.LoadLocation("Asia/Tokyo")
 
+	testCases := []struct {
+		name     string
+		baseTime time.Time
+		expected time.Time
+	}{
+		{
+			name:     "月曜日朝9時_当日10時を期待",
+			baseTime: time.Date(2024, 1, 8, 9, 0, 0, 0, jst), // 月曜日 9:00 JST
+			expected: time.Date(2024, 1, 8, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+		},
+		{
+			name:     "月曜日午後2時_火曜日10時を期待",
+			baseTime: time.Date(2024, 1, 8, 14, 0, 0, 0, jst), // 月曜日 14:00 JST
+			expected: time.Date(2024, 1, 9, 10, 0, 0, 0, jst), // 火曜日 10:00 JST
+		},
+		{
+			name:     "金曜日午後2時_月曜日10時を期待",
+			baseTime: time.Date(2024, 1, 12, 14, 0, 0, 0, jst), // 金曜日 14:00 JST
+			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+		},
+		{
+			name:     "土曜日午後2時_月曜日10時を期待",
+			baseTime: time.Date(2024, 1, 13, 14, 0, 0, 0, jst), // 土曜日 14:00 JST
+			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+		},
+		{
+			name:     "日曜日午後2時_月曜日10時を期待",
+			baseTime: time.Date(2024, 1, 14, 14, 0, 0, 0, jst), // 日曜日 14:00 JST
+			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := GetNextBusinessDayMorningWithTime(tc.baseTime)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+
+	result := GetNextBusinessDayMorning()
+	
 	// 結果は10:00に設定されている
 	assert.Equal(t, 10, result.Hour(), "時刻は10時に設定されていること")
 	assert.Equal(t, 0, result.Minute(), "分は0分に設定されていること")
 	assert.Equal(t, 0, result.Second(), "秒は0秒に設定されていること")
-
-	// 結果は現在時刻以降であること（当日の10時以降、または翌営業日の10時）
-	assert.True(t, result.After(now) || result.Equal(todayMorning), "結果は現在時刻以降であること")
-
-	// 土日の場合は月曜日になる
-	switch now.Weekday() {
-	case time.Saturday:
-		// 土曜日の場合、月曜日の10:00
-		assert.Equal(t, time.Monday, result.Weekday(), "土曜日の翌営業日は月曜日")
-	case time.Sunday:
-		// 日曜日の場合、月曜日の10:00
-		assert.Equal(t, time.Monday, result.Weekday(), "日曜日の翌営業日は月曜日")
-	case time.Monday, time.Tuesday, time.Wednesday, time.Thursday:
-		// 月〜木の場合
-		if now.Before(todayMorning) {
-			// 10時前なら当日の10時
-			assert.Equal(t, now.Weekday(), result.Weekday(), "平日10時前の翌営業日は当日")
-			assert.Equal(t, now.Day(), result.Day(), "平日10時前の翌営業日は当日")
-		} else {
-			// 10時以降なら翌日の10時
-			tomorrow := now.AddDate(0, 0, 1)
-			assert.Equal(t, tomorrow.Day(), result.Day(), "平日10時以降の翌営業日は翌日")
-		}
-	case time.Friday:
-		// 金曜日の場合
-		if now.Before(todayMorning) {
-			// 10時前なら当日の10時
-			assert.Equal(t, time.Friday, result.Weekday(), "金曜日10時前の翌営業日は当日")
-		} else {
-			// 10時以降なら月曜日の10時
-			assert.Equal(t, time.Monday, result.Weekday(), "金曜日10時以降の翌営業日は月曜日")
-		}
-	}
+	
+	// 現在時刻以降であることのチェック
+	assert.True(t, result.After(time.Now().Add(-time.Second)), "結果は現在時刻以降であること")
 }
 
 func TestSelectRandomReviewer(t *testing.T) {
