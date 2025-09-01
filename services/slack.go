@@ -686,12 +686,11 @@ func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
 
 // SendOutOfHoursReminderMessage は営業時間外のリマインドメッセージを送信する
 func SendOutOfHoursReminderMessage(db *gorm.DB, task models.ReviewTask) error {
-	message := fmt.Sprintf("<@%s> レビューしてくれたら嬉しいです...👀\n\n営業時間外のため、次回のリマインドは翌営業日に送信します。", task.Reviewer)
+	message := fmt.Sprintf("<@%s> レビューしてくれたら嬉しいです...👀\n\n*営業時間外のため、次回のリマインドは翌営業日に送信します。*", task.Reviewer)
 
-	pauseSelect := CreateStopOnlyPauseReminderSelect(task.ID, "pause_reminder", "リマインダーを停止")
-	blocks := CreateMessageWithActionBlocks(message, pauseSelect)
+	blocks := CreateMessageBlocks(message)
 
-	// スレッドにボタン付きメッセージを投稿
+	// スレッドにメッセージを投稿
 	body := map[string]interface{}{
 		"channel":   task.SlackChannel,
 		"thread_ts": task.SlackTS,
