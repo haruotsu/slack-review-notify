@@ -73,7 +73,8 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			// 最初の引数がサブコマンドかラベル名か判断
 			potentialSubCommands := []string{"show", "help", "set-mention", "add-reviewer", 
 				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo", 
-				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval"}
+				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
+				"set-business-hours-start", "set-business-hours-end", "set-timezone"}
 			
 			isSubCommand := false
 			for _, cmd := range potentialSubCommands {
@@ -207,6 +208,27 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				}
 				setReminderInterval(c, db, channelID, labelName, strings.TrimSpace(params), true)
 
+			case "set-business-hours-start":
+				if params == "" {
+					c.String(200, "営業開始時間を指定してください。例: /slack-review-notify " + labelName + " set-business-hours-start 09:00")
+					return
+				}
+				setBusinessHoursStart(c, db, channelID, labelName, strings.TrimSpace(params))
+
+			case "set-business-hours-end":
+				if params == "" {
+					c.String(200, "営業終了時間を指定してください。例: /slack-review-notify " + labelName + " set-business-hours-end 18:00")
+					return
+				}
+				setBusinessHoursEnd(c, db, channelID, labelName, strings.TrimSpace(params))
+
+			case "set-timezone":
+				if params == "" {
+					c.String(200, "タイムゾーンを指定してください。例: /slack-review-notify " + labelName + " set-timezone Asia/Tokyo")
+					return
+				}
+				setTimezone(c, db, channelID, labelName, strings.TrimSpace(params))
+
 			default:
 				c.String(200, "不明なコマンドです。/slack-review-notify help で使い方を確認してください。")
 			}
@@ -305,6 +327,9 @@ func showHelp(c *gin.Context) {
 • /slack-review-notify [ラベル名] remove-repo owner/repo - リポジトリを削除
 • /slack-review-notify [ラベル名] set-label 新ラベル名 - ラベル名を変更
 • /slack-review-notify [ラベル名] set-reviewer-reminder-interval 30 - リマインド頻度設定（分）
+• /slack-review-notify [ラベル名] set-business-hours-start 09:00 - 営業開始時間を設定
+• /slack-review-notify [ラベル名] set-business-hours-end 18:00 - 営業終了時間を設定
+• /slack-review-notify [ラベル名] set-timezone Asia/Tokyo - タイムゾーンを設定
 • /slack-review-notify [ラベル名] activate - 通知を有効化
 • /slack-review-notify [ラベル名] deactivate - 通知を無効化
 
@@ -364,14 +389,20 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 		reviewerReminderInterval = 30
 	}
 
+	timezone := config.Timezone
+	if timezone == "" {
+		timezone = "Asia/Tokyo" // デフォルトタイムゾーン
+	}
+
 	response := fmt.Sprintf(`*このチャンネルのラベル「%s」のレビュー通知設定*
 - ステータス: %s
 - メンション先: <@%s>
 - レビュワーリスト: %s
 - 通知対象リポジトリ: %s
-- レビュワー割り当て後のリマインド頻度: %d分`,
+- レビュワー割り当て後のリマインド頻度: %d分
+- 営業時間: %s - %s (%s)`,
 		labelName, status, config.DefaultMentionID, formatReviewerList(config.ReviewerList),
-		config.RepositoryList, reviewerReminderInterval)
+		config.RepositoryList, reviewerReminderInterval, config.BusinessHoursStart, config.BusinessHoursEnd, timezone)
 
 	c.String(200, response)
 }
@@ -809,4 +840,137 @@ func setReminderInterval(c *gin.Context, db *gorm.DB, channelID, labelName, inte
 
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
+}
+
+// 営業開始時間を設定
+func setBusinessHoursStart(c *gin.Context, db *gorm.DB, channelID, labelName, startTime string) {
+	if !isValidTimeFormat(startTime) {
+		c.String(200, "時間形式が無効です。HH:MM形式で指定してください（例: 09:00）")
+		return
+	}
+
+	var config models.ChannelConfig
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
+	
+	if result.Error != nil {
+		// 新規作成
+		config = models.ChannelConfig{
+			ID:                 uuid.NewString(),
+			SlackChannelID:     channelID,
+			LabelName:          labelName,
+			BusinessHoursStart: startTime,
+			BusinessHoursEnd:   "18:00",
+			Timezone:           "Asia/Tokyo",
+			IsActive:           true,
+			CreatedAt:          time.Now(),
+			UpdatedAt:          time.Now(),
+		}
+		db.Create(&config)
+		c.String(200, fmt.Sprintf("ラベル「%s」の営業開始時間を %s に設定しました。", labelName, startTime))
+		return
+	}
+
+	config.BusinessHoursStart = startTime
+	config.UpdatedAt = time.Now()
+	db.Save(&config)
+
+	c.String(200, fmt.Sprintf("ラベル「%s」の営業開始時間を %s に更新しました。", labelName, startTime))
+}
+
+// 営業終了時間を設定
+func setBusinessHoursEnd(c *gin.Context, db *gorm.DB, channelID, labelName, endTime string) {
+	if !isValidTimeFormat(endTime) {
+		c.String(200, "時間形式が無効です。HH:MM形式で指定してください（例: 18:00）")
+		return
+	}
+
+	var config models.ChannelConfig
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
+	
+	if result.Error != nil {
+		config = models.ChannelConfig{
+			ID:                 uuid.NewString(),
+			SlackChannelID:     channelID,
+			LabelName:          labelName,
+			BusinessHoursStart: "09:00",
+			BusinessHoursEnd:   endTime,
+			Timezone:           "Asia/Tokyo",
+			IsActive:           true,
+			CreatedAt:          time.Now(),
+			UpdatedAt:          time.Now(),
+		}
+		db.Create(&config)
+		c.String(200, fmt.Sprintf("ラベル「%s」の営業終了時間を %s に設定しました。", labelName, endTime))
+		return
+	}
+
+	// 既存設定を更新
+	config.BusinessHoursEnd = endTime
+	config.UpdatedAt = time.Now()
+	db.Save(&config)
+
+	c.String(200, fmt.Sprintf("ラベル「%s」の営業終了時間を %s に更新しました。", labelName, endTime))
+}
+
+// タイムゾーンを設定
+func setTimezone(c *gin.Context, db *gorm.DB, channelID, labelName, timezone string) {
+	// タイムゾーンをバリデート
+	if !isValidTimezone(timezone) {
+		c.String(200, "無効なタイムゾーンです。例: Asia/Tokyo, UTC, America/New_York")
+		return
+	}
+
+	var config models.ChannelConfig
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
+	
+	if result.Error != nil {
+		// 新規作成
+		config = models.ChannelConfig{
+			ID:             uuid.NewString(),
+			SlackChannelID: channelID,
+			LabelName:      labelName,
+			Timezone:       timezone,
+			BusinessHoursStart: "09:00",
+			BusinessHoursEnd:   "18:00",
+			IsActive:       true,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}
+		db.Create(&config)
+		c.String(200, fmt.Sprintf("ラベル「%s」のタイムゾーンを %s に設定しました。", labelName, timezone))
+		return
+	}
+
+	// 既存設定を更新
+	config.Timezone = timezone
+	config.UpdatedAt = time.Now()
+	db.Save(&config)
+
+	c.String(200, fmt.Sprintf("ラベル「%s」のタイムゾーンを %s に更新しました。", labelName, timezone))
+}
+
+// タイムゾーンをバリデート
+func isValidTimezone(timezone string) bool {
+	_, err := time.LoadLocation(timezone)
+	return err == nil
+}
+
+// 時間形式（HH:MM）をバリデート
+func isValidTimeFormat(timeStr string) bool {
+	parts := strings.Split(timeStr, ":")
+	if len(parts) != 2 {
+		return false
+	}
+
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil || hour < 0 || hour > 23 {
+		return false
+	}
+
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil || minute < 0 || minute > 59 {
+		return false
+	}
+
+	return true
 }

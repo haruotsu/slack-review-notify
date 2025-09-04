@@ -12,10 +12,8 @@ import (
 
 // CheckBusinessHoursTasks は営業時間外待機タスクを営業時間内になったときに処理する
 func CheckBusinessHoursTasks(db *gorm.DB) {
-	// 営業時間外の場合は何もしない
-	if IsOutsideBusinessHours(time.Now()) {
-		return
-	}
+	// 現在時刻を取得
+	now := time.Now()
 
 	var tasks []models.ReviewTask
 	result := db.Where("status = ?", "waiting_business_hours").Find(&tasks)
@@ -36,6 +34,11 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 		if err := db.Where("slack_channel_id = ? AND label_name = ?", task.SlackChannel, labelName).First(&config).Error; err != nil {
 			log.Printf("channel config not found for waiting task: %s, error: %v", task.ID, err)
 			continue
+		}
+
+		// このチャンネルの営業時間設定をチェック
+		if !IsWithinBusinessHours(&config, now) {
+			continue // 営業時間外なので処理をスキップ
 		}
 
 		// レビュワーをランダム選択
@@ -111,7 +114,8 @@ func CheckInReviewTasks(db *gorm.DB) {
 		}
 
 		// 営業時間外かチェック
-		if IsOutsideBusinessHours(now) {
+		isOutsideBusinessHours := !IsWithinBusinessHours(&config, now)
+		if isOutsideBusinessHours {
 			// 営業時間外で、まだ営業時間外リマインドを送っていない場合
 			if !task.OutOfHoursReminded {
 				// 設定された頻度でリマインダーを送信（初回のみ）
