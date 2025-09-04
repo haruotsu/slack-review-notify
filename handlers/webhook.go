@@ -117,7 +117,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 		var reviewerID string
 
 		// 営業時間外判定
-		if services.IsOutsideBusinessHours(time.Now()) {
+		if !services.IsWithinBusinessHours(&config, time.Now()) {
 			// 営業時間外の場合：メンション抜きメッセージを送信
 			var err error
 			slackTs, slackChannelID, err = services.SendSlackMessageOffHours(
