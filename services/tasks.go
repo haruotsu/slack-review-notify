@@ -132,8 +132,8 @@ func CheckInReviewTasks(db *gorm.DB) {
 							continue
 						}
 					} else {
-						// 翌営業日10時まで一時停止
-						nextBusinessDay := GetNextBusinessDayMorning()
+						// 翌営業日の営業開始時刻まで一時停止
+						nextBusinessDay := GetNextBusinessDayMorningWithConfig(now, &config)
 						task.ReminderPausedUntil = &nextBusinessDay
 						task.OutOfHoursReminded = true
 						task.UpdatedAt = now

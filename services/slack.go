@@ -124,7 +124,7 @@ func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) strin
 
 // SendSlackMessageOffHours は営業時間外用のメンション抜きメッセージを送信する
 func SendSlackMessageOffHours(prURL, title, channel string) (string, string, error) {
-	message := fmt.Sprintf("📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n (レビューのメンションは翌営業日の朝（10時）にお送りします)", title, prURL)
+	message := fmt.Sprintf("📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n (レビューのメンションは翌営業日の朝にお送りします)", title, prURL)
 	doneButton := CreateButton("レビュー完了", "review_done", "done", "primary")
 	blocks := CreateMessageWithActionBlocks(message, doneButton)
 
@@ -628,28 +628,43 @@ func IsOutsideBusinessHours(t time.Time) bool {
 	return false
 }
 
-// 翌営業日の朝（10:00）の時間を取得する関数
-func GetNextBusinessDayMorning() time.Time {
-	return GetNextBusinessDayMorningWithTime(time.Now())
-}
 
-// 指定された時刻から翌営業日の朝（10:00）の時間を取得する関数
-func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
-	// JST タイムゾーンを取得
-	jst, err := time.LoadLocation("Asia/Tokyo")
-	if err != nil {
-		// フォールバック：現在のタイムゾーンを使用
-		jst = now.Location()
+// 指定された時刻から翌営業日の営業開始時刻を取得する関数（営業時間設定対応）
+func GetNextBusinessDayMorningWithConfig(now time.Time, config *models.ChannelConfig) time.Time {
+	// タイムゾーンの設定を取得
+	timezone := "Asia/Tokyo"
+	if config != nil && config.Timezone != "" {
+		timezone = config.Timezone
 	}
 
-	// 現在時刻をJSTに変換
-	nowInJST := now.In(jst)
-	
-	// 今日の10:00（JST）を作成
-	todayMorning := time.Date(nowInJST.Year(), nowInJST.Month(), nowInJST.Day(), 10, 0, 0, 0, jst)
+	// タイムゾーンをロード
+	tz, err := time.LoadLocation(timezone)
+	if err != nil {
+		// フォールバック：現在のタイムゾーンを使用
+		tz = now.Location()
+	}
 
-	// 現在の曜日と時刻を確認（JST基準）
-	weekday := nowInJST.Weekday()
+	// 現在時刻を指定タイムゾーンに変換
+	nowInTZ := now.In(tz)
+
+	// 営業開始時刻を取得（デフォルト: 10:00）
+	businessHourStart := "10:00"
+	if config != nil && config.BusinessHoursStart != "" {
+		businessHourStart = config.BusinessHoursStart
+	}
+
+	// 営業開始時刻をパース
+	startHour, startMin, err := parseBusinessHoursTime(businessHourStart)
+	if err != nil {
+		// パースに失敗した場合は10:00をデフォルトとする
+		startHour, startMin = 10, 0
+	}
+
+	// 今日の営業開始時刻を作成
+	todayMorning := time.Date(nowInTZ.Year(), nowInTZ.Month(), nowInTZ.Day(), startHour, startMin, 0, 0, tz)
+
+	// 現在の曜日と時刻を確認
+	weekday := nowInTZ.Weekday()
 	
 	// 結果を格納する変数
 	var nextBusinessDayMorning time.Time
@@ -657,27 +672,27 @@ func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
 	switch weekday {
 	case time.Monday, time.Tuesday, time.Wednesday, time.Thursday:
 		// 月〜木の場合
-		if nowInJST.Before(todayMorning) {
-			// 10:00前なら今日の10:00
+		if nowInTZ.Before(todayMorning) {
+			// 営業開始時刻前なら今日の営業開始時刻
 			nextBusinessDayMorning = todayMorning
 		} else {
-			// 10:00以降なら翌日の10:00
+			// 営業開始時刻以降なら翌日の営業開始時刻
 			nextBusinessDayMorning = todayMorning.AddDate(0, 0, 1)
 		}
 	case time.Friday:
 		// 金曜日の場合
-		if nowInJST.Before(todayMorning) {
-			// 10:00前なら今日の10:00
+		if nowInTZ.Before(todayMorning) {
+			// 営業開始時刻前なら今日の営業開始時刻
 			nextBusinessDayMorning = todayMorning
 		} else {
-			// 10:00以降なら月曜日の10:00（3日後）
+			// 営業開始時刻以降なら月曜日の営業開始時刻（3日後）
 			nextBusinessDayMorning = todayMorning.AddDate(0, 0, 3)
 		}
 	case time.Saturday:
-		// 土曜日の場合、月曜日の10:00（2日後）
+		// 土曜日の場合、月曜日の営業開始時刻（2日後）
 		nextBusinessDayMorning = todayMorning.AddDate(0, 0, 2)
 	case time.Sunday:
-		// 日曜日の場合、月曜日の10:00（1日後）
+		// 日曜日の場合、月曜日の営業開始時刻（1日後）
 		nextBusinessDayMorning = todayMorning.AddDate(0, 0, 1)
 	}
 

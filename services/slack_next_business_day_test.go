@@ -56,8 +56,8 @@ func TestGetNextBusinessDayMorning_Detailed(t *testing.T) {
 			// このテストは現在の実装では失敗します
 			// 実際のテストのため、GetNextBusinessDayMorningに時刻を渡せるようにする必要があります
 			
-			// 現在の実装をテスト（バグがあることを確認）
-			result := GetNextBusinessDayMorning()
+			// 現在の実装をテスト（デフォルト設定を使用）
+			result := GetNextBusinessDayMorningWithConfig(time.Now(), nil)
 			
 			// 現在の実装では常に「翌日」になるため、このテストは失敗するはずです
 			t.Logf("現在時刻: %s", tc.currentTime.Format("2006-01-02 15:04:05"))
@@ -126,8 +126,8 @@ func TestGetNextBusinessDayMorningWithTime(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// GetNextBusinessDayMorningWithTimeをテスト（まだ実装されていない）
-			result := GetNextBusinessDayMorningWithTime(tc.currentTime)
+			// GetNextBusinessDayMorningWithConfigをテスト（デフォルト設定使用）
+			result := GetNextBusinessDayMorningWithConfig(tc.currentTime, nil)
 			
 			assert.Equal(t, tc.expected, result, 
 				"currentTime: %s, expected: %s, got: %s",

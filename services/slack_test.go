@@ -536,12 +536,12 @@ func TestGetNextBusinessDayMorning(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := GetNextBusinessDayMorningWithTime(tc.baseTime)
+			result := GetNextBusinessDayMorningWithConfig(tc.baseTime, nil)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
 
-	result := GetNextBusinessDayMorning()
+	result := GetNextBusinessDayMorningWithConfig(time.Now(), nil)
 	
 	// 結果は10:00に設定されている
 	assert.Equal(t, 10, result.Hour(), "時刻は10時に設定されていること")

@@ -120,7 +120,8 @@ func TestGetNextBusinessDayMorningWithTime_OutOfHours(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := GetNextBusinessDayMorningWithTime(tt.input)
+			// デフォルト設定（10:00開始）を使用
+			result := GetNextBusinessDayMorningWithConfig(tt.input, nil)
 			assert.Equal(t, tt.expected, result,
 				"翌営業日10時の計算が正しくない: got %v, want %v", result, tt.expected)
 		})
