@@ -19,7 +19,7 @@ func TestCheckInReviewTasks_ReminderPausedUntilTimezone(t *testing.T) {
 	baseTimeJST := time.Date(2024, 8, 27, 13, 0, 0, 0, jst)
 	
 	// 翌営業日の朝（JST 10:00）を計算
-	nextBusinessDayJST := GetNextBusinessDayMorningWithTime(baseTimeJST)
+	nextBusinessDayJST := GetNextBusinessDayMorningWithConfig(baseTimeJST, nil)
 	
 	// UTC での同じ時刻
 	baseTimeUTC := baseTimeJST.UTC()
@@ -140,7 +140,7 @@ func TestGetNextBusinessDayMorning_Timezone(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// 翌営業日を計算
-			nextBusinessDay := GetNextBusinessDayMorningWithTime(tt.inputTime)
+			nextBusinessDay := GetNextBusinessDayMorningWithConfig(tt.inputTime, nil)
 
 			// 結果は常に JST で指定された日の 10:00 になるはず
 			assert.Equal(t, 2024, nextBusinessDay.Year(), "Year should be 2024")

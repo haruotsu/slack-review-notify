@@ -135,8 +135,16 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				pauseUntil = time.Now().Add(4 * time.Hour)
 				taskToUpdate.ReminderPausedUntil = &pauseUntil
 			case "today":
-				// 翌営業日の朝まで停止
-				pauseUntil = services.GetNextBusinessDayMorning()
+				// 翌営業日の営業開始時刻まで停止
+				// チャンネル設定を取得
+				var config models.ChannelConfig
+				if err := db.Where("slack_channel_id = ? AND label_name = ?", taskToUpdate.SlackChannel, taskToUpdate.LabelName).First(&config).Error; err != nil {
+					// 設定が見つからない場合はデフォルト（10:00）を使用
+					pauseUntil = services.GetNextBusinessDayMorningWithConfig(time.Now(), nil)
+				} else {
+					// 設定に基づいて営業開始時刻を使用
+					pauseUntil = services.GetNextBusinessDayMorningWithConfig(time.Now(), &config)
+				}
 				taskToUpdate.ReminderPausedUntil = &pauseUntil
 			case "stop":
 				// レビュー担当者が決まるまで通知しない
