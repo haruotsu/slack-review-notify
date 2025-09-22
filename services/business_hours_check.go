@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kokardy/jpholiday"
 )
 
 // IsWithinBusinessHours は指定された時刻が営業時間内かどうかを判定する
@@ -27,6 +29,29 @@ func IsWithinBusinessHours(config *models.ChannelConfig, currentTime time.Time) 
 	}
 
 	localTime := currentTime.In(loc)
+
+	// 日本のタイムゾーンの場合、祝日・週末・年末年始チェックを行う
+	if timezone == "Asia/Tokyo" {
+		// 祝日チェック
+		date := jpholiday.TimeToDate(localTime)
+		isHoliday, _ := date.Holiday()
+		if isHoliday {
+			return false
+		}
+
+		// 週末チェック（土曜日または日曜日）
+		weekday := localTime.Weekday()
+		if weekday == time.Saturday || weekday == time.Sunday {
+			return false
+		}
+
+		// 年末年始チェック（12/29 - 1/3）
+		month := localTime.Month()
+		day := localTime.Day()
+		if (month == time.December && day >= 29) || (month == time.January && day <= 3) {
+			return false
+		}
+	}
 
 	currentHour := localTime.Hour()
 	currentMin := localTime.Minute()

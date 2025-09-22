@@ -600,40 +600,13 @@ func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) er
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
-// 営業時間外かどうかを判定する関数
-// 営業時間：平日の10:00〜18:59、それ以外は営業時間外
-func IsOutsideBusinessHours(t time.Time) bool {
-	// JST タイムゾーンを取得
-	jst, err := time.LoadLocation("Asia/Tokyo")
-	if err != nil {
-		// フォールバック：元のタイムゾーンを使用
-		jst = t.Location()
-	}
-
-	// 時刻をJSTに変換
-	timeInJST := t.In(jst)
-	
-	// 土日は営業時間外
-	weekday := timeInJST.Weekday()
-	if weekday == time.Saturday || weekday == time.Sunday {
-		return true
-	}
-	
-	// 平日の営業時間は10:00〜18:59
-	hour := timeInJST.Hour()
-	if hour < 10 || hour >= 19 {
-		return true
-	}
-	
-	return false
-}
-
-// 翌営業日の朝（10:00）の時間を取得する関数
+// 翌営業日の営業開始時刻を取得する関数
 func GetNextBusinessDayMorning() time.Time {
 	return GetNextBusinessDayMorningWithTime(time.Now())
 }
 
-// 指定された時刻から翌営業日の朝（10:00）の時間を取得する関数
+// 指定された時刻から翌営業日の営業開始時刻を取得する関数
+// 日本の祝日、週末、年末年始を考慮
 func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
 	// JST タイムゾーンを取得
 	jst, err := time.LoadLocation("Asia/Tokyo")
@@ -644,44 +617,43 @@ func GetNextBusinessDayMorningWithTime(now time.Time) time.Time {
 
 	// 現在時刻をJSTに変換
 	nowInJST := now.In(jst)
-	
-	// 今日の10:00（JST）を作成
-	todayMorning := time.Date(nowInJST.Year(), nowInJST.Month(), nowInJST.Day(), 10, 0, 0, 0, jst)
 
-	// 現在の曜日と時刻を確認（JST基準）
-	weekday := nowInJST.Weekday()
-	
-	// 結果を格納する変数
-	var nextBusinessDayMorning time.Time
-
-	switch weekday {
-	case time.Monday, time.Tuesday, time.Wednesday, time.Thursday:
-		// 月〜木の場合
-		if nowInJST.Before(todayMorning) {
-			// 10:00前なら今日の10:00
-			nextBusinessDayMorning = todayMorning
-		} else {
-			// 10:00以降なら翌日の10:00
-			nextBusinessDayMorning = todayMorning.AddDate(0, 0, 1)
-		}
-	case time.Friday:
-		// 金曜日の場合
-		if nowInJST.Before(todayMorning) {
-			// 10:00前なら今日の10:00
-			nextBusinessDayMorning = todayMorning
-		} else {
-			// 10:00以降なら月曜日の10:00（3日後）
-			nextBusinessDayMorning = todayMorning.AddDate(0, 0, 3)
-		}
-	case time.Saturday:
-		// 土曜日の場合、月曜日の10:00（2日後）
-		nextBusinessDayMorning = todayMorning.AddDate(0, 0, 2)
-	case time.Sunday:
-		// 日曜日の場合、月曜日の10:00（1日後）
-		nextBusinessDayMorning = todayMorning.AddDate(0, 0, 1)
+	// デフォルトの営業時間設定（10:00〜19:00）を作成
+	config := &models.ChannelConfig{
+		BusinessHoursStart: "10:00",
+		BusinessHoursEnd:   "19:00",
+		Timezone:           "Asia/Tokyo",
 	}
 
-	return nextBusinessDayMorning
+	// 営業開始時刻を解析
+	startHour, startMin, err := parseBusinessHoursTime(config.BusinessHoursStart)
+	if err != nil {
+		// エラーの場合はデフォルトの10:00を使用
+		startHour, startMin = 10, 0
+	}
+
+	// 今日の営業開始時刻を作成
+	todayBusinessStart := time.Date(nowInJST.Year(), nowInJST.Month(), nowInJST.Day(), startHour, startMin, 0, 0, jst)
+
+	// 開始日を決定（今日の営業開始時刻前なら今日から、そうでなければ翌日から）
+	startDay := 0
+	if nowInJST.After(todayBusinessStart) || nowInJST.Equal(todayBusinessStart) {
+		startDay = 1
+	}
+
+	// 翌営業日を探す（最大30日先まで探索）
+	for i := startDay; i < startDay+30; i++ {
+		// 候補日の営業開始時刻を作成
+		candidate := todayBusinessStart.AddDate(0, 0, i)
+
+		// 営業日かチェック（営業開始時刻の時点で営業時間内かチェック）
+		if IsWithinBusinessHours(config, candidate) {
+			return candidate
+		}
+	}
+
+	// 30日以内に営業日が見つからなかった場合は翌日の営業開始時刻を返す（フォールバック）
+	return time.Date(nowInJST.Year(), nowInJST.Month(), nowInJST.Day(), startHour, startMin, 0, 0, jst).AddDate(0, 0, 1)
 }
 
 // SendOutOfHoursReminderMessage は営業時間外のリマインドメッセージを送信する

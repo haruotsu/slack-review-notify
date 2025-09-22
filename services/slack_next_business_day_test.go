@@ -19,18 +19,18 @@ func TestGetNextBusinessDayMorning_Detailed(t *testing.T) {
 	}{
 		{
 			name:        "月曜日の午前9時 → 月曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 9, 0, 0, 0, jst), // 2024年1月8日は月曜日
-			expected:    time.Date(2024, 1, 8, 10, 0, 0, 0, jst),
+			currentTime: time.Date(2024, 1, 15, 9, 0, 0, 0, jst), // 2024年1月15日は月曜日
+			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "月曜日の午後2時 → 火曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 14, 0, 0, 0, jst),
-			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, jst),
+			currentTime: time.Date(2024, 1, 15, 14, 0, 0, 0, jst),
+			expected:    time.Date(2024, 1, 16, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "金曜日の午後2時 → 月曜日の10時",
-			currentTime: time.Date(2024, 1, 12, 14, 0, 0, 0, jst), // 2024年1月12日は金曜日
-			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 2024年1月15日は月曜日
+			currentTime: time.Date(2024, 1, 19, 14, 0, 0, 0, jst), // 2024年1月19日は金曜日
+			expected:    time.Date(2024, 1, 22, 10, 0, 0, 0, jst), // 2024年1月22日は月曜日
 		},
 		{
 			name:        "土曜日の午後2時 → 月曜日の10時",
@@ -79,23 +79,23 @@ func TestGetNextBusinessDayMorningWithTime(t *testing.T) {
 	}{
 		{
 			name:        "月曜日の午前9時 → 月曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 9, 0, 0, 0, jst), // 2024年1月8日は月曜日
-			expected:    time.Date(2024, 1, 8, 10, 0, 0, 0, jst),
+			currentTime: time.Date(2024, 1, 15, 9, 0, 0, 0, jst), // 2024年1月15日は月曜日
+			expected:    time.Date(2024, 1, 15, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "月曜日の午前10時ちょうど → 火曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 10, 0, 0, 0, jst),
-			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, jst),
+			currentTime: time.Date(2024, 1, 15, 10, 0, 0, 0, jst),
+			expected:    time.Date(2024, 1, 16, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "月曜日の午前10時1分 → 火曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 10, 1, 0, 0, jst),
-			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, jst),
+			currentTime: time.Date(2024, 1, 15, 10, 1, 0, 0, jst),
+			expected:    time.Date(2024, 1, 16, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "月曜日の午後2時 → 火曜日の10時",
-			currentTime: time.Date(2024, 1, 8, 14, 0, 0, 0, jst),
-			expected:    time.Date(2024, 1, 9, 10, 0, 0, 0, jst),
+			currentTime: time.Date(2024, 1, 15, 14, 0, 0, 0, jst),
+			expected:    time.Date(2024, 1, 16, 10, 0, 0, 0, jst),
 		},
 		{
 			name:        "金曜日の午前9時 → 金曜日の10時",

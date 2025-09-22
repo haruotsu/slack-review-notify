@@ -509,28 +509,28 @@ func TestGetNextBusinessDayMorning(t *testing.T) {
 	}{
 		{
 			name:     "月曜日朝9時_当日10時を期待",
-			baseTime: time.Date(2024, 1, 8, 9, 0, 0, 0, jst), // 月曜日 9:00 JST
-			expected: time.Date(2024, 1, 8, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+			baseTime: time.Date(2024, 1, 15, 9, 0, 0, 0, jst), // 月曜日 9:00 JST
+			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
 		},
 		{
 			name:     "月曜日午後2時_火曜日10時を期待",
-			baseTime: time.Date(2024, 1, 8, 14, 0, 0, 0, jst), // 月曜日 14:00 JST
-			expected: time.Date(2024, 1, 9, 10, 0, 0, 0, jst), // 火曜日 10:00 JST
+			baseTime: time.Date(2024, 1, 15, 14, 0, 0, 0, jst), // 月曜日 14:00 JST
+			expected: time.Date(2024, 1, 16, 10, 0, 0, 0, jst), // 火曜日 10:00 JST
 		},
 		{
 			name:     "金曜日午後2時_月曜日10時を期待",
-			baseTime: time.Date(2024, 1, 12, 14, 0, 0, 0, jst), // 金曜日 14:00 JST
-			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+			baseTime: time.Date(2024, 1, 19, 14, 0, 0, 0, jst), // 金曜日 14:00 JST
+			expected: time.Date(2024, 1, 22, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
 		},
 		{
 			name:     "土曜日午後2時_月曜日10時を期待",
-			baseTime: time.Date(2024, 1, 13, 14, 0, 0, 0, jst), // 土曜日 14:00 JST
-			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+			baseTime: time.Date(2024, 1, 20, 14, 0, 0, 0, jst), // 土曜日 14:00 JST
+			expected: time.Date(2024, 1, 22, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
 		},
 		{
 			name:     "日曜日午後2時_月曜日10時を期待",
-			baseTime: time.Date(2024, 1, 14, 14, 0, 0, 0, jst), // 日曜日 14:00 JST
-			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+			baseTime: time.Date(2024, 1, 21, 14, 0, 0, 0, jst), // 日曜日 14:00 JST
+			expected: time.Date(2024, 1, 22, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
 		},
 	}
 
