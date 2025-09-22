@@ -144,6 +144,46 @@ func TestIsWithinBusinessHours(t *testing.T) {
 			currentTime: time.Date(2023, 12, 15, 10, 30, 0, 0, time.UTC), // 10:30 UTC = 19:30 JST
 			expected:    false,
 		},
+		{
+			name: "日本の祝日（元日）の営業時間内は営業時間外として扱う",
+			config: &models.ChannelConfig{
+				BusinessHoursStart: "09:00",
+				BusinessHoursEnd:   "18:00",
+				Timezone:           "Asia/Tokyo",
+			},
+			currentTime: time.Date(2024, 1, 1, 3, 30, 0, 0, time.UTC), // 1/1 12:30 JST（元日）
+			expected:    false, // 祝日なので営業時間外
+		},
+		{
+			name: "日本の祝日（成人の日）の営業時間内は営業時間外として扱う",
+			config: &models.ChannelConfig{
+				BusinessHoursStart: "09:00",
+				BusinessHoursEnd:   "18:00",
+				Timezone:           "Asia/Tokyo",
+			},
+			currentTime: time.Date(2024, 1, 8, 3, 30, 0, 0, time.UTC), // 1/8 12:30 JST（2024年成人の日）
+			expected:    false, // 祝日なので営業時間外
+		},
+		{
+			name: "日本の祝日以外（平日）の営業時間内は営業時間内として扱う",
+			config: &models.ChannelConfig{
+				BusinessHoursStart: "09:00",
+				BusinessHoursEnd:   "18:00",
+				Timezone:           "Asia/Tokyo",
+			},
+			currentTime: time.Date(2024, 1, 9, 3, 30, 0, 0, time.UTC), // 1/9 12:30 JST（平日）
+			expected:    true, // 平日かつ営業時間内
+		},
+		{
+			name: "UTC設定の場合は祝日判定を行わない",
+			config: &models.ChannelConfig{
+				BusinessHoursStart: "09:00",
+				BusinessHoursEnd:   "18:00",
+				Timezone:           "UTC",
+			},
+			currentTime: time.Date(2024, 1, 1, 12, 30, 0, 0, time.UTC), // 1/1 12:30 UTC（元日だが、UTC設定）
+			expected:    true, // UTC設定なので祝日判定しない
+		},
 	}
 
 	for _, tt := range tests {

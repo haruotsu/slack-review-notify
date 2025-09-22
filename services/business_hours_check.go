@@ -6,6 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yut-kt/goholiday"
+	"github.com/yut-kt/goholiday/nholidays/jp"
 )
 
 // IsWithinBusinessHours は指定された時刻が営業時間内かどうかを判定する
@@ -27,6 +30,11 @@ func IsWithinBusinessHours(config *models.ChannelConfig, currentTime time.Time) 
 	}
 
 	localTime := currentTime.In(loc)
+
+	// 日本のタイムゾーンの場合は祝日チェックを行う
+	if timezone == "Asia/Tokyo" && isJapaneseHoliday(localTime) {
+		return false
+	}
 
 	currentHour := localTime.Hour()
 	currentMin := localTime.Minute()
@@ -74,4 +82,12 @@ func parseBusinessHoursTime(timeStr string) (int, int, error) {
 	}
 
 	return hour, minute, nil
+}
+
+// isJapaneseHoliday は指定された日付が日本の祝日かどうかを判定する
+func isJapaneseHoliday(t time.Time) bool {
+	// 日本の祝日スケジュールを使用
+	jpSchedule := jp.New()
+	jpHoliday := goholiday.New(jpSchedule)
+	return jpHoliday.IsHoliday(t)
 }
