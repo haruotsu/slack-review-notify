@@ -126,3 +126,80 @@ func TestIsLabelMatched(t *testing.T) {
 		})
 	}
 }
+
+func TestGetMissingLabels(t *testing.T) {
+	tests := []struct {
+		name            string
+		configLabels    string
+		prLabels        []*github.Label
+		expectedMissing []string
+	}{
+		{
+			name:         "単一ラベル設定でラベルが存在",
+			configLabels: "needs-review",
+			prLabels: []*github.Label{
+				{Name: github.Ptr("needs-review")},
+			},
+			expectedMissing: []string{},
+		},
+		{
+			name:         "単一ラベル設定でラベルが存在しない",
+			configLabels: "needs-review",
+			prLabels: []*github.Label{
+				{Name: github.Ptr("bug")},
+			},
+			expectedMissing: []string{"needs-review"},
+		},
+		{
+			name:         "複数ラベル設定で全て存在",
+			configLabels: "hoge-project,needs-review",
+			prLabels: []*github.Label{
+				{Name: github.Ptr("hoge-project")},
+				{Name: github.Ptr("needs-review")},
+			},
+			expectedMissing: []string{},
+		},
+		{
+			name:         "複数ラベル設定で一部のみ存在",
+			configLabels: "hoge-project,needs-review",
+			prLabels: []*github.Label{
+				{Name: github.Ptr("hoge-project")},
+			},
+			expectedMissing: []string{"needs-review"},
+		},
+		{
+			name:         "複数ラベル設定で複数が不足",
+			configLabels: "project-a,needs-review,urgent",
+			prLabels: []*github.Label{
+				{Name: github.Ptr("bug")},
+			},
+			expectedMissing: []string{"project-a", "needs-review", "urgent"},
+		},
+		{
+			name:            "空の設定",
+			configLabels:    "",
+			prLabels:        []*github.Label{{Name: github.Ptr("any")}},
+			expectedMissing: []string{},
+		},
+		{
+			name:         "スペース付きラベル設定",
+			configLabels: "project-a, needs-review , urgent",
+			prLabels: []*github.Label{
+				{Name: github.Ptr("project-a")},
+				{Name: github.Ptr("urgent")},
+			},
+			expectedMissing: []string{"needs-review"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &models.ChannelConfig{
+				LabelName: tt.configLabels,
+			}
+
+			result := GetMissingLabels(config, tt.prLabels)
+			assert.Equal(t, tt.expectedMissing, result)
+		})
+	}
+}

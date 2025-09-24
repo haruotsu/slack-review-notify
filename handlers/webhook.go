@@ -194,36 +194,69 @@ func handleUnlabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEven
 	pr := e.PullRequest
 	repo := e.Repo
 	repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
-	labelName := e.Label.GetName()
 
-	log.Printf("handling unlabeled event: repo=%s, pr=%d, label=%s", repoFullName, pr.GetNumber(), labelName)
+	log.Printf("handling unlabeled event: repo=%s, pr=%d", repoFullName, pr.GetNumber())
 
-	// 該当するレビュータスクを検索
+	// 該当するPRの全てのアクティブタスクを検索
 	var tasks []models.ReviewTask
-	db.Where("repo = ? AND pr_number = ? AND label_name = ? AND status IN (?)", 
-		repoFullName, pr.GetNumber(), labelName, []string{"pending", "in_review", "snoozed", "waiting_business_hours"}).Find(&tasks)
+	db.Where("repo = ? AND pr_number = ? AND status IN (?)",
+		repoFullName, pr.GetNumber(), []string{"pending", "in_review", "snoozed", "waiting_business_hours"}).Find(&tasks)
 
 	if len(tasks) == 0 {
-		log.Printf("no active tasks found for unlabeled event: repo=%s, pr=%d, label=%s", repoFullName, pr.GetNumber(), labelName)
+		log.Printf("no active tasks found for unlabeled event: repo=%s, pr=%d", repoFullName, pr.GetNumber())
 		return
 	}
 
+	// チャンネル設定を取得して、ラベル条件をチェック
+	var configs []models.ChannelConfig
+	db.Where("is_active = ?", true).Find(&configs)
+
 	for _, task := range tasks {
-		// Slackメッセージを更新してタスク完了を通知
-		if err := services.UpdateSlackMessageForCompletedTask(task); err != nil {
-			log.Printf("failed to update slack message for completed task: %v", err)
+		// このタスクに対応する設定を探す
+		var matchingConfig *models.ChannelConfig
+		for _, config := range configs {
+			if config.SlackChannelID == task.SlackChannel && config.LabelName == task.LabelName {
+				matchingConfig = &config
+				break
+			}
+		}
+
+		if matchingConfig == nil {
+			log.Printf("no matching config found for task: %s", task.ID)
 			continue
 		}
 
-		// タスクのステータスを完了に更新
-		task.Status = "completed"
-		task.UpdatedAt = time.Now()
-		if err := db.Save(&task).Error; err != nil {
-			log.Printf("failed to update task status to completed: %v", err)
-			continue
-		}
+		// PRの現在のラベル状態で、このタスクの条件を満たすかチェック
+		if !services.IsLabelMatched(matchingConfig, pr.Labels) {
+			log.Printf("label conditions no longer met for task: %s", task.ID)
 
-		log.Printf("task completed due to unlabeled event: id=%s, repo=%s, pr=%d", task.ID, repoFullName, pr.GetNumber())
+			// 削除されたラベルを特定
+			missingLabels := services.GetMissingLabels(matchingConfig, pr.Labels)
+
+			// Slackメッセージを更新してタスク完了を通知
+			if err := services.UpdateSlackMessageForCompletedTask(task); err != nil {
+				log.Printf("failed to update slack message for completed task: %v", err)
+				continue
+			}
+
+			// ラベル削除による完了をスレッドに通知
+			if err := services.PostLabelRemovedNotification(task, missingLabels); err != nil {
+				log.Printf("failed to post label removed notification: %v", err)
+				// 通知失敗してもタスクは完了状態にする
+			}
+
+			// タスクのステータスを完了に更新
+			task.Status = "completed"
+			task.UpdatedAt = time.Now()
+			if err := db.Save(&task).Error; err != nil {
+				log.Printf("failed to update task status to completed: %v", err)
+				continue
+			}
+
+			log.Printf("task completed due to unlabeled event: id=%s, repo=%s, pr=%d", task.ID, repoFullName, pr.GetNumber())
+		} else {
+			log.Printf("label conditions still met for task: %s, continuing", task.ID)
+		}
 	}
 }
 

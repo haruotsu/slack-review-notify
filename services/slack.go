@@ -776,3 +776,22 @@ func SendReviewCompletedAutoNotification(task models.ReviewTask, reviewerLogin s
 
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
+
+// PostLabelRemovedNotification はラベル削除によるタスク完了をスレッドに通知する
+func PostLabelRemovedNotification(task models.ReviewTask, removedLabels []string) error {
+	if IsTestMode {
+		log.Printf("test mode: would post label removed notification for task: %s", task.ID)
+		return nil
+	}
+
+	var labelText string
+	if len(removedLabels) == 1 {
+		labelText = fmt.Sprintf("`%s`ラベル", removedLabels[0])
+	} else {
+		labelText = fmt.Sprintf("`%s`ラベルのいずれか", strings.Join(removedLabels, "`, `"))
+	}
+
+	message := fmt.Sprintf("🏷️ %sが削除されたため、レビュータスクを完了しました。", labelText)
+
+	return PostToThread(task.SlackChannel, task.SlackTS, message)
+}
