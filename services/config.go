@@ -91,3 +91,32 @@ func IsLabelMatched(config *models.ChannelConfig, prLabels []*github.Label) bool
 	log.Printf("all required labels found: %s", config.LabelName)
 	return true
 }
+
+// GetMissingLabels は設定で必要なラベルのうち、PRに存在しないラベルを返す
+func GetMissingLabels(config *models.ChannelConfig, prLabels []*github.Label) []string {
+	if config == nil || config.LabelName == "" {
+		return []string{}
+	}
+
+	// PRのラベル名をセットに変換
+	prLabelNames := make(map[string]bool)
+	for _, label := range prLabels {
+		if label.Name != nil {
+			prLabelNames[*label.Name] = true
+		}
+	}
+
+	// 設定されたラベル（カンマ区切り）を分割
+	requiredLabels := strings.Split(config.LabelName, ",")
+	missingLabels := make([]string, 0)
+
+	// 存在しない必要なラベルを収集
+	for _, label := range requiredLabels {
+		trimmedLabel := strings.TrimSpace(label)
+		if trimmedLabel != "" && !prLabelNames[trimmedLabel] {
+			missingLabels = append(missingLabels, trimmedLabel)
+		}
+	}
+
+	return missingLabels
+}

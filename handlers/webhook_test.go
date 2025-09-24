@@ -569,3 +569,164 @@ func TestMultipleLabelMatching(t *testing.T) {
 		})
 	}
 }
+
+func TestMultipleLabelUnlabeling(t *testing.T) {
+	tests := []struct {
+		name               string
+		configLabel        string
+		prLabelsAfterEvent []*github.Label // unlabeled後のPRラベル状態
+		removedLabel       string          // 削除されたラベル
+		shouldComplete     bool            // タスクが完了すべきかどうか
+	}{
+		{
+			name:        "単一ラベル設定でラベル削除時にタスク完了",
+			configLabel: "needs-review",
+			prLabelsAfterEvent: []*github.Label{
+				{Name: github.Ptr("bug")},
+			},
+			removedLabel:   "needs-review",
+			shouldComplete: true,
+		},
+		{
+			name:        "複数ラベル設定で必要ラベル削除時にタスク完了",
+			configLabel: "hoge-project,needs-review",
+			prLabelsAfterEvent: []*github.Label{
+				{Name: github.Ptr("hoge-project")}, // needs-reviewが削除された
+				{Name: github.Ptr("bug")},
+			},
+			removedLabel:   "needs-review",
+			shouldComplete: true,
+		},
+		{
+			name:        "複数ラベル設定で不要ラベル削除時はタスク継続",
+			configLabel: "hoge-project,needs-review",
+			prLabelsAfterEvent: []*github.Label{
+				{Name: github.Ptr("hoge-project")},
+				{Name: github.Ptr("needs-review")}, // 両方とも残っている
+			},
+			removedLabel:   "bug", // 関係ないラベルが削除
+			shouldComplete: false,
+		},
+		{
+			name:        "複数ラベル設定で複数の必要ラベルのうち1つ削除",
+			configLabel: "project-a,needs-review,urgent",
+			prLabelsAfterEvent: []*github.Label{
+				{Name: github.Ptr("needs-review")},
+				{Name: github.Ptr("urgent")}, // project-aが削除された
+			},
+			removedLabel:   "project-a",
+			shouldComplete: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// セットアップ
+			db := setupTestDB(t)
+			gin.SetMode(gin.TestMode)
+			services.IsTestMode = true
+
+			// チャンネル設定を作成
+			config := models.ChannelConfig{
+				SlackChannelID:   "C1234567890",
+				LabelName:        tt.configLabel,
+				DefaultMentionID: "@here",
+				RepositoryList:   "test/repo",
+				IsActive:         true,
+			}
+			db.Create(&config)
+
+			// 既存のレビュータスクを作成
+			task := models.ReviewTask{
+				ID:           "test-task-id",
+				PRURL:        "https://github.com/test/repo/pull/123",
+				Repo:         "test/repo",
+				PRNumber:     123,
+				Title:        "Test PR",
+				SlackTS:      "1234567890.123456",
+				SlackChannel: "C1234567890",
+				Status:       "in_review",
+				LabelName:    tt.configLabel,
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
+			}
+			db.Create(&task)
+
+			// Slack API呼び出しをモック
+			if tt.shouldComplete {
+				// タスク完了時のメッセージ更新
+				gock.New("https://slack.com").
+					Post("/api/chat.update").
+					Reply(200).
+					JSON(map[string]interface{}{
+						"ok": true,
+					})
+
+				// ラベル削除による完了をスレッドに通知
+				gock.New("https://slack.com").
+					Post("/api/chat.postMessage").
+					Reply(200).
+					JSON(map[string]interface{}{
+						"ok": true,
+						"ts": "1234567890.123457",
+					})
+			}
+
+			// unlabeled イベントのペイロード作成
+			action := "unlabeled"
+			prNumber := 123
+
+			payload := github.PullRequestEvent{
+				Action: &action,
+				Number: &prNumber,
+				Label: &github.Label{
+					Name: github.Ptr(tt.removedLabel),
+				},
+				PullRequest: &github.PullRequest{
+					Number:  &prNumber,
+					HTMLURL: github.Ptr("https://github.com/test/repo/pull/123"),
+					Title:   github.Ptr("Test PR"),
+					Labels:  tt.prLabelsAfterEvent, // 削除後のラベル状態
+				},
+				Repo: &github.Repository{
+					FullName: github.Ptr("test/repo"),
+					Owner: &github.User{
+						Login: github.Ptr("test"),
+					},
+					Name: github.Ptr("repo"),
+				},
+			}
+
+			payloadJSON, _ := json.Marshal(payload)
+
+			// リクエスト作成
+			req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(payloadJSON))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-GitHub-Event", "pull_request")
+
+			w := httptest.NewRecorder()
+
+			// Ginルーターを作成してリクエスト実行
+			router := gin.Default()
+			router.POST("/webhook", HandleGitHubWebhook(db))
+			router.ServeHTTP(w, req)
+
+			// HTTPステータスが200であることを確認
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			// タスクのステータスを確認
+			var updatedTask models.ReviewTask
+			result := db.Where("id = ?", "test-task-id").First(&updatedTask)
+			assert.NoError(t, result.Error)
+
+			if tt.shouldComplete {
+				assert.Equal(t, "completed", updatedTask.Status, "タスクが完了状態になっていません")
+			} else {
+				assert.Equal(t, "in_review", updatedTask.Status, "タスクが継続状態でありません")
+			}
+
+			// クリーンアップ
+			gock.Off()
+		})
+	}
+}
