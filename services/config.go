@@ -5,6 +5,7 @@ import (
 	"slack-review-notify/models"
 	"strings"
 
+	"github.com/google/go-github/v71/github"
 	"gorm.io/gorm"
 )
 
@@ -53,4 +54,40 @@ func IsRepositoryWatched(config *models.ChannelConfig, repoFullName string) bool
 
 	log.Printf("repository %s is not watched", repoFullName)
 	return false
+}
+
+// ラベルが設定条件にマッチするかチェックする関数
+func IsLabelMatched(config *models.ChannelConfig, prLabels []*github.Label) bool {
+	if config == nil {
+		log.Printf("channel config is nil")
+		return false
+	}
+
+	// 空文字列の場合は全てマッチ（後方互換性）
+	if config.LabelName == "" {
+		return true
+	}
+
+	// PRのラベル名をセットに変換
+	prLabelNames := make(map[string]bool)
+	for _, label := range prLabels {
+		if label.Name != nil {
+			prLabelNames[*label.Name] = true
+		}
+	}
+
+	// 設定されたラベル（カンマ区切り）を分割
+	requiredLabels := strings.Split(config.LabelName, ",")
+
+	// 全ての必要なラベルがPRに存在するかチェック（AND条件）
+	for _, label := range requiredLabels {
+		trimmedLabel := strings.TrimSpace(label)
+		if trimmedLabel != "" && !prLabelNames[trimmedLabel] {
+			log.Printf("required label '%s' not found in PR labels", trimmedLabel)
+			return false
+		}
+	}
+
+	log.Printf("all required labels found: %s", config.LabelName)
+	return true
 }

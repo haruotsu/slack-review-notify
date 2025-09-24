@@ -63,7 +63,6 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 	pr := e.PullRequest
 	repo := e.Repo
 	repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
-	labelName := e.Label.GetName()
 
 	// チャンネル設定を全て取得
 	var configs []models.ChannelConfig
@@ -105,10 +104,10 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 			continue
 		}
 
-		// ラベルをチェック
-		if config.LabelName != "" && config.LabelName != labelName {
-			log.Printf("label %s is not watched (channel: %s, config: %s)",
-				labelName, config.SlackChannelID, config.LabelName)
+		// ラベルをチェック（複数ラベル対応）
+		if !services.IsLabelMatched(&config, pr.Labels) {
+			log.Printf("label requirements not met (channel: %s, config: %s)",
+				config.SlackChannelID, config.LabelName)
 			continue
 		}
 

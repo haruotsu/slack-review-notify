@@ -309,6 +309,13 @@ func showHelp(c *gin.Context) {
 - 例2: /slack-review-notify feature set-mention @開発チーム → featureラベル用の設定
 - 例3: /slack-review-notify security-review set-mention @セキュリティチーム → security-reviewラベル用の設定
 
+*複数ラベルAND条件の設定*
+カンマ区切りで複数のラベルを指定することで、全てのラベルが付いている場合のみ通知します:
+- 例: /slack-review-notify "hoge-project,needs-review" set-mention @team
+  → PRに「hoge-project」と「needs-review」の両方のラベルがある場合のみ通知
+- 例: /slack-review-notify "frontend,urgent,needs-review" add-repo owner/app
+  → 3つのラベル全てが必要
+
 *全コマンド一覧*
 *基本操作:*
 • /slack-review-notify show - このチャンネルの全ラベル設定を表示

@@ -420,3 +420,152 @@ func TestHandleReviewSubmittedEventWithWaitingBusinessHoursTask(t *testing.T) {
 	// モックが使用されたことを確認（Slack API呼び出しが行われた）
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
 }
+
+func TestMultipleLabelMatching(t *testing.T) {
+	tests := []struct {
+		name         string
+		configLabel  string
+		prLabels     []*github.Label
+		shouldNotify bool
+	}{
+		{
+			name:        "単一ラベル設定で複数ラベルPRがマッチ",
+			configLabel: "needs-review",
+			prLabels: []*github.Label{
+				{Name: github.Ptr("needs-review")},
+				{Name: github.Ptr("bug")},
+			},
+			shouldNotify: true,
+		},
+		{
+			name:        "複数ラベル設定で全ラベル存在時にマッチ",
+			configLabel: "hoge-project,needs-review",
+			prLabels: []*github.Label{
+				{Name: github.Ptr("hoge-project")},
+				{Name: github.Ptr("needs-review")},
+				{Name: github.Ptr("bug")},
+			},
+			shouldNotify: true,
+		},
+		{
+			name:        "複数ラベル設定で一部ラベル不足時にマッチしない",
+			configLabel: "hoge-project,needs-review",
+			prLabels: []*github.Label{
+				{Name: github.Ptr("hoge-project")},
+				{Name: github.Ptr("bug")},
+			},
+			shouldNotify: false,
+		},
+		{
+			name:        "スペース付きカンマ区切りラベルでマッチ",
+			configLabel: "project-a, needs-review, urgent",
+			prLabels: []*github.Label{
+				{Name: github.Ptr("project-a")},
+				{Name: github.Ptr("needs-review")},
+				{Name: github.Ptr("urgent")},
+				{Name: github.Ptr("feature")},
+			},
+			shouldNotify: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// セットアップ
+			db := setupTestDB(t)
+			gin.SetMode(gin.TestMode)
+			services.IsTestMode = true
+
+			// Slack API呼び出しをモック
+			// チャンネル状態確認のモック
+			gock.New("https://slack.com").
+				Get("/api/conversations.info").
+				Reply(200).
+				JSON(map[string]interface{}{
+					"ok":      true,
+					"channel": map[string]interface{}{"is_archived": false},
+				})
+
+			if tt.shouldNotify {
+				gock.New("https://slack.com").
+					Post("/api/chat.postMessage").
+					Reply(200).
+					JSON(map[string]interface{}{
+						"ok":      true,
+						"channel": "C1234567890",
+						"ts":      "1234567890.123456",
+					})
+			}
+
+			// チャンネル設定を作成
+			config := models.ChannelConfig{
+				SlackChannelID:   "C1234567890",
+				LabelName:        tt.configLabel,
+				DefaultMentionID: "@here",
+				RepositoryList:   "test/repo", // リポジトリを設定
+				IsActive:         true,
+			}
+			db.Create(&config)
+
+			// labeled イベントのペイロード作成
+			action := "labeled"
+			prNumber := 123
+
+			payload := github.PullRequestEvent{
+				Action: &action,
+				Number: &prNumber,
+				Label: &github.Label{
+					Name: github.Ptr("needs-review"), // トリガーとなるラベル
+				},
+				PullRequest: &github.PullRequest{
+					Number:  &prNumber,
+					HTMLURL: github.Ptr("https://github.com/test/repo/pull/123"),
+					Title:   github.Ptr("Test PR"),
+					Labels:  tt.prLabels, // PRに付いている全ラベル
+				},
+				Repo: &github.Repository{
+					FullName: github.Ptr("test/repo"),
+					Owner: &github.User{
+						Login: github.Ptr("test"),
+					},
+					Name: github.Ptr("repo"),
+				},
+			}
+
+			payloadJSON, _ := json.Marshal(payload)
+
+			// リクエスト作成
+			req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(payloadJSON))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-GitHub-Event", "pull_request")
+
+			w := httptest.NewRecorder()
+
+			// Ginルーターを作成してリクエスト実行
+			router := gin.Default()
+			router.POST("/webhook", HandleGitHubWebhook(db))
+			router.ServeHTTP(w, req)
+
+			// HTTPステータスが200であることを確認
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			// タスクが作成されたかチェック
+			var taskCount int64
+			db.Model(&models.ReviewTask{}).Where("repo = ? AND pr_number = ?", "test/repo", 123).Count(&taskCount)
+
+			if tt.shouldNotify {
+				assert.Equal(t, int64(1), taskCount, "通知すべき場合にタスクが作成されていません")
+
+				// モックが使用されたことを確認
+				if gock.HasUnmatchedRequest() {
+					t.Log("未マッチのリクエスト:", gock.GetUnmatchedRequests())
+				}
+			} else {
+				assert.Equal(t, int64(0), taskCount, "通知しない場合にタスクが作成されています")
+			}
+
+			// クリーンアップ
+			gock.Off()
+		})
+	}
+}
