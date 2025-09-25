@@ -63,9 +63,10 @@ func IsLabelMatched(config *models.ChannelConfig, prLabels []*github.Label) bool
 		return false
 	}
 
-	// 空文字列の場合は全てマッチ（後方互換性）
+	// 空文字列の場合はマッチしない
 	if config.LabelName == "" {
-		return true
+		log.Printf("no label configured for channel")
+		return false
 	}
 
 	// PRのラベル名をセットに変換

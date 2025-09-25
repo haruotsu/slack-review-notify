@@ -73,12 +73,12 @@ func TestIsLabelMatched(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			name:           "空文字列の場合は全てマッチ（後方互換）",
+			name:           "空文字列の場合はマッチしない",
 			configLabels:   "",
 			prLabels: []*github.Label{
 				{Name: github.Ptr("any-label")},
 			},
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
 			name:           "PRにラベルがない場合",
@@ -90,7 +90,7 @@ func TestIsLabelMatched(t *testing.T) {
 			name:           "設定が空でPRにもラベルがない",
 			configLabels:   "",
 			prLabels:       []*github.Label{},
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
 			name:         "3つのラベル全てが必要な設定",
