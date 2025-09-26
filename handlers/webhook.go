@@ -63,7 +63,16 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) {
 	pr := e.PullRequest
 	repo := e.Repo
+	addedLabel := e.Label
 	repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
+
+	if addedLabel == nil || addedLabel.Name == nil {
+		log.Printf("added label is nil or has no name")
+		return
+	}
+
+	addedLabelName := *addedLabel.Name
+	log.Printf("handling labeled event: repo=%s, pr=%d, added_label=%s", repoFullName, pr.GetNumber(), addedLabelName)
 
 	// チャンネル設定を全て取得
 	var configs []models.ChannelConfig
@@ -102,6 +111,13 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 		if !services.IsRepositoryWatched(&config, repoFullName) {
 			log.Printf("repository %s is not watched (channel: %s, config: %s)",
 				repoFullName, config.SlackChannelID, config.RepositoryList)
+			continue
+		}
+
+		// 追加されたラベルが設定に関連するかチェック
+		if !services.IsAddedLabelRelevant(&config, addedLabelName) {
+			log.Printf("added label '%s' is not relevant to config (channel: %s, config: %s)",
+				addedLabelName, config.SlackChannelID, config.LabelName)
 			continue
 		}
 

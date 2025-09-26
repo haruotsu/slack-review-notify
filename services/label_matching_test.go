@@ -203,3 +203,84 @@ func TestGetMissingLabels(t *testing.T) {
 		})
 	}
 }
+
+func TestIsAddedLabelRelevant(t *testing.T) {
+	tests := []struct {
+		name           string
+		configLabels   string
+		addedLabel     string
+		expectedResult bool
+	}{
+		{
+			name:           "単一ラベル設定で関連するラベル追加",
+			configLabels:   "needs-review",
+			addedLabel:     "needs-review",
+			expectedResult: true,
+		},
+		{
+			name:           "単一ラベル設定で関係ないラベル追加",
+			configLabels:   "needs-review",
+			addedLabel:     "bug",
+			expectedResult: false,
+		},
+		{
+			name:           "複数ラベル設定で最初のラベル追加",
+			configLabels:   "hoge-project,needs-review",
+			addedLabel:     "hoge-project",
+			expectedResult: true,
+		},
+		{
+			name:           "複数ラベル設定で2番目のラベル追加",
+			configLabels:   "hoge-project,needs-review",
+			addedLabel:     "needs-review",
+			expectedResult: true,
+		},
+		{
+			name:           "複数ラベル設定で関係ないラベル追加",
+			configLabels:   "hoge-project,needs-review",
+			addedLabel:     "bug",
+			expectedResult: false,
+		},
+		{
+			name:           "スペース付きラベル設定で関連するラベル追加",
+			configLabels:   "hoge-project , needs-review , urgent",
+			addedLabel:     "needs-review",
+			expectedResult: true,
+		},
+		{
+			name:           "スペース付きラベル設定で関係ないラベル追加",
+			configLabels:   "hoge-project , needs-review , urgent",
+			addedLabel:     "bug",
+			expectedResult: false,
+		},
+		{
+			name:           "空の設定",
+			configLabels:   "",
+			addedLabel:     "any-label",
+			expectedResult: false,
+		},
+		{
+			name:           "nilコンフィグ",
+			configLabels:   "needs-review",
+			addedLabel:     "needs-review",
+			expectedResult: false, // configがnilの場合のテストは関数内で別途実行
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.name == "nilコンフィグ" {
+				result := IsAddedLabelRelevant(nil, tt.addedLabel)
+				assert.Equal(t, tt.expectedResult, result)
+				return
+			}
+
+			config := &models.ChannelConfig{
+				LabelName: tt.configLabels,
+			}
+
+			result := IsAddedLabelRelevant(config, tt.addedLabel)
+			assert.Equal(t, tt.expectedResult, result)
+		})
+	}
+}
