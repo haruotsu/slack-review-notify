@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"slack-review-notify/models"
@@ -62,7 +63,16 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) {
 	pr := e.PullRequest
 	repo := e.Repo
+	addedLabel := e.Label
 	repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
+
+	if addedLabel == nil || addedLabel.Name == nil {
+		log.Printf("added label is nil or has no name")
+		return
+	}
+
+	addedLabelName := *addedLabel.Name
+	log.Printf("handling labeled event: repo=%s, pr=%d, added_label=%s", repoFullName, pr.GetNumber(), addedLabelName)
 
 	// チャンネル設定を全て取得
 	var configs []models.ChannelConfig
@@ -78,9 +88,9 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 
 	for _, config := range configs {
 		// チャンネルがアーカイブされているか確認
-		isArchived, err := services.IsChannelArchived(config.SlackChannelID)
-		if err != nil {
-			log.Printf("channel status check error (channel: %s): %v", config.SlackChannelID, err)
+		isArchived, checkErr := services.IsChannelArchived(config.SlackChannelID)
+		if checkErr != nil {
+			log.Printf("channel status check error (channel: %s): %v", config.SlackChannelID, checkErr)
 		}
 
 		if isArchived {
@@ -104,6 +114,13 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 			continue
 		}
 
+		// 追加されたラベルが設定に関連するかチェック
+		if !services.IsAddedLabelRelevant(&config, addedLabelName) {
+			log.Printf("added label '%s' is not relevant to config (channel: %s, config: %s)",
+				addedLabelName, config.SlackChannelID, config.LabelName)
+			continue
+		}
+
 		// ラベルをチェック（複数ラベル対応）
 		if !services.IsLabelMatched(&config, pr.Labels) {
 			log.Printf("label requirements not met (channel: %s, config: %s)",
@@ -111,100 +128,143 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 			continue
 		}
 
-		// トランザクションを使用して競合状態を防ぐ
+		// リトライトランザクション処理
+		const maxRetries = 3
+		const baseDelay = 100 * time.Millisecond
+
 		var taskCreated bool
-		err = db.Transaction(func(tx *gorm.DB) error {
-			// 既存のアクティブなタスクをチェック（同一チャンネル・同一PRでは1つのみ作成）
-			var existingTask models.ReviewTask
-			existingErr := tx.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN (?)",
-				repoFullName, pr.GetNumber(), config.SlackChannelID,
-				[]string{"pending", "in_review", "snoozed", "waiting_business_hours"}).
-				First(&existingTask).Error
+		var txErr error
 
-			if existingErr == nil {
-				// 既存のタスクが存在する場合はスキップ（ラベル名に関係なく）
-				log.Printf("active task already exists for PR %d in channel %s (existing label: %s, current config: %s), skipping",
-					pr.GetNumber(), config.SlackChannelID, existingTask.LabelName, config.LabelName)
-				taskCreated = false
-				return nil // トランザクションを正常終了させてスキップ
-			}
+		for retry := 0; retry < maxRetries; retry++ {
+			txErr = db.Transaction(func(tx *gorm.DB) error {
+				// 既存のアクティブなタスクをチェック（同一チャンネル・同一PRでは1つのみ作成）
+				var existingTask models.ReviewTask
+				existingErr := tx.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN (?)",
+					repoFullName, pr.GetNumber(), config.SlackChannelID,
+					[]string{"pending", "in_review", "snoozed", "waiting_business_hours"}).
+					First(&existingTask).Error
 
-			var slackTs, slackChannelID string
-			var taskStatus string
-			var reviewerID string
+				if existingErr == nil {
+					// 既存のタスクが存在する場合はスキップ（ラベル名に関係なく）
+					log.Printf("active task already exists for PR %d in channel %s (existing label: %s, current config: %s), skipping",
+						pr.GetNumber(), config.SlackChannelID, existingTask.LabelName, config.LabelName)
+					taskCreated = false
+					return nil // トランザクションを正常終了させてスキップ
+				}
 
-			// 営業時間外判定
-			if !services.IsWithinBusinessHours(&config, time.Now()) {
-				// 営業時間外の場合：メンション抜きメッセージを送信
-				var err error
-				slackTs, slackChannelID, err = services.SendSlackMessageOffHours(
-					pr.GetHTMLURL(),
-					pr.GetTitle(),
-					config.SlackChannelID,
-				)
-				taskStatus = "waiting_business_hours"
-				// レビュワーは翌営業日朝に設定する
-				reviewerID = ""
-				if err != nil {
-					log.Printf("off-hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
+				// まず仮のタスクレコードを作成（Slackメッセージ送信前）
+				tempTask := models.ReviewTask{
+					ID:           uuid.NewString(),
+					PRURL:        pr.GetHTMLURL(),
+					Repo:         repoFullName,
+					PRNumber:     pr.GetNumber(),
+					Title:        pr.GetTitle(),
+					SlackTS:      "", // 後で更新
+					SlackChannel: config.SlackChannelID,
+					Reviewer:     "", // 後で更新
+					Status:       "pending", // 仮の状態
+					LabelName:    config.LabelName,
+					CreatedAt:    time.Now(),
+					UpdatedAt:    time.Now(),
+				}
+
+				if err := tx.Create(&tempTask).Error; err != nil {
+					log.Printf("temp task insert failed (channel: %s): %v", config.SlackChannelID, err)
 					return err
 				}
-				log.Printf("off-hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
-			} else {
-				// 営業時間内の場合：通常のメンション付きメッセージを送信
-				var err error
-				slackTs, slackChannelID, err = services.SendSlackMessage(
-					pr.GetHTMLURL(),
-					pr.GetTitle(),
-					config.SlackChannelID,
-					config.DefaultMentionID,
-				)
-				taskStatus = "in_review"
-				// ランダムにレビュワーを選択
-				reviewerID = services.SelectRandomReviewer(db, config.SlackChannelID, config.LabelName)
-				if err != nil {
-					log.Printf("business hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
-					return err
-				}
-				log.Printf("business hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
+
+				taskCreated = true
+
+				// トランザクション外でSlackメッセージ送信とタスク更新を行う
+				go func() {
+					var slackTs, slackChannelID string
+					var taskStatus string
+					var reviewerID string
+
+					// 営業時間外判定
+					if !services.IsWithinBusinessHours(&config, time.Now()) {
+						// 営業時間外の場合：メンション抜きメッセージを送信
+						var err error
+						slackTs, slackChannelID, err = services.SendSlackMessageOffHours(
+							pr.GetHTMLURL(),
+							pr.GetTitle(),
+							config.SlackChannelID,
+						)
+						taskStatus = "waiting_business_hours"
+						// レビュワーは翌営業日朝に設定する
+						reviewerID = ""
+						if err != nil {
+							log.Printf("off-hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
+							// エラー時はタスクを削除
+							db.Delete(&tempTask)
+							return
+						}
+						log.Printf("off-hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
+					} else {
+						// 営業時間内の場合：通常のメンション付きメッセージを送信
+						var err error
+						slackTs, slackChannelID, err = services.SendSlackMessage(
+							pr.GetHTMLURL(),
+							pr.GetTitle(),
+							config.SlackChannelID,
+							config.DefaultMentionID,
+						)
+						taskStatus = "in_review"
+						// ランダムにレビュワーを選択
+						reviewerID = services.SelectRandomReviewer(db, config.SlackChannelID, config.LabelName)
+						if err != nil {
+							log.Printf("business hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
+							// エラー時はタスクを削除
+							db.Delete(&tempTask)
+							return
+						}
+						log.Printf("business hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
+					}
+
+					// タスクを正式な状態に更新
+					tempTask.SlackTS = slackTs
+					tempTask.Reviewer = reviewerID
+					tempTask.Status = taskStatus
+					tempTask.UpdatedAt = time.Now()
+
+					if err := db.Save(&tempTask).Error; err != nil {
+						log.Printf("task update failed (channel: %s): %v", config.SlackChannelID, err)
+						return
+					}
+
+					log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, tempTask.PRURL)
+
+					// 営業時間内で、レビュワーが割り当てられた場合のみスレッドに通知
+					if taskStatus == "in_review" && reviewerID != "" {
+						if err := services.PostReviewerAssignedMessageWithChangeButton(tempTask); err != nil {
+							log.Printf("reviewer assigned notification error: %v", err)
+						}
+					}
+				}()
+
+				return nil
+			})
+
+			// 成功した場合はループから抜ける
+			if txErr == nil {
+				break
 			}
 
-			// タスク作成
-			task := models.ReviewTask{
-				ID:           uuid.NewString(),
-				PRURL:        pr.GetHTMLURL(),
-				Repo:         repoFullName,
-				PRNumber:     pr.GetNumber(),
-				Title:        pr.GetTitle(),
-				SlackTS:      slackTs,
-				SlackChannel: slackChannelID,
-				Reviewer:     reviewerID,
-				Status:       taskStatus,
-				LabelName:    config.LabelName,
-				CreatedAt:    time.Now(),
-				UpdatedAt:    time.Now(),
+			// データベースロックエラーの場合はリトライ
+			if strings.Contains(txErr.Error(), "database is locked") && retry < maxRetries-1 {
+				delay := baseDelay * time.Duration(1<<retry) // 指数バックオフ
+				log.Printf("database lock detected for channel %s, retrying in %v (attempt %d/%d)",
+					config.SlackChannelID, delay, retry+1, maxRetries)
+				time.Sleep(delay)
+				continue
 			}
 
-			if err := tx.Create(&task).Error; err != nil {
-				log.Printf("db insert failed (channel: %s): %v", config.SlackChannelID, err)
-				return err
-			}
+			// その他のエラーまたは最大リトライ回数に達した場合
+			break
+		}
 
-			log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, task.PRURL)
-			taskCreated = true
-
-			// 営業時間内で、レビュワーが割り当てられた場合のみスレッドに通知
-			if taskStatus == "in_review" && reviewerID != "" {
-				if err := services.PostReviewerAssignedMessageWithChangeButton(task); err != nil {
-					log.Printf("reviewer assigned notification error: %v", err)
-				}
-			}
-
-			return nil
-		})
-
-		if err != nil {
-			log.Printf("transaction failed for channel %s: %v", config.SlackChannelID, err)
+		if txErr != nil {
+			log.Printf("transaction failed for channel %s after %d retries: %v", config.SlackChannelID, maxRetries, txErr)
 			continue
 		}
 

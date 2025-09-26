@@ -93,6 +93,28 @@ func IsLabelMatched(config *models.ChannelConfig, prLabels []*github.Label) bool
 	return true
 }
 
+// IsAddedLabelRelevant は今回追加されたラベルが、設定されたラベル群に関連するかチェック
+func IsAddedLabelRelevant(config *models.ChannelConfig, addedLabelName string) bool {
+	if config == nil || config.LabelName == "" {
+		return false
+	}
+
+	// 設定されたラベル（カンマ区切り）を分割
+	requiredLabels := strings.Split(config.LabelName, ",")
+
+	// 追加されたラベルが設定されたラベル群に含まれているかチェック
+	for _, label := range requiredLabels {
+		trimmedLabel := strings.TrimSpace(label)
+		if trimmedLabel != "" && trimmedLabel == addedLabelName {
+			log.Printf("added label '%s' is relevant to config: %s", addedLabelName, config.LabelName)
+			return true
+		}
+	}
+
+	log.Printf("added label '%s' is not relevant to config: %s", addedLabelName, config.LabelName)
+	return false
+}
+
 // GetMissingLabels は設定で必要なラベルのうち、PRに存在しないラベルを返す
 func GetMissingLabels(config *models.ChannelConfig, prLabels []*github.Label) []string {
 	if config == nil || config.LabelName == "" {
