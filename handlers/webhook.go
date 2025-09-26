@@ -111,89 +111,105 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 			continue
 		}
 
-		// 既存のアクティブなタスクをチェック
-		var existingTask models.ReviewTask
-		existingErr := db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND label_name = ? AND status IN (?)",
-			repoFullName, pr.GetNumber(), config.SlackChannelID, config.LabelName,
-			[]string{"pending", "in_review", "snoozed", "waiting_business_hours"}).
-			First(&existingTask).Error
+		// トランザクションを使用して競合状態を防ぐ
+		var taskCreated bool
+		err = db.Transaction(func(tx *gorm.DB) error {
+			// 既存のアクティブなタスクをチェック（同一チャンネル・同一PRでは1つのみ作成）
+			var existingTask models.ReviewTask
+			existingErr := tx.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN (?)",
+				repoFullName, pr.GetNumber(), config.SlackChannelID,
+				[]string{"pending", "in_review", "snoozed", "waiting_business_hours"}).
+				First(&existingTask).Error
 
-		if existingErr == nil {
-			// 既存のタスクが存在する場合はスキップ
-			log.Printf("active task already exists for PR %d in channel %s with label %s, skipping",
-				pr.GetNumber(), config.SlackChannelID, config.LabelName)
+			if existingErr == nil {
+				// 既存のタスクが存在する場合はスキップ（ラベル名に関係なく）
+				log.Printf("active task already exists for PR %d in channel %s (existing label: %s, current config: %s), skipping",
+					pr.GetNumber(), config.SlackChannelID, existingTask.LabelName, config.LabelName)
+				taskCreated = false
+				return nil // トランザクションを正常終了させてスキップ
+			}
+
+			var slackTs, slackChannelID string
+			var taskStatus string
+			var reviewerID string
+
+			// 営業時間外判定
+			if !services.IsWithinBusinessHours(&config, time.Now()) {
+				// 営業時間外の場合：メンション抜きメッセージを送信
+				var err error
+				slackTs, slackChannelID, err = services.SendSlackMessageOffHours(
+					pr.GetHTMLURL(),
+					pr.GetTitle(),
+					config.SlackChannelID,
+				)
+				taskStatus = "waiting_business_hours"
+				// レビュワーは翌営業日朝に設定する
+				reviewerID = ""
+				if err != nil {
+					log.Printf("off-hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
+					return err
+				}
+				log.Printf("off-hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
+			} else {
+				// 営業時間内の場合：通常のメンション付きメッセージを送信
+				var err error
+				slackTs, slackChannelID, err = services.SendSlackMessage(
+					pr.GetHTMLURL(),
+					pr.GetTitle(),
+					config.SlackChannelID,
+					config.DefaultMentionID,
+				)
+				taskStatus = "in_review"
+				// ランダムにレビュワーを選択
+				reviewerID = services.SelectRandomReviewer(db, config.SlackChannelID, config.LabelName)
+				if err != nil {
+					log.Printf("business hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
+					return err
+				}
+				log.Printf("business hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
+			}
+
+			// タスク作成
+			task := models.ReviewTask{
+				ID:           uuid.NewString(),
+				PRURL:        pr.GetHTMLURL(),
+				Repo:         repoFullName,
+				PRNumber:     pr.GetNumber(),
+				Title:        pr.GetTitle(),
+				SlackTS:      slackTs,
+				SlackChannel: slackChannelID,
+				Reviewer:     reviewerID,
+				Status:       taskStatus,
+				LabelName:    config.LabelName,
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
+			}
+
+			if err := tx.Create(&task).Error; err != nil {
+				log.Printf("db insert failed (channel: %s): %v", config.SlackChannelID, err)
+				return err
+			}
+
+			log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, task.PRURL)
+			taskCreated = true
+
+			// 営業時間内で、レビュワーが割り当てられた場合のみスレッドに通知
+			if taskStatus == "in_review" && reviewerID != "" {
+				if err := services.PostReviewerAssignedMessageWithChangeButton(task); err != nil {
+					log.Printf("reviewer assigned notification error: %v", err)
+				}
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			log.Printf("transaction failed for channel %s: %v", config.SlackChannelID, err)
 			continue
 		}
 
-		var slackTs, slackChannelID string
-		var taskStatus string
-		var reviewerID string
-
-		// 営業時間外判定
-		if !services.IsWithinBusinessHours(&config, time.Now()) {
-			// 営業時間外の場合：メンション抜きメッセージを送信
-			var err error
-			slackTs, slackChannelID, err = services.SendSlackMessageOffHours(
-				pr.GetHTMLURL(),
-				pr.GetTitle(),
-				config.SlackChannelID,
-			)
-			taskStatus = "waiting_business_hours"
-			// レビュワーは翌営業日朝に設定する
-			reviewerID = ""
-			if err != nil {
-				log.Printf("off-hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
-				continue
-			}
-			log.Printf("off-hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
-		} else {
-			// 営業時間内の場合：通常のメンション付きメッセージを送信
-			var err error
-			slackTs, slackChannelID, err = services.SendSlackMessage(
-				pr.GetHTMLURL(),
-				pr.GetTitle(),
-				config.SlackChannelID,
-				config.DefaultMentionID,
-			)
-			taskStatus = "in_review"
-			// ランダムにレビュワーを選択
-			reviewerID = services.SelectRandomReviewer(db, config.SlackChannelID, config.LabelName)
-			if err != nil {
-				log.Printf("business hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
-				continue
-			}
-			log.Printf("business hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
-		}
-
-		// タスク作成
-		task := models.ReviewTask{
-			ID:           uuid.NewString(),
-			PRURL:        pr.GetHTMLURL(),
-			Repo:         repoFullName,
-			PRNumber:     pr.GetNumber(),
-			Title:        pr.GetTitle(),
-			SlackTS:      slackTs,
-			SlackChannel: slackChannelID,
-			Reviewer:     reviewerID,
-			Status:       taskStatus,
-			LabelName:    config.LabelName,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
-		}
-
-		if err := db.Create(&task).Error; err != nil {
-			log.Printf("db insert failed (channel: %s): %v", config.SlackChannelID, err)
-			continue
-		}
-
-		log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, task.PRURL)
-		notified = true
-
-		// 営業時間内で、レビュワーが割り当てられた場合のみスレッドに通知
-		if taskStatus == "in_review" && reviewerID != "" {
-			if err := services.PostReviewerAssignedMessageWithChangeButton(task); err != nil {
-				log.Printf("reviewer assigned notification error: %v", err)
-			}
+		if taskCreated {
+			notified = true
 		}
 	}
 
