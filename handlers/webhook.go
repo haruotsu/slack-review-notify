@@ -111,6 +111,20 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 			continue
 		}
 
+		// 既存のアクティブなタスクをチェック
+		var existingTask models.ReviewTask
+		existingErr := db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND label_name = ? AND status IN (?)",
+			repoFullName, pr.GetNumber(), config.SlackChannelID, config.LabelName,
+			[]string{"pending", "in_review", "snoozed", "waiting_business_hours"}).
+			First(&existingTask).Error
+
+		if existingErr == nil {
+			// 既存のタスクが存在する場合はスキップ
+			log.Printf("active task already exists for PR %d in channel %s with label %s, skipping",
+				pr.GetNumber(), config.SlackChannelID, config.LabelName)
+			continue
+		}
+
 		var slackTs, slackChannelID string
 		var taskStatus string
 		var reviewerID string
