@@ -169,10 +169,28 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 		// 各アクションに対する処理
 		switch actionID {
 		case "review_done":
-			// tsとchannelを使ってタスクを検索
+			// tsとchannelを使ってタスクを検索（pending状態の場合は少し待ってからリトライ）
 			var task models.ReviewTask
-			if err := db.Where("slack_ts = ? AND slack_channel = ?", ts, channel).First(&task).Error; err != nil {
-				log.Printf("task not found: ts=%s, channel=%s", ts, channel)
+			const maxRetries = 5
+			const retryDelay = 200 * time.Millisecond
+
+			var err error
+			for retry := 0; retry < maxRetries; retry++ {
+				err = db.Where("slack_ts = ? AND slack_channel = ?", ts, channel).First(&task).Error
+				if err == nil {
+					break
+				}
+
+				// レコードが見つからない場合、少し待ってからリトライ
+				if retry < maxRetries-1 {
+					log.Printf("task not found (attempt %d/%d): ts=%s, channel=%s, retrying in %v",
+						retry+1, maxRetries, ts, channel, retryDelay)
+					time.Sleep(retryDelay)
+				}
+			}
+
+			if err != nil {
+				log.Printf("task not found after %d retries: ts=%s, channel=%s", maxRetries, ts, channel)
 				c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 				return
 			}
