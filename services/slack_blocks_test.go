@@ -10,6 +10,7 @@ func TestNewSlackBlockBuilder(t *testing.T) {
 
 	if builder == nil {
 		t.Fatal("builder should not be nil")
+		return
 	}
 
 	if len(builder.blocks) != 0 {
