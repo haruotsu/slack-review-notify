@@ -63,17 +63,23 @@ func TestCheckInReviewTasks_OutOfHoursReminder(t *testing.T) {
 
 	// 現在の時刻で営業時間外判定を確認してログ出力
 	now := time.Now()
-	isOutOfHours := IsOutsideBusinessHours(now)
+	// デフォルト設定（10:00-19:00 JST）での判定
+	defaultConfig := &models.ChannelConfig{
+		BusinessHoursStart: "10:00",
+		BusinessHoursEnd:   "19:00",
+		Timezone:           "Asia/Tokyo",
+	}
+	isWithinBusiness := IsWithinBusinessHours(defaultConfig, now)
 	t.Logf("現在時刻: %v", now)
-	t.Logf("営業時間外: %v", isOutOfHours)
+	t.Logf("営業時間内: %v", isWithinBusiness)
 	t.Logf("OutOfHoursReminded: %v", updatedTask.OutOfHoursReminded)
-	
+
 	if updatedTask.ReminderPausedUntil != nil {
 		t.Logf("ReminderPausedUntil: %v", *updatedTask.ReminderPausedUntil)
 	}
 
 	// 営業時間外の場合、OutOfHoursRemindedがtrueになり、ReminderPausedUntilが設定されることを確認
-	if isOutOfHours {
+	if !isWithinBusiness {
 		assert.True(t, updatedTask.OutOfHoursReminded,
 			"営業時間外でOutOfHoursRemindedフラグがtrueになっていない")
 		assert.NotNil(t, updatedTask.ReminderPausedUntil,
@@ -128,53 +134,60 @@ func TestGetNextBusinessDayMorningWithTime_OutOfHours(t *testing.T) {
 	}
 }
 
-// 営業時間外判定のテスト
-func TestIsOutsideBusinessHours_OutOfHours(t *testing.T) {
+// 営業時間判定のテスト
+func TestIsWithinBusinessHours_DefaultConfig(t *testing.T) {
 	// JSTタイムゾーンを取得
 	jst, _ := time.LoadLocation("Asia/Tokyo")
 
+	// デフォルト設定（10:00-19:00 JST）
+	defaultConfig := &models.ChannelConfig{
+		BusinessHoursStart: "10:00",
+		BusinessHoursEnd:   "19:00",
+		Timezone:           "Asia/Tokyo",
+	}
+
 	tests := []struct {
-		name               string
-		input              time.Time
-		expectedOutOfHours bool
+		name                  string
+		input                 time.Time
+		expectedWithinBusiness bool
 	}{
 		{
-			name:               "月曜10時_営業時間内",
-			input:              time.Date(2024, 1, 15, 10, 0, 0, 0, jst),
-			expectedOutOfHours: false,
+			name:                  "月曜10時_営業時間内",
+			input:                 time.Date(2024, 1, 15, 10, 0, 0, 0, jst),
+			expectedWithinBusiness: true,
 		},
 		{
-			name:               "月曜18時_営業時間内",
-			input:              time.Date(2024, 1, 15, 18, 59, 0, 0, jst),
-			expectedOutOfHours: false,
+			name:                  "月曜18時_営業時間内",
+			input:                 time.Date(2024, 1, 15, 18, 59, 0, 0, jst),
+			expectedWithinBusiness: true,
 		},
 		{
-			name:               "月曜19時_営業時間外",
-			input:              time.Date(2024, 1, 15, 19, 0, 0, 0, jst),
-			expectedOutOfHours: true,
+			name:                  "月曜19時_営業時間外",
+			input:                 time.Date(2024, 1, 15, 19, 0, 0, 0, jst),
+			expectedWithinBusiness: false,
 		},
 		{
-			name:               "月曜9時_営業時間外",
-			input:              time.Date(2024, 1, 15, 9, 59, 0, 0, jst),
-			expectedOutOfHours: true,
+			name:                  "月曜9時_営業時間外",
+			input:                 time.Date(2024, 1, 15, 9, 59, 0, 0, jst),
+			expectedWithinBusiness: false,
 		},
 		{
-			name:               "土曜14時_営業時間外",
-			input:              time.Date(2024, 1, 20, 14, 0, 0, 0, jst),
-			expectedOutOfHours: true,
+			name:                  "土曜14時_営業時間外",
+			input:                 time.Date(2024, 1, 20, 14, 0, 0, 0, jst),
+			expectedWithinBusiness: false,
 		},
 		{
-			name:               "日曜10時_営業時間外",
-			input:              time.Date(2024, 1, 21, 10, 0, 0, 0, jst),
-			expectedOutOfHours: true,
+			name:                  "日曜10時_営業時間外",
+			input:                 time.Date(2024, 1, 21, 10, 0, 0, 0, jst),
+			expectedWithinBusiness: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsOutsideBusinessHours(tt.input)
-			assert.Equal(t, tt.expectedOutOfHours, result,
-				"営業時間外判定が正しくない: got %v, want %v", result, tt.expectedOutOfHours)
+			result := IsWithinBusinessHours(defaultConfig, tt.input)
+			assert.Equal(t, tt.expectedWithinBusiness, result,
+				"営業時間判定が正しくない: got %v, want %v", result, tt.expectedWithinBusiness)
 		})
 	}
 }

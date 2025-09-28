@@ -600,16 +600,6 @@ func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) er
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
-// IsOutsideBusinessHours は後方互換性のためのテスト専用関数
-// デフォルトの営業時間設定（10:00-19:00 JST）で営業時間外かどうかを判定
-func IsOutsideBusinessHours(t time.Time) bool {
-	defaultConfig := &models.ChannelConfig{
-		BusinessHoursStart: "10:00",
-		BusinessHoursEnd:   "19:00",
-		Timezone:           "Asia/Tokyo",
-	}
-	return !IsWithinBusinessHours(defaultConfig, t)
-}
 
 // 指定された時刻から翌営業日の営業開始時刻を取得する関数（営業時間設定対応）
 func GetNextBusinessDayMorningWithConfig(now time.Time, config *models.ChannelConfig) time.Time {
