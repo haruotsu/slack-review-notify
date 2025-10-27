@@ -730,3 +730,103 @@ func TestMultipleLabelUnlabeling(t *testing.T) {
 		})
 	}
 }
+
+// 初回レビュー後、2回目のレビューでもスレッドに通知が送られることを確認するテスト
+func TestHandleReviewSubmittedEvent_SecondReviewAfterCompletion(t *testing.T) {
+	// テスト用DB
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	// テスト前の環境変数を保存し、テスト後に復元
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+
+	// テスト用の環境変数を設定
+	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	// モックの設定
+	defer gock.Off() // テスト終了時にモックをクリア
+
+	// Slack API成功レスポンスのモック（2回目のレビュー通知用）
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		MatchHeader("Authorization", "Bearer test-token").
+		Reply(200).
+		JSON(map[string]interface{}{
+			"ok": true,
+			"ts": "1234567890.999999",
+			"channel": "C1234567890",
+		})
+
+	// 既にレビュー済み（completed状態）のタスクを作成
+	task := models.ReviewTask{
+		ID:           "completed-task-id",
+		PRURL:        "https://github.com/test/repo/pull/888",
+		Repo:         "test/repo",
+		PRNumber:     888,
+		Title:        "Already Reviewed PR",
+		SlackTS:      "1234567890.888888",
+		SlackChannel: "C1234567890",
+		Status:       "completed", // 既に完了済み
+		Reviewer:     "U1234567890",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-1 * time.Hour), // 1時間前に作成
+		UpdatedAt:    time.Now().Add(-30 * time.Minute), // 30分前に更新
+	}
+	db.Create(&task)
+
+	// 2回目のレビュー投稿イベントのペイロードを作成
+	prNumber := 888
+	repoName := "repo"
+	ownerLogin := "test"
+	reviewerLogin := "second-reviewer"
+	reviewState := "changes_requested"
+	reviewBody := "いくつか修正をお願いします"
+
+	payload := github.PullRequestReviewEvent{
+		Action: github.Ptr("submitted"),
+		PullRequest: &github.PullRequest{
+			Number: &prNumber,
+		},
+		Repo: &github.Repository{
+			Name: &repoName,
+			Owner: &github.User{
+				Login: &ownerLogin,
+			},
+		},
+		Review: &github.PullRequestReview{
+			User: &github.User{
+				Login: &reviewerLogin,
+			},
+			State: &reviewState,
+			Body:  &reviewBody,
+		},
+	}
+
+	// HTTPリクエストを作成
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	// レスポンスレコーダー作成
+	w := httptest.NewRecorder()
+
+	// Ginルーターを作成してリクエスト実行
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	// HTTPステータスが200であることを確認
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// タスクのステータスはcompletedのまま維持されていることを確認
+	var updatedTask models.ReviewTask
+	result := db.Where("id = ?", "completed-task-id").First(&updatedTask)
+	assert.NoError(t, result.Error)
+	assert.Equal(t, "completed", updatedTask.Status, "タスクステータスはcompletedのまま維持されるべき")
+
+	// モックが使用されたことを確認（Slack API呼び出しが行われた = 通知が送られた）
+	assert.True(t, gock.IsDone(), "2回目のレビューでもSlack通知が送られるべき")
+}
