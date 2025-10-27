@@ -371,7 +371,9 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	// 該当するタスクを検索（completed状態も含める）
 	var tasks []models.ReviewTask
 	result := db.Where("repo = ? AND pr_number = ? AND status IN ?",
-		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "waiting_business_hours", "completed"}).Find(&tasks)
+		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "waiting_business_hours", "completed"}).
+		Order("created_at DESC").
+		Find(&tasks)
 
 	if result.Error != nil {
 		log.Printf("review submitted task search error: %v", result.Error)
@@ -383,10 +385,20 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 		return
 	}
 
-	// 各タスクについて完了通知を送信
+	// チャンネルごとに最新のタスクのみを抽出
+	channelLatestTasks := make(map[string]models.ReviewTask)
 	for _, task := range tasks {
-		// レビュー完了通知をスレッドに投稿
-		if err := services.SendReviewCompletedAutoNotification(task, review.GetUser().GetLogin(), reviewState); err != nil {
+		// すでに同じチャンネルのタスクが存在するかチェック
+		if _, exists := channelLatestTasks[task.SlackChannel]; !exists {
+			// created_at DESCでソート済みなので、最初に見つかったものが最新
+			channelLatestTasks[task.SlackChannel] = task
+		}
+	}
+
+	// 各チャンネルの最新タスクについて完了通知を送信
+	for channel, latestTask := range channelLatestTasks {
+		// レビュー完了通知をスレッドに投稿（最新タスクのみ）
+		if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
 			log.Printf("failed to send review completed notification: %v", err)
 			// チャンネル関連のエラー（アーカイブ済み、権限なしなど）の場合はタスクを完了にする
 			if !services.IsChannelRelatedError(err) {
@@ -394,19 +406,33 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			}
 		}
 
-		// タスクのステータスがcompletedでない場合のみ、完了に更新
-		if task.Status != "completed" {
-			task.Status = "completed"
-			task.UpdatedAt = time.Now()
-			if err := db.Save(&task).Error; err != nil {
-				log.Printf("failed to update task status to completed: %v", err)
-				continue
+		// 同一チャンネル・同一PRの全タスクをcompletedに更新（リマインド防止）
+		var channelTasks []models.ReviewTask
+		db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
+			repoFullName, pr.GetNumber(), channel,
+			[]string{"in_review", "pending", "waiting_business_hours", "completed"}).Find(&channelTasks)
+
+		for _, task := range channelTasks {
+			if task.Status != "completed" {
+				task.Status = "completed"
+				task.UpdatedAt = time.Now()
+				if err := db.Save(&task).Error; err != nil {
+					log.Printf("failed to update task status to completed: %v", err)
+					continue
+				}
+				if task.ID == latestTask.ID {
+					log.Printf("task auto-completed due to review: id=%s, repo=%s, pr=%d, reviewer=%s",
+						task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
+				} else {
+					log.Printf("old task also completed to prevent reminder: id=%s, repo=%s, pr=%d",
+						task.ID, repoFullName, pr.GetNumber())
+				}
+			} else {
+				if task.ID == latestTask.ID {
+					log.Printf("additional review notification sent for completed task: id=%s, repo=%s, pr=%d, reviewer=%s",
+						task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
+				}
 			}
-			log.Printf("task auto-completed due to review: id=%s, repo=%s, pr=%d, reviewer=%s",
-				task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
-		} else {
-			log.Printf("additional review notification sent for completed task: id=%s, repo=%s, pr=%d, reviewer=%s",
-				task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
 		}
 	}
 }
