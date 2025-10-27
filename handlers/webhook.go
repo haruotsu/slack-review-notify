@@ -368,10 +368,10 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 		return
 	}
 
-	// 該当するタスクを検索
+	// 該当するタスクを検索（completed状態も含める）
 	var tasks []models.ReviewTask
 	result := db.Where("repo = ? AND pr_number = ? AND status IN ?",
-		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "waiting_business_hours"}).Find(&tasks)
+		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "waiting_business_hours", "completed"}).Find(&tasks)
 
 	if result.Error != nil {
 		log.Printf("review submitted task search error: %v", result.Error)
@@ -394,15 +394,19 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			}
 		}
 
-		// タスクのステータスを完了に更新
-		task.Status = "completed"
-		task.UpdatedAt = time.Now()
-		if err := db.Save(&task).Error; err != nil {
-			log.Printf("failed to update task status to completed: %v", err)
-			continue
+		// タスクのステータスがcompletedでない場合のみ、完了に更新
+		if task.Status != "completed" {
+			task.Status = "completed"
+			task.UpdatedAt = time.Now()
+			if err := db.Save(&task).Error; err != nil {
+				log.Printf("failed to update task status to completed: %v", err)
+				continue
+			}
+			log.Printf("task auto-completed due to review: id=%s, repo=%s, pr=%d, reviewer=%s",
+				task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
+		} else {
+			log.Printf("additional review notification sent for completed task: id=%s, repo=%s, pr=%d, reviewer=%s",
+				task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
 		}
-
-		log.Printf("task auto-completed due to review: id=%s, repo=%s, pr=%d, reviewer=%s",
-			task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
 	}
 }
