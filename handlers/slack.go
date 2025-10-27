@@ -196,7 +196,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			// レビュー完了通知をスレッドに投稿
-			message := fmt.Sprintf("✅ @%s さんがレビューを完了しました！感謝！👏", slackUserID)
+			message := fmt.Sprintf("✅ <@%s> さんがレビューを完了しました！感謝！👏", slackUserID)
 			if err := services.PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
 				log.Printf("review done notification error: %v", err)
 			}
