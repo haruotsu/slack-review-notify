@@ -647,3 +647,55 @@ func TestSendReviewCompletedAutoNotification(t *testing.T) {
 		})
 	}
 }
+
+// TestFormatReviewerMentions は複数のレビュワーIDをSlackメンション形式に変換する関数のテスト
+func TestFormatReviewerMentions(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "単一レビュワーID",
+			input:    "haruotsu",
+			expected: "<@haruotsu>",
+		},
+		{
+			name:     "複数レビュワーID（スペース区切り）",
+			input:    "kitkatayama @uchimura",
+			expected: "<@kitkatayama> <@uchimura>",
+		},
+		{
+			name:     "複数レビュワーID（@付き）",
+			input:    "@nakamu @shunhamm",
+			expected: "<@nakamu> <@shunhamm>",
+		},
+		{
+			name:     "混在パターン",
+			input:    "nakamu @haruotsu",
+			expected: "<@nakamu> <@haruotsu>",
+		},
+		{
+			name:     "空文字列",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "3人のレビュワー",
+			input:    "user1 @user2 @user3",
+			expected: "<@user1> <@user2> <@user3>",
+		},
+		{
+			name:     "余分なスペース",
+			input:    "  user1   @user2  ",
+			expected: "<@user1> <@user2>",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := formatReviewerMentions(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
