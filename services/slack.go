@@ -594,9 +594,33 @@ func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
 	return nil
 }
 
+// formatReviewerMentions は複数のレビュワーIDをSlackメンション形式に変換する
+func formatReviewerMentions(reviewerIDs string) string {
+	if reviewerIDs == "" {
+		return ""
+	}
+
+	// スペースで分割してIDを抽出
+	ids := strings.Fields(reviewerIDs)
+
+	var mentions []string
+	for _, id := range ids {
+		// @記号を取り除く
+		cleanID := strings.TrimPrefix(id, "@")
+		if cleanID != "" {
+			mentions = append(mentions, fmt.Sprintf("<@%s>", cleanID))
+		}
+	}
+
+	return strings.Join(mentions, " ")
+}
+
 // レビュワーが変更されたことを通知する関数
 func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) error {
-	message := fmt.Sprintf("レビュワーを変更しました: <@%s> → <@%s> さん、よろしくお願いします！", oldReviewerID, task.Reviewer)
+	oldMentions := formatReviewerMentions(oldReviewerID)
+	newMentions := formatReviewerMentions(task.Reviewer)
+
+	message := fmt.Sprintf("レビュワーを変更しました: %s → %s さん、よろしくお願いします！", oldMentions, newMentions)
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
