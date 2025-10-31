@@ -662,18 +662,18 @@ func TestFormatReviewerMentions(t *testing.T) {
 		},
 		{
 			name:     "複数レビュワーID（スペース区切り）",
-			input:    "kitkatayama @uchimura",
-			expected: "<@kitkatayama> <@uchimura>",
+			input:    "fuga @hoge",
+			expected: "<@fuga> <@hoge>",
 		},
 		{
 			name:     "複数レビュワーID（@付き）",
-			input:    "@nakamu @shunhamm",
-			expected: "<@nakamu> <@shunhamm>",
+			input:    "@fuga @hoge",
+			expected: "<@fuga> <@hoge>",
 		},
 		{
 			name:     "混在パターン",
-			input:    "nakamu @haruotsu",
-			expected: "<@nakamu> <@haruotsu>",
+			input:    "fuga @hoge",
+			expected: "<@fuga> <@hoge>",
 		},
 		{
 			name:     "空文字列",
@@ -682,8 +682,8 @@ func TestFormatReviewerMentions(t *testing.T) {
 		},
 		{
 			name:     "3人のレビュワー",
-			input:    "user1 @user2 @user3",
-			expected: "<@user1> <@user2> <@user3>",
+			input:    "fuga hoge piyo",
+			expected: "<@fuga> <@hoge> <@piyo>",
 		},
 		{
 			name:     "余分なスペース",
