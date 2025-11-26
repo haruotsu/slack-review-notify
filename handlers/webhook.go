@@ -182,6 +182,12 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					var reviewerID string
 
 					// 営業時間外判定
+					creatorGithubUsername := pr.GetUser().GetLogin()
+					creatorSlackID := services.GetSlackUserIDFromGitHub(db, creatorGithubUsername)
+					if creatorSlackID != "" {
+						log.Printf("PR creator slack ID found: github=%s, slack=%s", creatorGithubUsername, creatorSlackID)
+					}
+
 					if !services.IsWithinBusinessHours(&config, time.Now()) {
 						// 営業時間外の場合：メンション抜きメッセージを送信
 						var err error
@@ -189,6 +195,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 							pr.GetHTMLURL(),
 							pr.GetTitle(),
 							config.SlackChannelID,
+							creatorSlackID,
 						)
 						taskStatus = "waiting_business_hours"
 						// レビュワーは翌営業日朝に設定する
@@ -208,6 +215,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 							pr.GetTitle(),
 							config.SlackChannelID,
 							config.DefaultMentionID,
+							creatorSlackID,
 						)
 						taskStatus = "in_review"
 						// ランダムにレビュワーを選択

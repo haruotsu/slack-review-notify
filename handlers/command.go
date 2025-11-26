@@ -71,10 +71,11 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			}
 			
 			// 最初の引数がサブコマンドかラベル名か判断
-			potentialSubCommands := []string{"show", "help", "set-mention", "add-reviewer", 
-				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo", 
+			potentialSubCommands := []string{"show", "help", "set-mention", "add-reviewer",
+				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
 				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
-				"set-business-hours-start", "set-business-hours-end", "set-timezone"}
+				"set-business-hours-start", "set-business-hours-end", "set-timezone",
+				"map-user", "show-user-mappings", "remove-user-mapping"}
 			
 			isSubCommand := false
 			for _, cmd := range potentialSubCommands {
@@ -229,6 +230,15 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				}
 				setTimezone(c, db, channelID, labelName, strings.TrimSpace(params))
 
+			case "map-user":
+				mapUser(c, db, params)
+
+			case "show-user-mappings":
+				showUserMappings(c, db)
+
+			case "remove-user-mapping":
+				removeUserMapping(c, db, params)
+
 			default:
 				c.String(200, "不明なコマンドです。/slack-review-notify help で使い方を確認してください。")
 			}
@@ -339,6 +349,11 @@ func showHelp(c *gin.Context) {
 • /slack-review-notify [ラベル名] set-timezone Asia/Tokyo - タイムゾーンを設定
 • /slack-review-notify [ラベル名] activate - 通知を有効化
 • /slack-review-notify [ラベル名] deactivate - 通知を無効化
+
+*ユーザーマッピング（PR作成者の通知用）:*
+• /slack-review-notify map-user <github-username> @slack-user - GitHubユーザーとSlackユーザーを紐付け
+• /slack-review-notify show-user-mappings - 登録済みのユーザーマッピング一覧を表示
+• /slack-review-notify remove-user-mapping <github-username> - ユーザーマッピングを削除
 
 [ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します`
 
@@ -980,4 +995,94 @@ func isValidTimeFormat(timeStr string) bool {
 	}
 
 	return true
+}
+
+func mapUser(c *gin.Context, db *gorm.DB, params string) {
+	parts := strings.Fields(params)
+	if len(parts) < 2 {
+		c.String(200, "使用方法: /slack-review-notify map-user <github-username> @slack-user\n例: /slack-review-notify map-user octocat @user")
+		return
+	}
+
+	githubUsername := strings.TrimSpace(parts[0])
+	slackUserID := cleanUserID(parts[1])
+
+	if githubUsername == "" || slackUserID == "" {
+		c.String(200, "GitHubユーザー名とSlackユーザーIDの両方を指定してください。")
+		return
+	}
+
+	var existingMapping models.UserMapping
+	result := db.Where("github_username = ?", githubUsername).First(&existingMapping)
+
+	if result.Error == nil {
+		existingMapping.SlackUserID = slackUserID
+		existingMapping.UpdatedAt = time.Now()
+		db.Save(&existingMapping)
+		c.String(200, fmt.Sprintf("GitHubユーザー `%s` のマッピングを <@%s> に更新しました。", githubUsername, slackUserID))
+		return
+	}
+
+	newMapping := models.UserMapping{
+		ID:             uuid.NewString(),
+		GithubUsername: githubUsername,
+		SlackUserID:    slackUserID,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	if err := db.Create(&newMapping).Error; err != nil {
+		log.Printf("failed to create user mapping: %v", err)
+		c.String(200, "ユーザーマッピングの作成に失敗しました。")
+		return
+	}
+
+	c.String(200, fmt.Sprintf("GitHubユーザー `%s` を <@%s> にマッピングしました。", githubUsername, slackUserID))
+}
+
+func showUserMappings(c *gin.Context, db *gorm.DB) {
+	var mappings []models.UserMapping
+
+	if err := db.Find(&mappings).Error; err != nil {
+		log.Printf("failed to get user mappings: %v", err)
+		c.String(200, "ユーザーマッピングの取得に失敗しました。")
+		return
+	}
+
+	if len(mappings) == 0 {
+		c.String(200, "まだユーザーマッピングが登録されていません。\n/slack-review-notify map-user コマンドで登録してください。")
+		return
+	}
+
+	response := "*登録済みのユーザーマッピング*\n"
+	for _, mapping := range mappings {
+		response += fmt.Sprintf("• GitHub: `%s` → Slack: <@%s>\n", mapping.GithubUsername, mapping.SlackUserID)
+	}
+
+	c.String(200, response)
+}
+
+func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername string) {
+	githubUsername = strings.TrimSpace(githubUsername)
+
+	if githubUsername == "" {
+		c.String(200, "使用方法: /slack-review-notify remove-user-mapping <github-username>\n例: /slack-review-notify remove-user-mapping octocat")
+		return
+	}
+
+	var mapping models.UserMapping
+	result := db.Where("github_username = ?", githubUsername).First(&mapping)
+
+	if result.Error != nil {
+		c.String(200, fmt.Sprintf("GitHubユーザー `%s` のマッピングは存在しません。", githubUsername))
+		return
+	}
+
+	if err := db.Delete(&mapping).Error; err != nil {
+		log.Printf("failed to delete user mapping: %v", err)
+		c.String(200, "ユーザーマッピングの削除に失敗しました。")
+		return
+	}
+
+	c.String(200, fmt.Sprintf("GitHubユーザー `%s` のマッピングを削除しました。", githubUsername))
 }
