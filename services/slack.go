@@ -83,6 +83,27 @@ func ValidateSlackRequest(r *http.Request, body []byte) bool {
 	return true
 }
 
+func GetSlackUserIDFromGitHub(db *gorm.DB, githubUsername string) string {
+	if githubUsername == "" {
+		return ""
+	}
+
+	var mapping models.UserMapping
+	if err := db.Where("github_username = ?", githubUsername).First(&mapping).Error; err != nil {
+		log.Printf("user mapping not found for github user: %s", githubUsername)
+		return ""
+	}
+
+	return mapping.SlackUserID
+}
+
+func buildMentionText(mentionID string) string {
+	if strings.HasPrefix(mentionID, "subteam^") || strings.HasPrefix(mentionID, "S") {
+		return fmt.Sprintf("<!subteam^%s>", mentionID)
+	}
+	return fmt.Sprintf("<@%s>", mentionID)
+}
+
 // メンション先ユーザーIDをランダムに選択する関数
 func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) string {
 	var config models.ChannelConfig
@@ -123,8 +144,13 @@ func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) strin
 }
 
 // SendSlackMessageOffHours は営業時間外用のメンション抜きメッセージを送信する
-func SendSlackMessageOffHours(prURL, title, channel string) (string, string, error) {
-	message := fmt.Sprintf("📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n (レビューのメンションは翌営業日の朝にお送りします)", title, prURL)
+func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID string) (string, string, error) {
+	var message string
+	if creatorSlackID != "" {
+		message = fmt.Sprintf("<@%s> からのレビュー依頼が登録されました\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n📝 レビューのメンションは翌営業日の朝にお送りします", creatorSlackID, title, prURL)
+	} else {
+		message = fmt.Sprintf("📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n (レビューのメンションは翌営業日の朝にお送りします)", title, prURL)
+	}
 	doneButton := CreateButton("レビュー完了", "review_done", "done", "primary")
 	blocks := CreateMessageWithActionBlocks(message, doneButton)
 
@@ -169,16 +195,8 @@ func SendSlackMessageOffHours(prURL, title, channel string) (string, string, err
 
 // PostBusinessHoursNotificationToThread は営業時間になったときにスレッドにメンション付き通知を送信する
 func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID string) error {
-	// ユーザーIDまたはチームIDのメンション形式を決定
-	var mentionText string
-	if strings.HasPrefix(mentionID, "subteam^") || strings.HasPrefix(mentionID, "S") {
-		// チームIDの場合はsubteam形式で表示
-		mentionText = fmt.Sprintf("<!subteam^%s>", mentionID)
-	} else {
-		// ユーザーIDの場合は通常のメンション形式
-		mentionText = fmt.Sprintf("<@%s>", mentionID)
-	}
-	
+	mentionText := buildMentionText(mentionID)
+
 	// レビュワーが設定されている場合は追加
 	var reviewerText string
 	if task.Reviewer != "" {
@@ -227,18 +245,15 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 	return nil
 }
 
-func SendSlackMessage(prURL, title, channel, mentionID string) (string, string, error) {
-	// ユーザーIDまたはチームIDのメンション形式を決定
-	var mentionText string
-	if strings.HasPrefix(mentionID, "subteam^") || strings.HasPrefix(mentionID, "S") {
-		// チームIDの場合はsubteam形式で表示
-		mentionText = fmt.Sprintf("<!subteam^%s>", mentionID)
-	} else {
-		// ユーザーIDの場合は通常のメンション形式
-		mentionText = fmt.Sprintf("<@%s>", mentionID)
-	}
+func SendSlackMessage(prURL, title, channel, mentionID, creatorSlackID string) (string, string, error) {
+	mentionText := buildMentionText(mentionID)
 
-	message := fmt.Sprintf("%s *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>", mentionText, title, prURL)
+	var message string
+	if creatorSlackID != "" {
+		message = fmt.Sprintf("%s <@%s> からのレビュー依頼があります\n\n*PRタイトル*: %s\n*URL*: <%s>", mentionText, creatorSlackID, title, prURL)
+	} else {
+		message = fmt.Sprintf("%s *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>", mentionText, title, prURL)
+	}
 	doneButton := CreateButton("レビュー完了", "review_done", "done", "primary")
 	blocks := CreateMessageWithActionBlocks(message, doneButton)
 

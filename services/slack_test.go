@@ -40,6 +40,7 @@ func TestSendSlackMessage(t *testing.T) {
 		"Test PR Title",
 		"C12345",
 		"U12345",
+		"", // PR作成者のSlack ID (テストでは空)
 	)
 
 	// アサーション
@@ -63,6 +64,7 @@ func TestSendSlackMessage(t *testing.T) {
 		"Test PR Title",
 		"INVALID",
 		"U12345",
+		"", // PR作成者のSlack ID (テストでは空)
 	)
 
 	// アサーション

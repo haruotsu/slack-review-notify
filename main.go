@@ -31,7 +31,7 @@ func main() {
 		log.Fatal("fail to connect db:", err)
 	}
 
-	if err := db.AutoMigrate(&models.ReviewTask{}, &models.ChannelConfig{}); err != nil {
+	if err := db.AutoMigrate(&models.ReviewTask{}, &models.ChannelConfig{}, &models.UserMapping{}); err != nil {
 		log.Fatal("fail to migrate db:", err)
 	}
 
