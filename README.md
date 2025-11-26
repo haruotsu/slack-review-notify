@@ -8,6 +8,7 @@
 ## 機能
 - **Slackコマンドによる設定管理**: すべての設定をSlackから変更可能
 - **自動通知**: PRにラベルが付けられると、設定されたSlackチャンネルに通知
+- **PR作成者へのメンション**: PR作成者もメンションされるため、スレッドの会話通知を受け取れる
 - **カスタマイズ可能な営業時間**: チャンネルごとに営業時間を個別設定、深夜営業にも対応
 - **タイムゾーン対応**: グローバルチームでの運用を支援（JST、UTC、その他多数対応）
 - **営業時間外待機機能**: 営業時間外にPRにラベルが付けられた場合、営業時間内まで待機してから通知
@@ -80,6 +81,33 @@ DB_PATH=review_tasks.db  # デフォルト: review_tasks.db（省略可能）
 - `/slack-review-notify [ラベル名] activate`: このラベルの通知を有効化
 - `/slack-review-notify [ラベル名] deactivate`: このラベルの通知を無効化
 
+### ユーザーマッピング（PR作成者の通知用）
+GitHubユーザーとSlackユーザーを紐付けることで、PR作成者にもメンションが届き、スレッド通知を受け取れます。
+
+- `/slack-review-notify map-user <github-username> @slack-user`: GitHubユーザーとSlackユーザーを紐付け
+- `/slack-review-notify show-user-mappings`: 登録済みのユーザーマッピング一覧を表示
+- `/slack-review-notify remove-user-mapping <github-username>`: ユーザーマッピングを削除
+
+**例:**
+```bash
+# 自分のGitHubユーザー名とSlackアカウントを紐付け
+/slack-review-notify map-user octocat @john
+
+# マッピング一覧を確認
+/slack-review-notify show-user-mappings
+
+# マッピングを削除
+/slack-review-notify remove-user-mapping octocat
+```
+
+マッピングを設定すると、PRにラベルが付けられた際に以下のように表示されます：
+```
+@team @john からのレビュー依頼があります
+
+*PRタイトル*: hogehoge API の実装
+*URL*: https://github.com/owner/repo/pull/123
+```
+
 ### レビュー管理
 通知メッセージから各種アクションを実行できます:
 
@@ -108,6 +136,19 @@ GitHubでレビューが行われると、自動的に感謝メッセージが�
 - リマインダー一時停止: 1時間, 2時間, 4時間, 今日は通知しない (翌営業日の朝まで停止), 完全停止のパターンで変更
 
 ### 設定例
+#### ユーザーマッピングの設定（推奨）
+PR作成者にもスレッド通知が届くようにするため、最初にユーザーマッピングを設定することをおすすめします。
+
+```bash
+# チームメンバーのGitHubとSlackアカウントを紐付け
+/slack-review-notify map-user alice @alice
+/slack-review-notify map-user bob @bob
+/slack-review-notify map-user charlie @charlie
+
+# マッピングの確認
+/slack-review-notify show-user-mappings
+```
+
 #### 営業時間とタイムゾーンの設定
 ```bash
 # 営業時間を9:00-18:00に設定
