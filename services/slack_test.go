@@ -584,10 +584,15 @@ func TestSelectRandomReviewer(t *testing.T) {
 	db.Create(&testConfig)
 
 	// 関数を実行
-	reviewerID := SelectRandomReviewer(db, "C12345", "needs-review")
+	reviewerID := SelectRandomReviewer(db, "C12345", "needs-review", "")
 
 	// アサーション
 	assert.Contains(t, []string{"U23456", "U34567"}, reviewerID)
+
+	// PR作成者を除外するテスト
+	creatorExcludedReviewer := SelectRandomReviewer(db, "C12345", "needs-review", "U23456")
+	// U23456が除外されるのでU34567のみが選択される
+	assert.Equal(t, "U34567", creatorExcludedReviewer)
 
 	// レビュワーリストが空の場合のテスト
 	emptyConfig := models.ChannelConfig{
@@ -602,11 +607,11 @@ func TestSelectRandomReviewer(t *testing.T) {
 	}
 
 	db.Create(&emptyConfig)
-	defaultReviewer := SelectRandomReviewer(db, "C67890", "needs-review")
+	defaultReviewer := SelectRandomReviewer(db, "C67890", "needs-review", "")
 	assert.Equal(t, "U12345", defaultReviewer)
 
 	// 存在しないチャンネル/ラベルのテスト
-	nonExistentReviewer := SelectRandomReviewer(db, "nonexistent", "needs-review")
+	nonExistentReviewer := SelectRandomReviewer(db, "nonexistent", "needs-review", "")
 	assert.Equal(t, "", nonExistentReviewer)
 }
 
