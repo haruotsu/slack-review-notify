@@ -134,6 +134,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 
 		var taskCreated bool
 		var txErr error
+		var processTask func()
 
 		for retry := 0; retry < maxRetries; retry++ {
 			txErr = db.Transaction(func(tx *gorm.DB) error {
@@ -176,7 +177,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 				taskCreated = true
 
 				// トランザクション外でSlackメッセージ送信とタスク更新を行う
-				go func() {
+				processTask = func() {
 					var slackTs, slackChannelID string
 					var taskStatus string
 					var reviewerID string
@@ -230,15 +231,23 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					}
 
 					// タスクを正式な状態に更新
+					updates := map[string]interface{}{
+						"slack_ts":   slackTs,
+						"reviewer":   reviewerID,
+						"status":     taskStatus,
+						"updated_at": time.Now(),
+					}
+
+					if err := db.Model(&models.ReviewTask{}).Where("id = ?", tempTask.ID).Updates(updates).Error; err != nil {
+						log.Printf("task update failed (channel: %s): %v", config.SlackChannelID, err)
+						return
+					}
+
+					// ローカルオブジェクトも更新
 					tempTask.SlackTS = slackTs
 					tempTask.Reviewer = reviewerID
 					tempTask.Status = taskStatus
 					tempTask.UpdatedAt = time.Now()
-
-					if err := db.Save(&tempTask).Error; err != nil {
-						log.Printf("task update failed (channel: %s): %v", config.SlackChannelID, err)
-						return
-					}
 
 					log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, tempTask.PRURL)
 
@@ -248,13 +257,22 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 							log.Printf("reviewer assigned notification error: %v", err)
 						}
 					}
-				}()
+				}
 
 				return nil
 			})
 
 			// 成功した場合はループから抜ける
 			if txErr == nil {
+				// トランザクション成功後にタスク更新処理を実行
+				if taskCreated {
+					// テストモードでは同期実行、本番ではgoroutineで非同期実行
+					if services.IsTestMode {
+						processTask()
+					} else {
+						go processTask()
+					}
+				}
 				break
 			}
 
