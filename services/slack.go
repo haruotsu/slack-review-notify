@@ -845,3 +845,31 @@ func PostLabelRemovedNotification(task models.ReviewTask, removedLabels []string
 
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
+
+func PostCheckRunFailureNotification(task models.ReviewTask, checkRun interface{}) error {
+	if IsTestMode {
+		log.Printf("test mode: would post check run failure notification for task: %s", task.ID)
+		return nil
+	}
+
+	var checkName, checkURL, conclusion string
+
+	if cr, ok := checkRun.(interface{ GetName() string }); ok {
+		checkName = cr.GetName()
+	}
+	if cr, ok := checkRun.(interface{ GetHTMLURL() string }); ok {
+		checkURL = cr.GetHTMLURL()
+	}
+	if cr, ok := checkRun.(interface{ GetConclusion() string }); ok {
+		conclusion = cr.GetConclusion()
+	}
+
+	var message string
+	if checkURL != "" {
+		message = fmt.Sprintf("❌ *CI失敗*: `%s` が失敗しました\n🔗 詳細: <%s>", checkName, checkURL)
+	} else {
+		message = fmt.Sprintf("❌ *CI失敗*: `%s` が失敗しました (conclusion: %s)", checkName, conclusion)
+	}
+
+	return PostToThread(task.SlackChannel, task.SlackTS, message)
+}
