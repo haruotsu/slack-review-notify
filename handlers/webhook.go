@@ -52,6 +52,12 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 			if e.Action != nil && *e.Action == "submitted" {
 				handleReviewSubmittedEvent(c, db, e)
 			}
+		case *github.CheckRunEvent:
+			log.Printf("CheckRunEvent received: action=%s, status=%s, conclusion=%s",
+				e.GetAction(), e.GetCheckRun().GetStatus(), e.GetCheckRun().GetConclusion())
+			if e.Action != nil && *e.Action == "completed" {
+				handleCheckRunEvent(c, db, e)
+			}
 		default:
 			log.Printf("Unknown event type received: %T", e)
 		}
@@ -358,6 +364,49 @@ func handleUnlabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEven
 	}
 }
 
+func handleCheckRunEvent(c *gin.Context, db *gorm.DB, e *github.CheckRunEvent) {
+	checkRun := e.GetCheckRun()
+	conclusion := checkRun.GetConclusion()
+
+	if conclusion != "failure" {
+		log.Printf("CheckRun conclusion is %s, skipping notification", conclusion)
+		return
+	}
+
+	pullRequests := checkRun.PullRequests
+	if len(pullRequests) == 0 {
+		log.Printf("No pull requests associated with this check run")
+		return
+	}
+
+	repo := e.GetRepo()
+	repoFullName := repo.GetFullName()
+
+	for _, pr := range pullRequests {
+		prNumber := pr.GetNumber()
+		log.Printf("handling check run failure: repo=%s, pr=%d, check_name=%s",
+			repoFullName, prNumber, checkRun.GetName())
+
+		var tasks []models.ReviewTask
+		db.Where("repo = ? AND pr_number = ? AND status IN (?)",
+			repoFullName, prNumber, []string{"pending", "in_review", "snoozed", "waiting_business_hours"}).
+			Find(&tasks)
+
+		if len(tasks) == 0 {
+			log.Printf("no active tasks found for check run failure: repo=%s, pr=%d", repoFullName, prNumber)
+			continue
+		}
+
+		for _, task := range tasks {
+			if err := services.PostCheckRunFailureNotification(task, checkRun); err != nil {
+				log.Printf("failed to post check run failure notification: %v", err)
+			} else {
+				log.Printf("check run failure notification sent: task_id=%s, check_name=%s",
+					task.ID, checkRun.GetName())
+			}
+		}
+	}
+}
 
 // レビューが提出された際の処理
 func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestReviewEvent) {

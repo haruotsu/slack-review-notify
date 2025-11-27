@@ -1196,3 +1196,203 @@ func TestHandleReviewSubmittedEvent_OldTasksAlsoCompleted(t *testing.T) {
 	// モックが使用されたことを確認
 	assert.True(t, gock.IsDone(), "最新のタスクにのみSlack通知が送られるべき")
 }
+
+func TestHandleCheckRunEvent_Failure(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = false
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		MatchHeader("Authorization", "Bearer test-token").
+		Reply(200).
+		JSON(map[string]interface{}{
+			"ok": true,
+			"ts": "1234567890.999999",
+			"channel": "C1234567890",
+		})
+
+	task := models.ReviewTask{
+		ID:           "test-task-ci",
+		PRURL:        "https://github.com/test/repo/pull/123",
+		Repo:         "test/repo",
+		PRNumber:     123,
+		Title:        "Test PR",
+		SlackTS:      "1234567890.123456",
+		SlackChannel: "C1234567890",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	action := "completed"
+	prNumber := 123
+	checkName := "build"
+	checkStatus := "completed"
+	checkConclusion := "failure"
+	checkHTMLURL := "https://github.com/test/repo/runs/12345"
+	repoFullName := "test/repo"
+
+	payload := github.CheckRunEvent{
+		Action: &action,
+		CheckRun: &github.CheckRun{
+			Name:       &checkName,
+			Status:     &checkStatus,
+			Conclusion: &checkConclusion,
+			HTMLURL:    &checkHTMLURL,
+			PullRequests: []*github.PullRequest{
+				{Number: &prNumber},
+			},
+		},
+		Repo: &github.Repository{
+			FullName: &repoFullName,
+		},
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "check_run")
+
+	w := httptest.NewRecorder()
+
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, gock.IsDone(), "CI失敗通知が送られるべき")
+}
+
+func TestHandleCheckRunEvent_Success(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	task := models.ReviewTask{
+		ID:           "test-task-ci-success",
+		PRURL:        "https://github.com/test/repo/pull/456",
+		Repo:         "test/repo",
+		PRNumber:     456,
+		Title:        "Test PR Success",
+		SlackTS:      "1234567890.456789",
+		SlackChannel: "C1234567890",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	action := "completed"
+	prNumber := 456
+	checkName := "build"
+	checkStatus := "completed"
+	checkConclusion := "success"
+	checkHTMLURL := "https://github.com/test/repo/runs/67890"
+	repoFullName := "test/repo"
+
+	payload := github.CheckRunEvent{
+		Action: &action,
+		CheckRun: &github.CheckRun{
+			Name:       &checkName,
+			Status:     &checkStatus,
+			Conclusion: &checkConclusion,
+			HTMLURL:    &checkHTMLURL,
+			PullRequests: []*github.PullRequest{
+				{Number: &prNumber},
+			},
+		},
+		Repo: &github.Repository{
+			FullName: &repoFullName,
+		},
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "check_run")
+
+	w := httptest.NewRecorder()
+
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	pendingMocks := gock.Pending()
+	assert.Equal(t, 0, len(pendingMocks), "成功時は通知されないべき")
+}
+
+func TestHandleCheckRunEvent_NoActiveTask(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	action := "completed"
+	prNumber := 789
+	checkName := "test"
+	checkStatus := "completed"
+	checkConclusion := "failure"
+	checkHTMLURL := "https://github.com/test/repo/runs/99999"
+	repoFullName := "test/repo"
+
+	payload := github.CheckRunEvent{
+		Action: &action,
+		CheckRun: &github.CheckRun{
+			Name:       &checkName,
+			Status:     &checkStatus,
+			Conclusion: &checkConclusion,
+			HTMLURL:    &checkHTMLURL,
+			PullRequests: []*github.PullRequest{
+				{Number: &prNumber},
+			},
+		},
+		Repo: &github.Repository{
+			FullName: &repoFullName,
+		},
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "check_run")
+
+	w := httptest.NewRecorder()
+
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	pendingMocks := gock.Pending()
+	assert.Equal(t, 0, len(pendingMocks), "アクティブタスクがない場合は通知されないべき")
+}
