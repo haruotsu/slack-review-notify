@@ -10,7 +10,7 @@ import (
 type UserMapping struct {
 	ID             string `gorm:"primaryKey"`
 	GithubUsername string `gorm:"uniqueIndex"` // GitHub のユーザー名
-	SlackUserID    string                      // Slack のユーザーID
+	SlackUserID    string // Slack のユーザーID
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	DeletedAt      gorm.DeletedAt `gorm:"index"`

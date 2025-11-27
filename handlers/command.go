@@ -63,20 +63,20 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 
 			// テキストをクォート対応で分割
 			parts := parseCommand(text)
-			
+
 			if len(parts) == 0 {
 				// 引数がない場合はヘルプを表示
 				showHelp(c)
 				return
 			}
-			
+
 			// 最初の引数がサブコマンドかラベル名か判断
 			potentialSubCommands := []string{"show", "help", "set-mention", "add-reviewer",
 				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
 				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
 				"set-business-hours-start", "set-business-hours-end", "set-timezone",
 				"map-user", "show-user-mappings", "remove-user-mapping"}
-			
+
 			isSubCommand := false
 			for _, cmd := range potentialSubCommands {
 				if parts[0] == cmd {
@@ -84,22 +84,22 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 					break
 				}
 			}
-			
+
 			if isSubCommand {
 				// 最初の引数がサブコマンドの場合、デフォルトのラベル名を使用
 				subCommand = parts[0]
 				labelName = "needs-review" // デフォルトのラベル名
-				
+
 				if len(parts) > 1 {
 					params = strings.Join(parts[1:], " ")
 				}
 			} else {
 				// 最初の引数がラベル名の場合
 				labelName = parts[0]
-				
+
 				if len(parts) > 1 {
 					subCommand = parts[1]
-					
+
 					if len(parts) > 2 {
 						params = strings.Join(parts[2:], " ")
 					}
@@ -110,7 +110,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			// ラベル名に関するロギング
-			log.Printf("command parsed: label=%s, subCommand=%s, params=%s", 
+			log.Printf("command parsed: label=%s, subCommand=%s, params=%s",
 				labelName, subCommand, params)
 
 			if subCommand == "" || subCommand == "help" {
@@ -122,12 +122,12 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			// ラベル名を指定して既存設定を取得
 			var config models.ChannelConfig
 			result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
-			
+
 			// ラベル名を指定して設定が見つからなかった場合は新しく作成
 			if result.Error != nil {
-				log.Printf("config for channel(%s) and label(%s) not found: %v", 
+				log.Printf("config for channel(%s) and label(%s) not found: %v",
 					channelID, labelName, result.Error)
-				
+
 				// 新しい設定の作成は各コマンド処理内で行う
 			}
 
@@ -144,7 +144,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 
 			case "set-mention":
 				if params == "" {
-					c.String(200, "メンション先のユーザーIDを指定してください。例: /slack-review-notify " + labelName + " set-mention @user")
+					c.String(200, "メンション先のユーザーIDを指定してください。例: /slack-review-notify "+labelName+" set-mention @user")
 					return
 				}
 				mentionID := strings.TrimSpace(params)
@@ -152,7 +152,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 
 			case "add-reviewer":
 				if params == "" {
-					c.String(200, "レビュワーのユーザーIDをカンマ区切りで指定してください。例: /slack-review-notify " + labelName + " add-reviewer @user1,@user2")
+					c.String(200, "レビュワーのユーザーIDをカンマ区切りで指定してください。例: /slack-review-notify "+labelName+" add-reviewer @user1,@user2")
 					return
 				}
 				// 正規表現を使ってすべてのスペースパターンを処理
@@ -173,7 +173,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 
 			case "add-repo":
 				if params == "" {
-					c.String(200, "リポジトリ名をカンマ区切りで指定してください。例: /slack-review-notify " + labelName + " add-repo owner/repo1,owner/repo2")
+					c.String(200, "リポジトリ名をカンマ区切りで指定してください。例: /slack-review-notify "+labelName+" add-repo owner/repo1,owner/repo2")
 					return
 				}
 				repoName := params
@@ -181,7 +181,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 
 			case "remove-repo":
 				if params == "" {
-					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify " + labelName + " remove-repo owner/repo")
+					c.String(200, "リポジトリ名を指定してください。例: /slack-review-notify "+labelName+" remove-repo owner/repo")
 					return
 				}
 				repoName := params
@@ -190,7 +190,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			case "set-label":
 				// set-label は実際にはラベル名を変更する操作に変更
 				if params == "" {
-					c.String(200, "新しいラベル名を指定してください。例: /slack-review-notify " + labelName + " set-label new-label-name")
+					c.String(200, "新しいラベル名を指定してください。例: /slack-review-notify "+labelName+" set-label new-label-name")
 					return
 				}
 				newLabelName := params
@@ -204,28 +204,28 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 
 			case "set-reviewer-reminder-interval":
 				if params == "" {
-					c.String(200, "レビュワー割り当て後のリマインド頻度を分単位で指定してください。例: /slack-review-notify " + labelName + " set-reviewer-reminder-interval 30")
+					c.String(200, "レビュワー割り当て後のリマインド頻度を分単位で指定してください。例: /slack-review-notify "+labelName+" set-reviewer-reminder-interval 30")
 					return
 				}
 				setReminderInterval(c, db, channelID, labelName, strings.TrimSpace(params), true)
 
 			case "set-business-hours-start":
 				if params == "" {
-					c.String(200, "営業開始時間を指定してください。例: /slack-review-notify " + labelName + " set-business-hours-start 09:00")
+					c.String(200, "営業開始時間を指定してください。例: /slack-review-notify "+labelName+" set-business-hours-start 09:00")
 					return
 				}
 				setBusinessHoursStart(c, db, channelID, labelName, strings.TrimSpace(params))
 
 			case "set-business-hours-end":
 				if params == "" {
-					c.String(200, "営業終了時間を指定してください。例: /slack-review-notify " + labelName + " set-business-hours-end 18:00")
+					c.String(200, "営業終了時間を指定してください。例: /slack-review-notify "+labelName+" set-business-hours-end 18:00")
 					return
 				}
 				setBusinessHoursEnd(c, db, channelID, labelName, strings.TrimSpace(params))
 
 			case "set-timezone":
 				if params == "" {
-					c.String(200, "タイムゾーンを指定してください。例: /slack-review-notify " + labelName + " set-timezone Asia/Tokyo")
+					c.String(200, "タイムゾーンを指定してください。例: /slack-review-notify "+labelName+" set-timezone Asia/Tokyo")
 					return
 				}
 				setTimezone(c, db, channelID, labelName, strings.TrimSpace(params))
@@ -256,10 +256,10 @@ func parseCommand(text string) []string {
 	var current strings.Builder
 	inQuote := false
 	quoteChar := byte(0)
-	
+
 	for i := 0; i < len(text); i++ {
 		char := text[i]
-		
+
 		switch {
 		case char == '"' || char == '\'':
 			if !inQuote {
@@ -284,12 +284,12 @@ func parseCommand(text string) []string {
 			current.WriteByte(char)
 		}
 	}
-	
+
 	// 最後の部分を追加
 	if current.Len() > 0 {
 		parts = append(parts, current.String())
 	}
-	
+
 	return parts
 }
 
@@ -363,31 +363,31 @@ func showHelp(c *gin.Context) {
 // すべてのラベル設定を表示
 func showAllLabels(c *gin.Context, db *gorm.DB, channelID string) {
 	var configs []models.ChannelConfig
-	
+
 	err := db.Where("slack_channel_id = ?", channelID).Find(&configs).Error
 	if err != nil {
 		c.String(200, "設定の取得中にエラーが発生しました。")
 		return
 	}
-	
+
 	if len(configs) == 0 {
 		c.String(200, "このチャンネルにはまだ設定がありません。/slack-review-notify [ラベル名] set-mention コマンドで設定を開始してください。")
 		return
 	}
-	
+
 	response := "*このチャンネルで設定済みのラベル*\n"
-	
+
 	for _, config := range configs {
 		status := "無効"
 		if config.IsActive {
 			status = "有効"
 		}
-		
+
 		response += fmt.Sprintf("• `%s` - %s (<@%s>)\n", config.LabelName, status, config.DefaultMentionID)
 	}
-	
+
 	response += "\n特定のラベルの詳細設定を確認するには: `/slack-review-notify [ラベル名] show`"
-	
+
 	c.String(200, response)
 }
 
@@ -638,13 +638,13 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoNames 
 	if result.Error != nil {
 		// 設定がまだない場合は新規作成
 		config = models.ChannelConfig{
-			ID:               uuid.NewString(),
-			SlackChannelID:   channelID,
-			LabelName:        labelName,
-			RepositoryList:   repoNames,
-			IsActive:         true,
-			CreatedAt:        time.Now(),
-			UpdatedAt:        time.Now(),
+			ID:             uuid.NewString(),
+			SlackChannelID: channelID,
+			LabelName:      labelName,
+			RepositoryList: repoNames,
+			IsActive:       true,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
 		}
 		db.Create(&config)
 		c.String(200, fmt.Sprintf("ラベル「%s」の通知対象リポジトリに `%s` を追加しました。", labelName, repoNames))
@@ -703,14 +703,14 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoNames 
 	if len(addedRepos) > 0 {
 		response = fmt.Sprintf("ラベル「%s」の通知対象リポジトリに以下を追加しました:\n`%s`", labelName, strings.Join(addedRepos, "`, `"))
 	}
-	
+
 	if len(alreadyExistsRepos) > 0 {
 		if response != "" {
 			response += "\n\n"
 		}
 		response += fmt.Sprintf("以下のリポジトリは既に通知対象でした:\n`%s`", strings.Join(alreadyExistsRepos, "`, `"))
 	}
-	
+
 	if response == "" {
 		response = "有効なリポジトリ名が指定されませんでした。"
 	}
@@ -769,7 +769,7 @@ func changeLabelName(c *gin.Context, db *gorm.DB, channelID, oldLabelName, newLa
 		c.String(200, fmt.Sprintf("ラベル「%s」の設定はこのチャンネルに存在しません。", oldLabelName))
 		return
 	}
-	
+
 	// 新しいラベル名で既に設定が存在するか確認
 	var existingConfig models.ChannelConfig
 	existingResult := db.Where("slack_channel_id = ? AND label_name = ?", channelID, newLabelName).First(&existingConfig)
@@ -873,7 +873,7 @@ func setBusinessHoursStart(c *gin.Context, db *gorm.DB, channelID, labelName, st
 
 	var config models.ChannelConfig
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
-	
+
 	if result.Error != nil {
 		// 新規作成
 		config = models.ChannelConfig{
@@ -908,7 +908,7 @@ func setBusinessHoursEnd(c *gin.Context, db *gorm.DB, channelID, labelName, endT
 
 	var config models.ChannelConfig
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
-	
+
 	if result.Error != nil {
 		config = models.ChannelConfig{
 			ID:                 uuid.NewString(),
@@ -944,19 +944,19 @@ func setTimezone(c *gin.Context, db *gorm.DB, channelID, labelName, timezone str
 
 	var config models.ChannelConfig
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
-	
+
 	if result.Error != nil {
 		// 新規作成
 		config = models.ChannelConfig{
-			ID:             uuid.NewString(),
-			SlackChannelID: channelID,
-			LabelName:      labelName,
-			Timezone:       timezone,
+			ID:                 uuid.NewString(),
+			SlackChannelID:     channelID,
+			LabelName:          labelName,
+			Timezone:           timezone,
 			BusinessHoursStart: "09:00",
 			BusinessHoursEnd:   "18:00",
-			IsActive:       true,
-			CreatedAt:      time.Now(),
-			UpdatedAt:      time.Now(),
+			IsActive:           true,
+			CreatedAt:          time.Now(),
+			UpdatedAt:          time.Now(),
 		}
 		db.Create(&config)
 		c.String(200, fmt.Sprintf("ラベル「%s」のタイムゾーンを %s に設定しました。", labelName, timezone))

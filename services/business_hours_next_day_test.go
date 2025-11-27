@@ -18,7 +18,7 @@ func TestGetNextBusinessDayMorningWithConfig(t *testing.T) {
 	config := &models.ChannelConfig{
 		BusinessHoursStart: "09:00",
 		BusinessHoursEnd:   "18:00",
-		Timezone:          "Asia/Tokyo",
+		Timezone:           "Asia/Tokyo",
 	}
 
 	testCases := []struct {
@@ -118,14 +118,14 @@ func TestGetNextBusinessDayMorningWithConfig_DifferentBusinessHours(t *testing.T
 			config := &models.ChannelConfig{
 				BusinessHoursStart: tc.businessStart,
 				BusinessHoursEnd:   "18:00",
-				Timezone:          "Asia/Tokyo",
+				Timezone:           "Asia/Tokyo",
 			}
 
 			result := GetNextBusinessDayMorningWithConfig(tc.currentTime, config)
-			
-			assert.Equal(t, tc.expectedHour, result.Hour(), 
+
+			assert.Equal(t, tc.expectedHour, result.Hour(),
 				"Expected hour %d, got %d", tc.expectedHour, result.Hour())
-			assert.Equal(t, tc.expectedMin, result.Minute(), 
+			assert.Equal(t, tc.expectedMin, result.Minute(),
 				"Expected minute %d, got %d", tc.expectedMin, result.Minute())
 		})
 	}
@@ -147,7 +147,7 @@ func TestGetNextBusinessDayMorningWithConfig_InvalidConfig(t *testing.T) {
 			config: &models.ChannelConfig{
 				BusinessHoursStart: "invalid",
 				BusinessHoursEnd:   "18:00",
-				Timezone:          "Asia/Tokyo",
+				Timezone:           "Asia/Tokyo",
 			},
 		},
 		{
@@ -155,7 +155,7 @@ func TestGetNextBusinessDayMorningWithConfig_InvalidConfig(t *testing.T) {
 			config: &models.ChannelConfig{
 				BusinessHoursStart: "",
 				BusinessHoursEnd:   "18:00",
-				Timezone:          "Asia/Tokyo",
+				Timezone:           "Asia/Tokyo",
 			},
 		},
 		{
@@ -163,7 +163,7 @@ func TestGetNextBusinessDayMorningWithConfig_InvalidConfig(t *testing.T) {
 			config: &models.ChannelConfig{
 				BusinessHoursStart: "25:00",
 				BusinessHoursEnd:   "18:00",
-				Timezone:          "Asia/Tokyo",
+				Timezone:           "Asia/Tokyo",
 			},
 		},
 	}
@@ -171,11 +171,11 @@ func TestGetNextBusinessDayMorningWithConfig_InvalidConfig(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := GetNextBusinessDayMorningWithConfig(currentTime, tc.config)
-			
+
 			// 無効な設定の場合、デフォルト（10:00）が使用されることを確認
-			assert.Equal(t, 10, result.Hour(), 
+			assert.Equal(t, 10, result.Hour(),
 				"Invalid config should fallback to default hour 10, got %d", result.Hour())
-			assert.Equal(t, 0, result.Minute(), 
+			assert.Equal(t, 0, result.Minute(),
 				"Invalid config should fallback to default minute 0, got %d", result.Minute())
 		})
 	}
@@ -186,14 +186,14 @@ func TestGetNextBusinessDayMorningWithConfig_DifferentTimezones(t *testing.T) {
 	// UTC タイムゾーンでの時刻
 	utc, err := time.LoadLocation("UTC")
 	assert.NoError(t, err)
-	
+
 	currentTimeUTC := time.Date(2024, 1, 15, 23, 0, 0, 0, utc) // UTC 23:00（JST 8:00）
 
 	// JST設定
 	configJST := &models.ChannelConfig{
 		BusinessHoursStart: "09:00",
 		BusinessHoursEnd:   "18:00",
-		Timezone:          "Asia/Tokyo",
+		Timezone:           "Asia/Tokyo",
 	}
 
 	result := GetNextBusinessDayMorningWithConfig(currentTimeUTC, configJST)
@@ -212,7 +212,7 @@ func TestGetNextBusinessDayMorningWithConfig_DifferentTimezones(t *testing.T) {
 	t.Logf("Got:      %s", result.Format("2006-01-02 15:04:05 MST"))
 
 	assert.Equal(t, expected, result,
-		"Expected JST time %s, got %s", 
-		expected.Format("2006-01-02 15:04:05 MST"), 
+		"Expected JST time %s, got %s",
+		expected.Format("2006-01-02 15:04:05 MST"),
 		result.Format("2006-01-02 15:04:05 MST"))
 }

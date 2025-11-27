@@ -77,8 +77,8 @@ func TestHandleSlackAction_ChangeReviewer_MultipleLabels(t *testing.T) {
 			ID string `json:"id"`
 		}{ID: "U99999"},
 		Actions: []struct {
-			ActionID string `json:"action_id"`
-			Value    string `json:"value,omitempty"`
+			ActionID       string `json:"action_id"`
+			Value          string `json:"value,omitempty"`
 			SelectedOption struct {
 				Value string `json:"value"`
 				Text  struct {
@@ -174,8 +174,8 @@ func TestHandleSlackAction_ChangeReviewer_SingleReviewer(t *testing.T) {
 			ID string `json:"id"`
 		}{ID: "U99999"},
 		Actions: []struct {
-			ActionID string `json:"action_id"`
-			Value    string `json:"value,omitempty"`
+			ActionID       string `json:"action_id"`
+			Value          string `json:"value,omitempty"`
 			SelectedOption struct {
 				Value string `json:"value"`
 				Text  struct {
@@ -267,8 +267,8 @@ func TestHandleSlackAction_ChangeReviewer_NoLabelName(t *testing.T) {
 			ID string `json:"id"`
 		}{ID: "U99999"},
 		Actions: []struct {
-			ActionID string `json:"action_id"`
-			Value    string `json:"value,omitempty"`
+			ActionID       string `json:"action_id"`
+			Value          string `json:"value,omitempty"`
 			SelectedOption struct {
 				Value string `json:"value"`
 				Text  struct {

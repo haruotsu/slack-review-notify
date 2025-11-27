@@ -28,15 +28,15 @@ func TestChannelConfig_BusinessHoursFields(t *testing.T) {
 
 	// 営業時間フィールドを持つChannelConfigを作成
 	config := ChannelConfig{
-		ID:                    "test-config",
-		SlackChannelID:        "C12345",
-		LabelName:            "needs-review",
-		DefaultMentionID:     "U12345",
-		IsActive:             true,
-		BusinessHoursStart:   "09:00",
-		BusinessHoursEnd:     "18:00",
-		CreatedAt:            time.Now(),
-		UpdatedAt:            time.Now(),
+		ID:                 "test-config",
+		SlackChannelID:     "C12345",
+		LabelName:          "needs-review",
+		DefaultMentionID:   "U12345",
+		IsActive:           true,
+		BusinessHoursStart: "09:00",
+		BusinessHoursEnd:   "18:00",
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
 	}
 
 	// データベースに保存

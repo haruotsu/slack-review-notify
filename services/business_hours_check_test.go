@@ -10,10 +10,10 @@ import (
 
 func TestIsWithinBusinessHours(t *testing.T) {
 	tests := []struct {
-		name         string
-		config       *models.ChannelConfig
-		currentTime  time.Time
-		expected     bool
+		name        string
+		config      *models.ChannelConfig
+		currentTime time.Time
+		expected    bool
 	}{
 		{
 			name: "営業時間内（通常時間）",
@@ -63,7 +63,7 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				Timezone:           "UTC",
 			},
 			currentTime: time.Date(2023, 12, 15, 18, 0, 0, 0, time.UTC), // 18:00
-			expected:    false, // 終了時刻は含まない
+			expected:    false,                                          // 終了時刻は含まない
 		},
 		{
 			name: "営業時間設定がない場合（デフォルト値）",
@@ -72,7 +72,7 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				BusinessHoursEnd:   "",
 			},
 			currentTime: time.Date(2023, 12, 15, 12, 30, 0, 0, time.UTC), // 12:30
-			expected:    true, // 営業時間設定がない場合は常に通知
+			expected:    true,                                            // 営業時間設定がない場合は常に通知
 		},
 		{
 			name: "深夜営業（22:00-06:00）の営業時間内",
@@ -152,7 +152,7 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				Timezone:           "Asia/Tokyo",
 			},
 			currentTime: time.Date(2024, 1, 1, 3, 30, 0, 0, time.UTC), // 1/1 12:30 JST（元日）
-			expected:    false, // 祝日なので営業時間外
+			expected:    false,                                        // 祝日なので営業時間外
 		},
 		{
 			name: "日本の祝日（成人の日）の営業時間内は営業時間外として扱う",
@@ -162,7 +162,7 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				Timezone:           "Asia/Tokyo",
 			},
 			currentTime: time.Date(2024, 1, 8, 3, 30, 0, 0, time.UTC), // 1/8 12:30 JST（2024年成人の日）
-			expected:    false, // 祝日なので営業時間外
+			expected:    false,                                        // 祝日なので営業時間外
 		},
 		{
 			name: "日本の祝日以外（平日）の営業時間内は営業時間内として扱う",
@@ -172,7 +172,7 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				Timezone:           "Asia/Tokyo",
 			},
 			currentTime: time.Date(2024, 1, 9, 3, 30, 0, 0, time.UTC), // 1/9 12:30 JST（平日）
-			expected:    true, // 平日かつ営業時間内
+			expected:    true,                                         // 平日かつ営業時間内
 		},
 		{
 			name: "UTC設定の場合は祝日判定を行わない",
@@ -182,7 +182,7 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				Timezone:           "UTC",
 			},
 			currentTime: time.Date(2024, 1, 1, 12, 30, 0, 0, time.UTC), // 1/1 12:30 UTC（元日だが、UTC設定）
-			expected:    true, // UTC設定なので祝日判定しない
+			expected:    true,                                          // UTC設定なので祝日判定しない
 		},
 	}
 
@@ -249,7 +249,7 @@ func TestParseBusinessHoursTime(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			hour, min, err := parseBusinessHoursTime(tt.timeStr)
-			
+
 			if tt.expectError {
 				assert.Error(t, err)
 			} else {

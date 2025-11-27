@@ -56,7 +56,7 @@ func (b *SlackBlockBuilder) AddActions(elements ...map[string]interface{}) *Slac
 	if len(elements) == 0 {
 		return b
 	}
-	
+
 	actions := map[string]interface{}{
 		"type":     "actions",
 		"elements": elements,
@@ -75,7 +75,7 @@ func CreateButton(text, actionID, value, style string) map[string]interface{} {
 	if value == "" {
 		value = "default"
 	}
-	
+
 	button := map[string]interface{}{
 		"type": "button",
 		"text": map[string]interface{}{
@@ -85,11 +85,11 @@ func CreateButton(text, actionID, value, style string) map[string]interface{} {
 		"action_id": actionID,
 		"value":     value,
 	}
-	
+
 	if style != "" {
 		button["style"] = style
 	}
-	
+
 	return button
 }
 
@@ -101,7 +101,7 @@ func CreatePauseReminderSelect(taskID, actionID, placeholder string, options []P
 	if placeholder == "" {
 		placeholder = "選択してください"
 	}
-	
+
 	selectOptions := make([]map[string]interface{}, len(options))
 	for i, option := range options {
 		selectOptions[i] = map[string]interface{}{
@@ -112,7 +112,7 @@ func CreatePauseReminderSelect(taskID, actionID, placeholder string, options []P
 			"value": fmt.Sprintf("%s:%s", taskID, option.Value),
 		}
 	}
-	
+
 	return map[string]interface{}{
 		"type": "static_select",
 		"placeholder": map[string]interface{}{

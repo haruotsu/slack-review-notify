@@ -14,10 +14,12 @@ import (
 func TestSendSlackMessage(t *testing.T) {
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
@@ -76,10 +78,12 @@ func TestSendSlackMessage(t *testing.T) {
 func TestPostToThread(t *testing.T) {
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
@@ -122,10 +126,12 @@ func TestPostToThread(t *testing.T) {
 func TestIsChannelArchived(t *testing.T) {
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
@@ -197,10 +203,12 @@ func TestSendReminderMessage(t *testing.T) {
 
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
@@ -312,10 +320,12 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
@@ -426,10 +436,12 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 func TestSendReminderPausedMessage(t *testing.T) {
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
@@ -511,7 +523,7 @@ func TestGetNextBusinessDayMorning(t *testing.T) {
 	}{
 		{
 			name:     "月曜日朝9時_当日10時を期待",
-			baseTime: time.Date(2024, 1, 8, 9, 0, 0, 0, jst), // 月曜日 9:00 JST
+			baseTime: time.Date(2024, 1, 8, 9, 0, 0, 0, jst),  // 月曜日 9:00 JST
 			expected: time.Date(2024, 1, 8, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
 		},
 		{
@@ -544,12 +556,12 @@ func TestGetNextBusinessDayMorning(t *testing.T) {
 	}
 
 	result := GetNextBusinessDayMorningWithConfig(time.Now(), nil)
-	
+
 	// 結果は10:00に設定されている
 	assert.Equal(t, 10, result.Hour(), "時刻は10時に設定されていること")
 	assert.Equal(t, 0, result.Minute(), "分は0分に設定されていること")
 	assert.Equal(t, 0, result.Second(), "秒は0秒に設定されていること")
-	
+
 	// 現在時刻以降であることのチェック
 	assert.True(t, result.After(time.Now().Add(-time.Second)), "結果は現在時刻以降であること")
 }
@@ -601,19 +613,21 @@ func TestSelectRandomReviewer(t *testing.T) {
 func TestSendReviewCompletedAutoNotification(t *testing.T) {
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
 
 	testCases := []struct {
-		name         string
+		name          string
 		reviewerLogin string
-		reviewState  string
-		expectedMsg  string
+		reviewState   string
+		expectedMsg   string
 	}{
 		{"承認", "reviewer1", "approved", "✅ reviewer1さんがレビューを承認しました！感謝！👏"},
 		{"変更要求", "reviewer2", "changes_requested", "🔄 reviewer2さんが変更を要求しました 感謝！👏"},

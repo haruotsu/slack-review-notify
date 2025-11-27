@@ -59,7 +59,7 @@ func TestUnlabeledEventWithExistingTask(t *testing.T) {
 	prHTMLURL := "https://github.com/test/repo/pull/123"
 	labelName := "needs-review"
 	action := "unlabeled"
-	
+
 	payload := github.PullRequestEvent{
 		Action: &action,
 		Number: &prNumber,
@@ -114,7 +114,7 @@ func TestUnlabeledEventWithoutExistingTask(t *testing.T) {
 	prHTMLURL := "https://github.com/test/repo/pull/456"
 	labelName := "needs-review"
 	action := "unlabeled"
-	
+
 	payload := github.PullRequestEvent{
 		Action: &action,
 		Number: &prNumber,
@@ -195,7 +195,7 @@ func TestUnlabeledEventWithWaitingBusinessHoursTask(t *testing.T) {
 	prHTMLURL := "https://github.com/test/repo/pull/789"
 	labelName := "needs-review"
 	action := "unlabeled"
-	
+
 	payload := github.PullRequestEvent{
 		Action: &action,
 		Number: &prNumber,
@@ -243,13 +243,15 @@ func TestUnlabeledEventWithWaitingBusinessHoursTask(t *testing.T) {
 func TestHandleReviewSubmittedEvent(t *testing.T) {
 	// テスト用DB
 	db := setupTestDB(t)
-	
+
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
@@ -317,7 +319,7 @@ func TestHandleReviewSubmittedEvent(t *testing.T) {
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-task-review").First(&updatedTask)
 	assert.Equal(t, "completed", updatedTask.Status)
-	
+
 	// モックが使用されたことを確認
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
 }
@@ -327,13 +329,15 @@ func TestHandleReviewSubmittedEventWithWaitingBusinessHoursTask(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
-	
+
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
@@ -344,8 +348,8 @@ func TestHandleReviewSubmittedEventWithWaitingBusinessHoursTask(t *testing.T) {
 		MatchHeader("Authorization", "Bearer test-token").
 		Reply(200).
 		JSON(map[string]interface{}{
-			"ok": true,
-			"ts": "1234567890.123456",
+			"ok":      true,
+			"ts":      "1234567890.123456",
 			"channel": "C1234567890",
 		})
 
@@ -372,7 +376,7 @@ func TestHandleReviewSubmittedEventWithWaitingBusinessHoursTask(t *testing.T) {
 	reviewerLogin := "reviewer"
 	reviewState := "approved"
 	reviewBody := "LGTM!"
-	
+
 	payload := github.PullRequestReviewEvent{
 		Action: github.Ptr("submitted"),
 		PullRequest: &github.PullRequest{
@@ -416,7 +420,7 @@ func TestHandleReviewSubmittedEventWithWaitingBusinessHoursTask(t *testing.T) {
 	assert.NoError(t, result.Error)
 	assert.Equal(t, "completed", updatedTask.Status)
 	assert.True(t, updatedTask.UpdatedAt.After(task.UpdatedAt))
-	
+
 	// モックが使用されたことを確認（Slack API呼び出しが行われた）
 	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
 }
@@ -740,10 +744,12 @@ func TestHandleReviewSubmittedEvent_SecondReviewAfterCompletion(t *testing.T) {
 
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
@@ -754,8 +760,8 @@ func TestHandleReviewSubmittedEvent_SecondReviewAfterCompletion(t *testing.T) {
 		MatchHeader("Authorization", "Bearer test-token").
 		Reply(200).
 		JSON(map[string]interface{}{
-			"ok": true,
-			"ts": "1234567890.999999",
+			"ok":      true,
+			"ts":      "1234567890.999999",
 			"channel": "C1234567890",
 		})
 
@@ -771,7 +777,7 @@ func TestHandleReviewSubmittedEvent_SecondReviewAfterCompletion(t *testing.T) {
 		Status:       "completed", // 既に完了済み
 		Reviewer:     "U1234567890",
 		LabelName:    "needs-review",
-		CreatedAt:    time.Now().Add(-1 * time.Hour), // 1時間前に作成
+		CreatedAt:    time.Now().Add(-1 * time.Hour),    // 1時間前に作成
 		UpdatedAt:    time.Now().Add(-30 * time.Minute), // 30分前に更新
 	}
 	db.Create(&task)
@@ -839,8 +845,10 @@ func TestHandleReviewSubmittedEvent_OnlyLatestTaskReceivesNotification(t *testin
 	services.IsTestMode = true
 
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	defer gock.Off() // テスト終了時にモックをクリア
 
@@ -850,8 +858,8 @@ func TestHandleReviewSubmittedEvent_OnlyLatestTaskReceivesNotification(t *testin
 		MatchHeader("Authorization", "Bearer test-token").
 		Reply(200).
 		JSON(map[string]interface{}{
-			"ok": true,
-			"ts": "1234567890.999999",
+			"ok":      true,
+			"ts":      "1234567890.999999",
 			"channel": "C1234567890",
 		})
 
@@ -950,8 +958,10 @@ func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *tes
 	services.IsTestMode = true
 
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	defer gock.Off() // テスト終了時にモックをクリア
 
@@ -961,8 +971,8 @@ func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *tes
 		MatchHeader("Authorization", "Bearer test-token").
 		Reply(200).
 		JSON(map[string]interface{}{
-			"ok": true,
-			"ts": "1234567890.111111",
+			"ok":      true,
+			"ts":      "1234567890.111111",
 			"channel": "C1111111111",
 		})
 
@@ -972,8 +982,8 @@ func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *tes
 		MatchHeader("Authorization", "Bearer test-token").
 		Reply(200).
 		JSON(map[string]interface{}{
-			"ok": true,
-			"ts": "1234567890.222222",
+			"ok":      true,
+			"ts":      "1234567890.222222",
 			"channel": "C2222222222",
 		})
 
@@ -1073,10 +1083,12 @@ func TestHandleReviewSubmittedEvent_OldTasksAlsoCompleted(t *testing.T) {
 
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア
@@ -1087,8 +1099,8 @@ func TestHandleReviewSubmittedEvent_OldTasksAlsoCompleted(t *testing.T) {
 		MatchHeader("Authorization", "Bearer test-token").
 		Reply(200).
 		JSON(map[string]interface{}{
-			"ok": true,
-			"ts": "1234567890.999999",
+			"ok":      true,
+			"ts":      "1234567890.999999",
 			"channel": "C1234567890",
 		})
 

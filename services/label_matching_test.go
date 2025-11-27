@@ -73,8 +73,8 @@ func TestIsLabelMatched(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			name:           "空文字列の場合はマッチしない",
-			configLabels:   "",
+			name:         "空文字列の場合はマッチしない",
+			configLabels: "",
 			prLabels: []*github.Label{
 				{Name: github.Ptr("any-label")},
 			},

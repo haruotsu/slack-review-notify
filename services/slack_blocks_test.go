@@ -49,7 +49,7 @@ func TestSlackBlockBuilder_AddSection(t *testing.T) {
 func TestSlackBlockBuilder_AddActions(t *testing.T) {
 	builder := NewSlackBlockBuilder()
 	button := CreateButton("Test Button", "test_action", "test_value", "")
-	
+
 	result := builder.AddActions(button)
 
 	// チェーン可能性の確認
@@ -366,7 +366,7 @@ func TestCreatePauseReminderSelect_EmptyValues(t *testing.T) {
 	options := []PauseOption{
 		{Text: "停止", Value: "stop"},
 	}
-	
+
 	selectElement := CreatePauseReminderSelect("", "", "", options)
 
 	// taskIDとplaceholderにデフォルト値が設定されることを確認
