@@ -71,7 +71,7 @@ func TestParseCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := parseCommand(tt.input)
-			
+
 			// nilと空のスライスを同等として扱う
 			if tt.expected == nil && len(result) == 0 {
 				return
@@ -79,7 +79,7 @@ func TestParseCommand(t *testing.T) {
 			if len(tt.expected) == 0 && len(result) == 0 {
 				return
 			}
-			
+
 			if !reflect.DeepEqual(result, tt.expected) {
 				t.Errorf("parseCommand(%q) = %v, expected %v", tt.input, result, tt.expected)
 			}

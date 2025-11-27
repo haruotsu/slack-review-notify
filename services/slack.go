@@ -172,7 +172,9 @@ func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID string) (str
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var result struct {
 		OK      bool   `json:"ok"`
@@ -204,7 +206,7 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 	}
 
 	message := fmt.Sprintf("🌅 *おはようございます！* %s\n\n📋 こちらのPRのレビューをお願いします。%s", mentionText, reviewerText)
-	
+
 	blocks := CreateMessageBlocks(message)
 
 	body := map[string]interface{}{
@@ -226,7 +228,9 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var result struct {
 		OK    bool   `json:"ok"`
@@ -275,7 +279,9 @@ func SendSlackMessage(prURL, title, channel, mentionID, creatorSlackID string) (
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	bodyBytes, _ := io.ReadAll(resp.Body)
 
@@ -285,7 +291,7 @@ func SendSlackMessage(prURL, title, channel, mentionID, creatorSlackID string) (
 	}
 
 	if !slackResp.OK {
-		return "", "", fmt.Errorf("Slack error: %s", slackResp.Error)
+		return "", "", fmt.Errorf("slack error: %s", slackResp.Error)
 	}
 
 	return slackResp.Ts, slackResp.Channel, nil
@@ -312,7 +318,9 @@ func PostToThread(channel, ts, message string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var result struct {
 		OK    bool   `json:"ok"`
@@ -357,7 +365,9 @@ func PostToThreadWithButtons(channel, ts, message string, taskID string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var result struct {
 		OK    bool   `json:"ok"`
@@ -453,7 +463,9 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	return nil
 }
@@ -495,7 +507,9 @@ func GetBotChannels() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var result struct {
 		OK       bool `json:"ok"`
@@ -550,7 +564,9 @@ func IsChannelArchived(channelID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var result struct {
 		OK      bool `json:"ok"`
@@ -604,7 +620,9 @@ func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	return nil
 }
@@ -638,7 +656,6 @@ func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) er
 	message := fmt.Sprintf("レビュワーを変更しました: %s → %s さん、よろしくお願いします！", oldMentions, newMentions)
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
-
 
 // 指定された時刻から翌営業日の営業開始時刻を取得する関数（営業時間設定対応）
 func GetNextBusinessDayMorningWithConfig(now time.Time, config *models.ChannelConfig) time.Time {
@@ -676,7 +693,7 @@ func GetNextBusinessDayMorningWithConfig(now time.Time, config *models.ChannelCo
 
 	// 現在の曜日と時刻を確認
 	weekday := nowInTZ.Weekday()
-	
+
 	// 結果を格納する変数
 	var nextBusinessDayMorning time.Time
 
@@ -737,7 +754,9 @@ func SendOutOfHoursReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	return nil
 }
@@ -772,7 +791,9 @@ func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

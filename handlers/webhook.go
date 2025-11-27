@@ -161,7 +161,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					Title:        pr.GetTitle(),
 					SlackTS:      "", // 後で更新
 					SlackChannel: config.SlackChannelID,
-					Reviewer:     "", // 後で更新
+					Reviewer:     "",        // 後で更新
 					Status:       "pending", // 仮の状態
 					LabelName:    config.LabelName,
 					CreatedAt:    time.Now(),

@@ -46,7 +46,7 @@ func TestCheckBusinessHoursTasks(t *testing.T) {
 
 	// 営業時間外の時刻でテスト（何も起きない）
 	outsideHours := time.Date(2024, 8, 27, 20, 0, 0, 0, jst) // 火曜日 20:00 JST
-	
+
 	// ここでは実際の時間をモックするのではなく、ロジックを直接テスト
 	// デフォルト設定（10:00-19:00 JST）での営業時間判定のテスト
 	defaultConfig := &models.ChannelConfig{

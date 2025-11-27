@@ -302,7 +302,7 @@ func TestHandleSlackCommand_ShowAllLabels(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 	responseBody := w.Body.String()
-	
+
 	// 現在のチャンネルのラベルのみが表示されることを確認
 	assert.Contains(t, responseBody, "このチャンネルで設定済みのラベル")
 	assert.Contains(t, responseBody, "needs-review")
@@ -310,7 +310,7 @@ func TestHandleSlackCommand_ShowAllLabels(t *testing.T) {
 	assert.Contains(t, responseBody, "feature")
 	assert.Contains(t, responseBody, "有効")
 	assert.Contains(t, responseBody, "無効")
-	
+
 	// 他のチャンネルのラベルは表示されないことを確認
 	assert.NotContains(t, responseBody, "security")
 }

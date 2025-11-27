@@ -147,38 +147,38 @@ func TestIsWithinBusinessHours_DefaultConfig(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                  string
-		input                 time.Time
+		name                   string
+		input                  time.Time
 		expectedWithinBusiness bool
 	}{
 		{
-			name:                  "月曜10時_営業時間内",
-			input:                 time.Date(2024, 1, 15, 10, 0, 0, 0, jst),
+			name:                   "月曜10時_営業時間内",
+			input:                  time.Date(2024, 1, 15, 10, 0, 0, 0, jst),
 			expectedWithinBusiness: true,
 		},
 		{
-			name:                  "月曜18時_営業時間内",
-			input:                 time.Date(2024, 1, 15, 18, 59, 0, 0, jst),
+			name:                   "月曜18時_営業時間内",
+			input:                  time.Date(2024, 1, 15, 18, 59, 0, 0, jst),
 			expectedWithinBusiness: true,
 		},
 		{
-			name:                  "月曜19時_営業時間外",
-			input:                 time.Date(2024, 1, 15, 19, 0, 0, 0, jst),
+			name:                   "月曜19時_営業時間外",
+			input:                  time.Date(2024, 1, 15, 19, 0, 0, 0, jst),
 			expectedWithinBusiness: false,
 		},
 		{
-			name:                  "月曜9時_営業時間外",
-			input:                 time.Date(2024, 1, 15, 9, 59, 0, 0, jst),
+			name:                   "月曜9時_営業時間外",
+			input:                  time.Date(2024, 1, 15, 9, 59, 0, 0, jst),
 			expectedWithinBusiness: false,
 		},
 		{
-			name:                  "土曜14時_営業時間外",
-			input:                 time.Date(2024, 1, 20, 14, 0, 0, 0, jst),
+			name:                   "土曜14時_営業時間外",
+			input:                  time.Date(2024, 1, 20, 14, 0, 0, 0, jst),
 			expectedWithinBusiness: false,
 		},
 		{
-			name:                  "日曜10時_営業時間外",
-			input:                 time.Date(2024, 1, 21, 10, 0, 0, 0, jst),
+			name:                   "日曜10時_営業時間外",
+			input:                  time.Date(2024, 1, 21, 10, 0, 0, 0, jst),
 			expectedWithinBusiness: false,
 		},
 	}

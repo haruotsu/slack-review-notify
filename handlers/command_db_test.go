@@ -47,42 +47,42 @@ func setupHTTPRequest(t *testing.T, text, channelID string) *http.Request {
 
 func TestSetBusinessHoursStartCommand_Integration(t *testing.T) {
 	db := setupCommandIntegrationTestDB(t)
-	
+
 	services.IsTestMode = true
 	defer func() {
 		services.IsTestMode = false
 	}()
 
 	tests := []struct {
-		name            string
-		text            string
-		channelID       string
-		expectedStart   string
-		expectedStatus  int
-		expectsError    bool
+		name           string
+		text           string
+		channelID      string
+		expectedStart  string
+		expectedStatus int
+		expectsError   bool
 	}{
 		{
-			name:            "正常な営業開始時間設定",
-			text:            "needs-review set-business-hours-start 09:00",
-			channelID:       "C12345",
-			expectedStart:   "09:00",
-			expectedStatus:  200,
-			expectsError:    false,
+			name:           "正常な営業開始時間設定",
+			text:           "needs-review set-business-hours-start 09:00",
+			channelID:      "C12345",
+			expectedStart:  "09:00",
+			expectedStatus: 200,
+			expectsError:   false,
 		},
 		{
-			name:            "デフォルトラベルでの営業開始時間設定",
-			text:            "set-business-hours-start 10:00",
-			channelID:       "C67890",
-			expectedStart:   "10:00",
-			expectedStatus:  200,
-			expectsError:    false,
+			name:           "デフォルトラベルでの営業開始時間設定",
+			text:           "set-business-hours-start 10:00",
+			channelID:      "C67890",
+			expectedStart:  "10:00",
+			expectedStatus: 200,
+			expectsError:   false,
 		},
 		{
-			name:            "無効な時間形式",
-			text:            "needs-review set-business-hours-start 25:00",
-			channelID:       "C12345",
-			expectedStatus:  200,
-			expectsError:    true,
+			name:           "無効な時間形式",
+			text:           "needs-review set-business-hours-start 25:00",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectsError:   true,
 		},
 	}
 
@@ -112,7 +112,7 @@ func TestSetBusinessHoursStartCommand_Integration(t *testing.T) {
 
 func TestSetTimezoneCommand_Integration(t *testing.T) {
 	db := setupCommandIntegrationTestDB(t)
-	
+
 	services.IsTestMode = true
 	defer func() {
 		services.IsTestMode = false

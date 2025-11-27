@@ -17,10 +17,12 @@ func TestCleanupArchivedChannels(t *testing.T) {
 
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
 
 	// テスト用の環境変数を設定
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// モックの設定
 	defer gock.Off() // テスト終了時にモックをクリア

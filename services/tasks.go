@@ -17,7 +17,7 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 
 	var tasks []models.ReviewTask
 	result := db.Where("status = ?", "waiting_business_hours").Find(&tasks)
-	
+
 	if result.Error != nil {
 		log.Printf("waiting_business_hours task check error: %v", result.Error)
 		return
@@ -30,7 +30,7 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 		if labelName == "" {
 			labelName = "needs-review"
 		}
-		
+
 		if err := db.Where("slack_channel_id = ? AND label_name = ?", task.SlackChannel, labelName).First(&config).Error; err != nil {
 			log.Printf("channel config not found for waiting task: %s, error: %v", task.ID, err)
 			continue
@@ -43,7 +43,7 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 
 		// レビュワーをランダム選択
 		reviewerID := SelectRandomReviewer(db, task.SlackChannel, labelName)
-		
+
 		// スレッドに営業時間通知を送信
 		if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
 			log.Printf("business hours notification error (task: %s): %v", task.ID, err)
@@ -54,7 +54,7 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 		task.Status = "in_review"
 		task.Reviewer = reviewerID
 		task.UpdatedAt = time.Now()
-		
+
 		if err := db.Save(&task).Error; err != nil {
 			log.Printf("task status update error (task: %s): %v", task.ID, err)
 			continue
@@ -99,7 +99,7 @@ func CheckInReviewTasks(db *gorm.DB) {
 
 		// チャンネル設定からリマインド頻度を取得
 		var config models.ChannelConfig
-		var reminderInterval int = 30 // デフォルト値（30分）
+		reminderInterval := 30 // デフォルト値（30分）
 
 		// LabelNameも考慮して設定を取得
 		labelName := task.LabelName
@@ -137,7 +137,7 @@ func CheckInReviewTasks(db *gorm.DB) {
 						task.ReminderPausedUntil = &nextBusinessDay
 						task.OutOfHoursReminded = true
 						task.UpdatedAt = now
-						
+
 						if err := db.Save(&task).Error; err != nil {
 							log.Printf("task update error: %v", err)
 						}
@@ -149,7 +149,7 @@ func CheckInReviewTasks(db *gorm.DB) {
 			// 既に営業時間外リマインドを送信済みの場合はスキップ（ReminderPausedUntilで制御される）
 		} else {
 			// 営業時間内の場合
-			
+
 			// 営業時間外リマインドフラグをリセット
 			if task.OutOfHoursReminded {
 				task.OutOfHoursReminded = false

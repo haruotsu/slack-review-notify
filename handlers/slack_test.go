@@ -48,8 +48,8 @@ func TestHandleSlackAction_PauseReminder_Today(t *testing.T) {
 			ID string `json:"id"`
 		}{ID: "U12345"},
 		Actions: []struct {
-			ActionID string `json:"action_id"`
-			Value    string `json:"value,omitempty"`
+			ActionID       string `json:"action_id"`
+			Value          string `json:"value,omitempty"`
 			SelectedOption struct {
 				Value string `json:"value"`
 				Text  struct {
@@ -169,8 +169,8 @@ func TestHandleSlackAction_PauseReminder_Hours(t *testing.T) {
 					ID string `json:"id"`
 				}{ID: "U12345"},
 				Actions: []struct {
-					ActionID string `json:"action_id"`
-					Value    string `json:"value,omitempty"`
+					ActionID       string `json:"action_id"`
+					Value          string `json:"value,omitempty"`
 					SelectedOption struct {
 						Value string `json:"value"`
 						Text  struct {
@@ -240,7 +240,7 @@ func TestHandleSlackAction_PauseReminder_Hours(t *testing.T) {
 func TestHandleSlackAction_PauseReminderInitial(t *testing.T) {
 	// テストモードを有効化（署名検証をスキップ）
 	services.IsTestMode = true
-	
+
 	// テスト用のDB作成
 	db := setupTestDB(t)
 
@@ -267,8 +267,8 @@ func TestHandleSlackAction_PauseReminderInitial(t *testing.T) {
 			ID string `json:"id"`
 		}{ID: "U12345"},
 		Actions: []struct {
-			ActionID string `json:"action_id"`
-			Value    string `json:"value,omitempty"`
+			ActionID       string `json:"action_id"`
+			Value          string `json:"value,omitempty"`
 			SelectedOption struct {
 				Value string `json:"value"`
 				Text  struct {

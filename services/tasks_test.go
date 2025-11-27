@@ -119,8 +119,10 @@ func TestCheckInReviewTasks(t *testing.T) {
 
 	// テスト用の環境変数を設定
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// テスト用のタスクを作成（単純にin_review状態の1つだけ）
 	now := time.Now()
@@ -185,12 +187,14 @@ func TestCheckInReviewTasks_ReminderInterval(t *testing.T) {
 
 	// テスト用の環境変数を設定
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
-	defer os.Setenv("SLACK_BOT_TOKEN", originalToken)
-	os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
 	// テスト用のチャンネル設定を複数作成
 	now := time.Now()
-	
+
 	// needs-reviewラベル用設定：60分間隔
 	config1 := models.ChannelConfig{
 		ID:                       "config1",

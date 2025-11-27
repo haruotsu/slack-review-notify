@@ -16,8 +16,8 @@ type ChannelConfig struct {
 	IsActive                 bool   // 有効/無効フラグ
 	ReminderInterval         int    // リマインド頻度（分単位、デフォルト30分）
 	ReviewerReminderInterval int    // レビュワー割り当て後のリマインド頻度（分単位、デフォルト30分）
-	BusinessHoursStart       string `gorm:"default:'09:00'"` // 営業時間開始（HH:MM形式）
-	BusinessHoursEnd         string `gorm:"default:'18:00'"` // 営業時間終了（HH:MM形式）
+	BusinessHoursStart       string `gorm:"default:'09:00'"`      // 営業時間開始（HH:MM形式）
+	BusinessHoursEnd         string `gorm:"default:'18:00'"`      // 営業時間終了（HH:MM形式）
 	Timezone                 string `gorm:"default:'Asia/Tokyo'"` // タイムゾーン（デフォルト：JST）
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
