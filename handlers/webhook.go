@@ -39,12 +39,18 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 		switch e := event.(type) {
 		case *github.PullRequestEvent:
 			log.Printf("PullRequestEvent received: action=%s", e.GetAction())
-			if e.Action != nil && e.Label != nil {
+			if e.Action != nil {
 				switch *e.Action {
 				case "labeled":
-					handleLabeledEvent(c, db, e)
+					if e.Label != nil {
+						handleLabeledEvent(c, db, e)
+					}
 				case "unlabeled":
-					handleUnlabeledEvent(c, db, e)
+					if e.Label != nil {
+						handleUnlabeledEvent(c, db, e)
+					}
+				case "closed":
+					handleClosedEvent(c, db, e)
 				}
 			}
 		case *github.PullRequestReviewEvent:
@@ -134,6 +140,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 
 		var taskCreated bool
 		var txErr error
+		var processTask func()
 
 		for retry := 0; retry < maxRetries; retry++ {
 			txErr = db.Transaction(func(tx *gorm.DB) error {
@@ -184,7 +191,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 				taskCreated = true
 
 				// トランザクション外でSlackメッセージ送信とタスク更新を行う
-				go func() {
+				processTask = func() {
 					var slackTs, slackChannelID string
 					var taskStatus string
 					var reviewerID string
@@ -231,15 +238,23 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					}
 
 					// タスクを正式な状態に更新
+					updates := map[string]interface{}{
+						"slack_ts":   slackTs,
+						"reviewer":   reviewerID,
+						"status":     taskStatus,
+						"updated_at": time.Now(),
+					}
+
+					if err := db.Model(&models.ReviewTask{}).Where("id = ?", tempTask.ID).Updates(updates).Error; err != nil {
+						log.Printf("task update failed (channel: %s): %v", config.SlackChannelID, err)
+						return
+					}
+
+					// ローカルオブジェクトも更新
 					tempTask.SlackTS = slackTs
 					tempTask.Reviewer = reviewerID
 					tempTask.Status = taskStatus
 					tempTask.UpdatedAt = time.Now()
-
-					if err := db.Save(&tempTask).Error; err != nil {
-						log.Printf("task update failed (channel: %s): %v", config.SlackChannelID, err)
-						return
-					}
 
 					log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, tempTask.PRURL)
 
@@ -249,13 +264,22 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 							log.Printf("reviewer assigned notification error: %v", err)
 						}
 					}
-				}()
+				}
 
 				return nil
 			})
 
 			// 成功した場合はループから抜ける
 			if txErr == nil {
+				// トランザクション成功後にタスク更新処理を実行
+				if taskCreated {
+					// テストモードでは同期実行、本番ではgoroutineで非同期実行
+					if services.IsTestMode {
+						processTask()
+					} else {
+						go processTask()
+					}
+				}
 				break
 			}
 
@@ -359,6 +383,44 @@ func handleUnlabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEven
 	}
 }
 
+// PRがcloseされた際の処理
+func handleClosedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) {
+	pr := e.PullRequest
+	repo := e.Repo
+	repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
+
+	log.Printf("handling closed event: repo=%s, pr=%d, merged=%v", repoFullName, pr.GetNumber(), pr.GetMerged())
+
+	// 該当するPRの全てのアクティブタスクを検索
+	var tasks []models.ReviewTask
+	db.Where("repo = ? AND pr_number = ? AND status IN (?)",
+		repoFullName, pr.GetNumber(), []string{"pending", "in_review", "snoozed", "waiting_business_hours"}).Find(&tasks)
+
+	if len(tasks) == 0 {
+		log.Printf("no active tasks found for closed event: repo=%s, pr=%d", repoFullName, pr.GetNumber())
+		return
+	}
+
+	// 各タスクについて完了処理を実行
+	for _, task := range tasks {
+		// Slackにクローズ通知を送信
+		if err := services.PostPRClosedNotification(task, pr.GetMerged()); err != nil {
+			log.Printf("failed to post PR closed notification: %v", err)
+			// 通知失敗してもタスクは完了状態にする
+		}
+
+		// タスクのステータスを完了に更新
+		task.Status = "completed"
+		task.UpdatedAt = time.Now()
+		if err := db.Save(&task).Error; err != nil {
+			log.Printf("failed to update task status to completed: %v", err)
+			continue
+		}
+
+		log.Printf("task completed due to PR closed: id=%s, repo=%s, pr=%d, merged=%v",
+			task.ID, repoFullName, pr.GetNumber(), pr.GetMerged())
+	}
+}
 
 // レビューが提出された際の処理
 func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestReviewEvent) {
@@ -369,6 +431,12 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 	log.Printf("handling review submitted event: repo=%s, pr=%d, reviewer=%s, state=%s",
 		repoFullName, pr.GetNumber(), review.GetUser().GetLogin(), review.GetState())
+
+	// PRが閉じている場合は通知をスキップ
+	if pr.GetState() == "closed" {
+		log.Printf("PR is closed, skipping notification: repo=%s, pr=%d", repoFullName, pr.GetNumber())
+		return
+	}
 
 	// レビューが「承認」「変更要求」「コメント」のいずれかの場合のみ処理
 	reviewState := review.GetState()
