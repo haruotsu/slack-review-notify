@@ -237,8 +237,8 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				db.Save(&taskToUpdate)
 			}
 
-			// 新しいレビュワーをランダムに選択
-			newReviewerID := services.SelectRandomReviewer(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName)
+			// 新しいレビュワーをランダムに選択（PR作成者を除外）
+			newReviewerID := services.SelectRandomReviewer(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName, taskToUpdate.CreatorSlackID)
 
 			// 新しいレビュワーが前と同じであれば、再度選択
 			// (レビュワーリストが1人しかない場合は同じになる)
@@ -246,11 +246,26 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			if newReviewerID == oldReviewerID && db.Where("slack_channel_id = ? AND label_name = ?", taskToUpdate.SlackChannel, taskToUpdate.LabelName).First(&config).Error == nil {
 				reviewers := strings.Split(config.ReviewerList, ",")
 				if len(reviewers) > 1 {
-					// リストから古いレビュワー以外を選ぶ
+					// リストから古いレビュワーとPR作成者を除外して選ぶ
 					validReviewers := []string{}
 					for _, r := range reviewers {
-						if trimmed := strings.TrimSpace(r); trimmed != "" && trimmed != oldReviewerID {
-							validReviewers = append(validReviewers, trimmed)
+						// カンマ区切りの各エントリをスペースでも分割
+						spaceDelimited := strings.Fields(strings.TrimSpace(r))
+
+						for _, userID := range spaceDelimited {
+							// メンション記号を除去してクリーンなユーザーIDを取得
+							cleanedID := services.CleanUserIDFromMention(userID)
+
+							if cleanedID == "" || cleanedID == oldReviewerID {
+								continue
+							}
+
+							// PR作成者も除外
+							if taskToUpdate.CreatorSlackID != "" && cleanedID == taskToUpdate.CreatorSlackID {
+								continue
+							}
+
+							validReviewers = append(validReviewers, cleanedID)
 						}
 					}
 

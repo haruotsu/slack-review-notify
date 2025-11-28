@@ -159,20 +159,28 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					return nil // トランザクションを正常終了させてスキップ
 				}
 
+				// PR作成者のSlack IDを取得
+				creatorGithubUsername := pr.GetUser().GetLogin()
+				creatorSlackID := services.GetSlackUserIDFromGitHub(db, creatorGithubUsername)
+				if creatorSlackID != "" {
+					log.Printf("PR creator slack ID found: github=%s, slack=%s", creatorGithubUsername, creatorSlackID)
+				}
+
 				// まず仮のタスクレコードを作成（Slackメッセージ送信前）
 				tempTask := models.ReviewTask{
-					ID:           uuid.NewString(),
-					PRURL:        pr.GetHTMLURL(),
-					Repo:         repoFullName,
-					PRNumber:     pr.GetNumber(),
-					Title:        pr.GetTitle(),
-					SlackTS:      "", // 後で更新
-					SlackChannel: config.SlackChannelID,
-					Reviewer:     "",        // 後で更新
-					Status:       "pending", // 仮の状態
-					LabelName:    config.LabelName,
-					CreatedAt:    time.Now(),
-					UpdatedAt:    time.Now(),
+					ID:             uuid.NewString(),
+					PRURL:          pr.GetHTMLURL(),
+					Repo:           repoFullName,
+					PRNumber:       pr.GetNumber(),
+					Title:          pr.GetTitle(),
+					SlackTS:        "", // 後で更新
+					SlackChannel:   config.SlackChannelID,
+					Reviewer:       "",            // 後で更新
+					CreatorSlackID: creatorSlackID, // PR作成者のSlack ID
+					Status:         "pending",     // 仮の状態
+					LabelName:      config.LabelName,
+					CreatedAt:      time.Now(),
+					UpdatedAt:      time.Now(),
 				}
 
 				if err := tx.Create(&tempTask).Error; err != nil {
@@ -188,13 +196,6 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					var taskStatus string
 					var reviewerID string
 
-					// 営業時間外判定
-					creatorGithubUsername := pr.GetUser().GetLogin()
-					creatorSlackID := services.GetSlackUserIDFromGitHub(db, creatorGithubUsername)
-					if creatorSlackID != "" {
-						log.Printf("PR creator slack ID found: github=%s, slack=%s", creatorGithubUsername, creatorSlackID)
-					}
-
 					if !services.IsWithinBusinessHours(&config, time.Now()) {
 						// 営業時間外の場合：メンション抜きメッセージを送信
 						var err error
@@ -202,7 +203,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 							pr.GetHTMLURL(),
 							pr.GetTitle(),
 							config.SlackChannelID,
-							creatorSlackID,
+							tempTask.CreatorSlackID,
 						)
 						taskStatus = "waiting_business_hours"
 						// レビュワーは翌営業日朝に設定する
@@ -222,11 +223,11 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 							pr.GetTitle(),
 							config.SlackChannelID,
 							config.DefaultMentionID,
-							creatorSlackID,
+							tempTask.CreatorSlackID,
 						)
 						taskStatus = "in_review"
-						// ランダムにレビュワーを選択
-						reviewerID = services.SelectRandomReviewer(db, config.SlackChannelID, config.LabelName)
+						// ランダムにレビュワーを選択（PR作成者を除外）
+						reviewerID = services.SelectRandomReviewer(db, config.SlackChannelID, config.LabelName, tempTask.CreatorSlackID)
 						if err != nil {
 							log.Printf("business hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
 							// エラー時はタスクを削除

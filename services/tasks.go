@@ -41,8 +41,8 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 			continue // 営業時間外なので処理をスキップ
 		}
 
-		// レビュワーをランダム選択
-		reviewerID := SelectRandomReviewer(db, task.SlackChannel, labelName)
+		// レビュワーをランダム選択（PR作成者を除外）
+		reviewerID := SelectRandomReviewer(db, task.SlackChannel, labelName, task.CreatorSlackID)
 
 		// スレッドに営業時間通知を送信
 		if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
