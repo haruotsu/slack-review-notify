@@ -104,6 +104,25 @@ func buildMentionText(mentionID string) string {
 	return fmt.Sprintf("<@%s>", mentionID)
 }
 
+// CleanUserIDFromMention はメンション形式からユーザーIDを抽出する
+// 例: "<@U12345>" → "U12345", "@U12345" → "U12345", "U12345" → "U12345"
+func CleanUserIDFromMention(mention string) string {
+	mention = strings.TrimSpace(mention)
+
+	// <@U12345> 形式
+	if strings.HasPrefix(mention, "<@") && strings.HasSuffix(mention, ">") {
+		return strings.TrimSuffix(strings.TrimPrefix(mention, "<@"), ">")
+	}
+
+	// @U12345 形式
+	if strings.HasPrefix(mention, "@") {
+		return strings.TrimPrefix(mention, "@")
+	}
+
+	// U12345 形式（そのまま）
+	return mention
+}
+
 // メンション先ユーザーIDをランダムに選択する関数
 // excludeCreatorSlackID: PR作成者のSlack ID（空文字列の場合は除外しない）
 func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string, excludeCreatorSlackID string) string {
@@ -126,13 +145,24 @@ func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string, exclu
 	// 空の要素を削除し、PR作成者を除外
 	var validReviewers []string
 	for _, r := range reviewers {
-		if trimmed := strings.TrimSpace(r); trimmed != "" {
+		// カンマ区切りの各エントリをスペースでも分割
+		spaceDelimited := strings.Fields(strings.TrimSpace(r))
+
+		for _, userID := range spaceDelimited {
+			// メンション記号を除去してクリーンなユーザーIDを取得
+			cleanedID := CleanUserIDFromMention(userID)
+
+			if cleanedID == "" {
+				continue
+			}
+
 			// PR作成者のSlack IDが指定されている場合は除外
-			if excludeCreatorSlackID != "" && trimmed == excludeCreatorSlackID {
+			if excludeCreatorSlackID != "" && cleanedID == excludeCreatorSlackID {
 				log.Printf("excluding PR creator from reviewer list: %s", excludeCreatorSlackID)
 				continue
 			}
-			validReviewers = append(validReviewers, trimmed)
+
+			validReviewers = append(validReviewers, cleanedID)
 		}
 	}
 

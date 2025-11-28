@@ -249,12 +249,23 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 					// リストから古いレビュワーとPR作成者を除外して選ぶ
 					validReviewers := []string{}
 					for _, r := range reviewers {
-						if trimmed := strings.TrimSpace(r); trimmed != "" && trimmed != oldReviewerID {
-							// PR作成者も除外
-							if taskToUpdate.CreatorSlackID != "" && trimmed == taskToUpdate.CreatorSlackID {
+						// カンマ区切りの各エントリをスペースでも分割
+						spaceDelimited := strings.Fields(strings.TrimSpace(r))
+
+						for _, userID := range spaceDelimited {
+							// メンション記号を除去してクリーンなユーザーIDを取得
+							cleanedID := services.CleanUserIDFromMention(userID)
+
+							if cleanedID == "" || cleanedID == oldReviewerID {
 								continue
 							}
-							validReviewers = append(validReviewers, trimmed)
+
+							// PR作成者も除外
+							if taskToUpdate.CreatorSlackID != "" && cleanedID == taskToUpdate.CreatorSlackID {
+								continue
+							}
+
+							validReviewers = append(validReviewers, cleanedID)
 						}
 					}
 
