@@ -584,15 +584,10 @@ func TestSelectRandomReviewer(t *testing.T) {
 	db.Create(&testConfig)
 
 	// 関数を実行
-	reviewerID := SelectRandomReviewer(db, "C12345", "needs-review", "")
+	reviewerID := SelectRandomReviewer(db, "C12345", "needs-review")
 
 	// アサーション
 	assert.Contains(t, []string{"U23456", "U34567"}, reviewerID)
-
-	// PR作成者を除外するテスト
-	creatorExcludedReviewer := SelectRandomReviewer(db, "C12345", "needs-review", "U23456")
-	// U23456が除外されるのでU34567のみが選択される
-	assert.Equal(t, "U34567", creatorExcludedReviewer)
 
 	// レビュワーリストが空の場合のテスト
 	emptyConfig := models.ChannelConfig{
@@ -607,55 +602,12 @@ func TestSelectRandomReviewer(t *testing.T) {
 	}
 
 	db.Create(&emptyConfig)
-	defaultReviewer := SelectRandomReviewer(db, "C67890", "needs-review", "")
+	defaultReviewer := SelectRandomReviewer(db, "C67890", "needs-review")
 	assert.Equal(t, "U12345", defaultReviewer)
 
 	// 存在しないチャンネル/ラベルのテスト
-	nonExistentReviewer := SelectRandomReviewer(db, "nonexistent", "needs-review", "")
+	nonExistentReviewer := SelectRandomReviewer(db, "nonexistent", "needs-review")
 	assert.Equal(t, "", nonExistentReviewer)
-
-	// スペース区切りのレビュワーリストのテスト
-	spaceConfig := models.ChannelConfig{
-		ID:               "space-id",
-		SlackChannelID:   "C11111",
-		LabelName:        "needs-review",
-		DefaultMentionID: "U12345",
-		ReviewerList:     "<@U23456> <@U34567> <@U45678>", // スペース区切り
-		IsActive:         true,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-	}
-	db.Create(&spaceConfig)
-
-	spaceReviewer := SelectRandomReviewer(db, "C11111", "needs-review", "")
-	assert.Contains(t, []string{"U23456", "U34567", "U45678"}, spaceReviewer)
-
-	// スペース区切りでPR作成者を除外
-	spaceExcludedReviewer := SelectRandomReviewer(db, "C11111", "needs-review", "U23456")
-	assert.Contains(t, []string{"U34567", "U45678"}, spaceExcludedReviewer)
-	assert.NotEqual(t, "U23456", spaceExcludedReviewer)
-}
-
-func TestCleanUserIDFromMention(t *testing.T) {
-	testCases := []struct {
-		input    string
-		expected string
-	}{
-		{"<@U12345>", "U12345"},
-		{"@U12345", "U12345"},
-		{"U12345", "U12345"},
-		{"  <@U12345>  ", "U12345"},
-		{"  @U12345  ", "U12345"},
-		{"  U12345  ", "U12345"},
-		{"", ""},
-		{"<@>", ""},
-		{"@", ""},
-	}
-
-	for _, tc := range testCases {
-		result := CleanUserIDFromMention(tc.input)
-		assert.Equal(t, tc.expected, result, "Input: %s", tc.input)
-	}
 }
 
 func TestSendReviewCompletedAutoNotification(t *testing.T) {

@@ -15,7 +15,6 @@ type ReviewTask struct {
 	SlackTS             string
 	SlackChannel        string
 	Reviewer            string
-	CreatorSlackID      string // PR作成者のSlack ID
 	Status              string // "pending", "in_review", "paused", "archived", "done", "waiting_business_hours"
 	LabelName           string
 	WatchingUntil       *time.Time
