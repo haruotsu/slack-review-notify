@@ -107,7 +107,7 @@ func TestBusinessHoursTaskFlow(t *testing.T) {
 	db.Create(&task)
 
 	// レビュワー選択のテスト
-	selectedReviewer := SelectRandomReviewer(db, "C12345", "needs-review")
+	selectedReviewer := SelectRandomReviewer(db, "C12345", "needs-review", "")
 	assert.Contains(t, []string{"U67890", "U11111", "U22222"}, selectedReviewer, "レビュワーがリストから正しく選択される")
 
 	// タスクのステータス確認

@@ -104,8 +104,28 @@ func buildMentionText(mentionID string) string {
 	return fmt.Sprintf("<@%s>", mentionID)
 }
 
+// CleanUserIDFromMention はメンション形式からユーザーIDを抽出する
+// 例: "<@U12345>" → "U12345", "@U12345" → "U12345", "U12345" → "U12345"
+func CleanUserIDFromMention(mention string) string {
+	mention = strings.TrimSpace(mention)
+
+	// <@U12345> 形式
+	if strings.HasPrefix(mention, "<@") && strings.HasSuffix(mention, ">") {
+		return strings.TrimSuffix(strings.TrimPrefix(mention, "<@"), ">")
+	}
+
+	// @U12345 形式
+	if strings.HasPrefix(mention, "@") {
+		return strings.TrimPrefix(mention, "@")
+	}
+
+	// U12345 形式（そのまま）
+	return mention
+}
+
 // メンション先ユーザーIDをランダムに選択する関数
-func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) string {
+// excludeCreatorSlackID: PR作成者のSlack ID（空文字列の場合は除外しない）
+func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string, excludeCreatorSlackID string) string {
 	var config models.ChannelConfig
 
 	// チャンネルとラベルの設定を取得
@@ -122,15 +142,32 @@ func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) strin
 	// レビュワーリストからランダムに選択
 	reviewers := strings.Split(config.ReviewerList, ",")
 
-	// 空の要素を削除
+	// 空の要素を削除し、PR作成者を除外
 	var validReviewers []string
 	for _, r := range reviewers {
-		if trimmed := strings.TrimSpace(r); trimmed != "" {
-			validReviewers = append(validReviewers, trimmed)
+		// カンマ区切りの各エントリをスペースでも分割
+		spaceDelimited := strings.Fields(strings.TrimSpace(r))
+
+		for _, userID := range spaceDelimited {
+			// メンション記号を除去してクリーンなユーザーIDを取得
+			cleanedID := CleanUserIDFromMention(userID)
+
+			if cleanedID == "" {
+				continue
+			}
+
+			// PR作成者のSlack IDが指定されている場合は除外
+			if excludeCreatorSlackID != "" && cleanedID == excludeCreatorSlackID {
+				log.Printf("excluding PR creator from reviewer list: %s", excludeCreatorSlackID)
+				continue
+			}
+
+			validReviewers = append(validReviewers, cleanedID)
 		}
 	}
 
 	if len(validReviewers) == 0 {
+		log.Printf("no valid reviewers available after excluding creator, using default mention")
 		return config.DefaultMentionID
 	}
 
