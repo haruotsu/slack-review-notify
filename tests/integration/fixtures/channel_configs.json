@@ -1,0 +1,72 @@
+[
+  {
+    "id": "config-001",
+    "slack_channel_id": "C01TEST001",
+    "label_name": "needs-review",
+    "default_mention_id": "U01USER001",
+    "reviewer_list": "U01USER001,U01USER002,U01USER003",
+    "repository_list": "owner/repo,owner/test-repo",
+    "is_active": true,
+    "reminder_interval": 30,
+    "reviewer_reminder_interval": 30,
+    "business_hours_start": "09:00",
+    "business_hours_end": "18:00",
+    "timezone": "Asia/Tokyo"
+  },
+  {
+    "id": "config-002",
+    "slack_channel_id": "C01TEST002",
+    "label_name": "urgent-review",
+    "default_mention_id": "U01SENIOR01",
+    "reviewer_list": "U01SENIOR01,U01SENIOR02",
+    "repository_list": "owner/repo",
+    "is_active": true,
+    "reminder_interval": 15,
+    "reviewer_reminder_interval": 15,
+    "business_hours_start": "09:00",
+    "business_hours_end": "18:00",
+    "timezone": "Asia/Tokyo"
+  },
+  {
+    "id": "config-003",
+    "slack_channel_id": "C01TEST003",
+    "label_name": "needs-review",
+    "default_mention_id": "",
+    "reviewer_list": "",
+    "repository_list": "owner/another-repo",
+    "is_active": false,
+    "reminder_interval": 30,
+    "reviewer_reminder_interval": 30,
+    "business_hours_start": "09:00",
+    "business_hours_end": "18:00",
+    "timezone": "Asia/Tokyo"
+  },
+  {
+    "id": "config-004",
+    "slack_channel_id": "C01TEST004",
+    "label_name": "backend-review",
+    "default_mention_id": "U01BACKEND01",
+    "reviewer_list": "U01BACKEND01,U01BACKEND02,U01BACKEND03,U01BACKEND04",
+    "repository_list": "owner/backend-repo",
+    "is_active": true,
+    "reminder_interval": 60,
+    "reviewer_reminder_interval": 60,
+    "business_hours_start": "10:00",
+    "business_hours_end": "19:00",
+    "timezone": "Asia/Tokyo"
+  },
+  {
+    "id": "config-005",
+    "slack_channel_id": "C01TEST005",
+    "label_name": "frontend-review",
+    "default_mention_id": "U01FRONTEND01",
+    "reviewer_list": "U01FRONTEND01,U01FRONTEND02",
+    "repository_list": "owner/frontend-repo",
+    "is_active": true,
+    "reminder_interval": 30,
+    "reviewer_reminder_interval": 30,
+    "business_hours_start": "09:00",
+    "business_hours_end": "18:00",
+    "timezone": "Asia/Tokyo"
+  }
+]
