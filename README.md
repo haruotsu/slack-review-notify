@@ -245,6 +245,36 @@ docker-compose -f docker-compose.test.yml down -v
 - テスト用SQLiteデータベース（永続化ボリューム）
 - ヘルスチェック機能付き
 
+### 統合テスト実行スクリプト
+統合テストを自動実行するスクリプトが用意されています。
+
+```bash
+# 統合テストの実行
+./scripts/run-integration-tests.sh
+```
+
+**スクリプトの機能:**
+- 環境変数のチェック
+- テスト用DBのセットアップ
+- Docker Composeサービスの起動
+- ユニットテストと統合テストの実行
+- カバレッジレポートの生成
+- テスト後の自動クリーンアップ
+- 実行結果のサマリー表示
+
+**環境変数（オプション）:**
+```bash
+# テスト用のトークンを指定する場合
+export SLACK_BOT_TOKEN=xoxb-test-token
+export SLACK_SIGNING_SECRET=test-signing-secret
+export GITHUB_WEBHOOK_SECRET=test-webhook-secret
+export DB_PATH=test_integration.db
+export TEST_MODE=true
+
+# スクリプト実行
+./scripts/run-integration-tests.sh
+```
+
 ### CI/CD統合テスト
 GitHub Actionsを使用した統合テスト環境が設定されています。
 

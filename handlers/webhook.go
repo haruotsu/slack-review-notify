@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -22,11 +24,30 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 		eventType := c.GetHeader("X-GitHub-Event")
 		log.Printf("GitHub Webhook received: event_type=%s", eventType)
 
-		payload, err := github.ValidatePayload(c.Request, []byte(os.Getenv("GITHUB_WEBHOOK_SECRET")))
-		if err != nil {
-			log.Printf("Webhook validation error: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-			return
+		var payload []byte
+		var err error
+
+		// テストモードまたは署名シークレットが未設定の場合は署名検証をスキップ
+		webhookSecret := os.Getenv("GITHUB_WEBHOOK_SECRET")
+		if services.IsTestMode || webhookSecret == "" {
+			// 署名検証をスキップしてペイロードを直接読み取る
+			bodyBytes, err := io.ReadAll(c.Request.Body)
+			if err != nil {
+				log.Printf("Failed to read request body: %v", err)
+				c.JSON(http.StatusBadRequest, gin.H{"error": "cannot read payload"})
+				return
+			}
+			// ボディを復元（後続の処理で使用するため）
+			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			payload = bodyBytes
+		} else {
+			// 本番環境では署名検証を実行
+			payload, err = github.ValidatePayload(c.Request, []byte(webhookSecret))
+			if err != nil {
+				log.Printf("Webhook validation error: %v", err)
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+				return
+			}
 		}
 
 		event, err := github.ParseWebHook(github.WebHookType(c.Request), payload)

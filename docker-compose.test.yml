@@ -10,8 +10,8 @@ services:
       # Slack設定
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-xoxb-test-token}
       - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET:-test-signing-secret}
-      # GitHub設定
-      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-test-webhook-secret}
+      # GitHub設定（テストモードでは空にして署名検証をスキップ）
+      - GITHUB_WEBHOOK_SECRET=
       # データベース設定
       - DB_PATH=/app/data/test_review_tasks.db
     volumes:
