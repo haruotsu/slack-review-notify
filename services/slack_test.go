@@ -715,3 +715,84 @@ func TestFormatReviewerMentions(t *testing.T) {
 		})
 	}
 }
+
+// TestGetReviewerWorkload は GetReviewerWorkload 関数のテスト
+func TestGetReviewerWorkload(t *testing.T) {
+	db := setupTestDB(t)
+
+	// テスト用のタスクを作成（未完了タスク）
+	task1 := models.ReviewTask{
+		ID:           "task-1",
+		PRURL:        "https://github.com/owner/repo/pull/1",
+		Repo:         "owner/repo",
+		PRNumber:     1,
+		Title:        "Test PR 1",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Reviewer:     "U12345",
+		Status:       "pending",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	task2 := models.ReviewTask{
+		ID:           "task-2",
+		PRURL:        "https://github.com/owner/repo/pull/2",
+		Repo:         "owner/repo",
+		PRNumber:     2,
+		Title:        "Test PR 2",
+		SlackTS:      "1234.5679",
+		SlackChannel: "C12345",
+		Reviewer:     "U12345",
+		Status:       "in_review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	// 完了済みタスク
+	task3 := models.ReviewTask{
+		ID:           "task-3",
+		PRURL:        "https://github.com/owner/repo/pull/3",
+		Repo:         "owner/repo",
+		PRNumber:     3,
+		Title:        "Test PR 3",
+		SlackTS:      "1234.5680",
+		SlackChannel: "C12345",
+		Reviewer:     "U12345",
+		Status:       "done",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	// 別のレビュワーのタスク
+	task4 := models.ReviewTask{
+		ID:           "task-4",
+		PRURL:        "https://github.com/owner/repo/pull/4",
+		Repo:         "owner/repo",
+		PRNumber:     4,
+		Title:        "Test PR 4",
+		SlackTS:      "1234.5681",
+		SlackChannel: "C12345",
+		Reviewer:     "U67890",
+		Status:       "pending",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	db.Create(&task1)
+	db.Create(&task2)
+	db.Create(&task3)
+	db.Create(&task4)
+
+	// U12345のワークロードをチェック（未完了タスク数）
+	workload := GetReviewerWorkload(db, "U12345")
+	assert.Equal(t, 2, workload, "U12345の未完了タスクは2つであること")
+
+	// U67890のワークロードをチェック
+	workload = GetReviewerWorkload(db, "U67890")
+	assert.Equal(t, 1, workload, "U67890の未完了タスクは1つであること")
+
+	// 存在しないレビュワー
+	workload = GetReviewerWorkload(db, "UNKNOWN")
+	assert.Equal(t, 0, workload, "存在しないレビュワーのワークロードは0であること")
+}

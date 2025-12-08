@@ -143,6 +143,15 @@ func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) strin
 	return validReviewers[randomIndex]
 }
 
+// GetReviewerWorkload 指定されたレビュワーの未完了タスク数を返す関数
+func GetReviewerWorkload(db *gorm.DB, reviewerID string) int {
+	var count int64
+	db.Model(&models.ReviewTask{}).
+		Where("reviewer LIKE ? AND status != ?", "%"+reviewerID+"%", "done").
+		Count(&count)
+	return int(count)
+}
+
 // SendSlackMessageOffHours は営業時間外用のメンション抜きメッセージを送信する
 func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID string) (string, string, error) {
 	var message string
