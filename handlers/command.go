@@ -75,7 +75,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
 				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
 				"set-business-hours-start", "set-business-hours-end", "set-timezone",
-				"map-user", "show-user-mappings", "remove-user-mapping"}
+				"map-user", "show-user-mappings", "remove-user-mapping", "set-reviewer-count"}
 
 			isSubCommand := false
 			for _, cmd := range potentialSubCommands {
@@ -239,6 +239,13 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			case "remove-user-mapping":
 				removeUserMapping(c, db, params)
 
+			case "set-reviewer-count":
+				if params == "" {
+					c.String(200, "レビュワー割り当て人数を指定してください。例: /slack-review-notify "+labelName+" set-reviewer-count 3")
+					return
+				}
+				setReviewerCount(c, db, channelID, labelName, strings.TrimSpace(params))
+
 			default:
 				c.String(200, "不明なコマンドです。/slack-review-notify help で使い方を確認してください。")
 			}
@@ -339,6 +346,7 @@ func showHelp(c *gin.Context) {
 • /slack-review-notify [ラベル名] add-reviewer @user1,@user2 - レビュワーを追加
 • /slack-review-notify [ラベル名] show-reviewers - レビュワー一覧を表示
 • /slack-review-notify [ラベル名] clear-reviewers - レビュワーをクリア
+• /slack-review-notify [ラベル名] set-reviewer-count 3 - レビュワー割り当て人数を設定
 
 *高度な設定:*
 • /slack-review-notify [ラベル名] remove-repo owner/repo - リポジトリを削除
@@ -416,15 +424,21 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 		timezone = "Asia/Tokyo" // デフォルトタイムゾーン
 	}
 
+	reviewerCount := config.ReviewerCount
+	if reviewerCount <= 0 {
+		reviewerCount = 1 // デフォルト値
+	}
+
 	response := fmt.Sprintf(`*このチャンネルのラベル「%s」のレビュー通知設定*
 - ステータス: %s
 - メンション先: <@%s>
 - レビュワーリスト: %s
+- レビュワー割り当て人数: %d人
 - 通知対象リポジトリ: %s
 - レビュワー割り当て後のリマインド頻度: %d分
 - 営業時間: %s - %s (%s)`,
 		labelName, status, config.DefaultMentionID, formatReviewerList(config.ReviewerList),
-		config.RepositoryList, reviewerReminderInterval, config.BusinessHoursStart, config.BusinessHoursEnd, timezone)
+		reviewerCount, config.RepositoryList, reviewerReminderInterval, config.BusinessHoursStart, config.BusinessHoursEnd, timezone)
 
 	c.String(200, response)
 }
@@ -1085,4 +1099,40 @@ func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername string) {
 	}
 
 	c.String(200, fmt.Sprintf("GitHubユーザー `%s` のマッピングを削除しました。", githubUsername))
+}
+
+// レビュワー数を設定
+func setReviewerCount(c *gin.Context, db *gorm.DB, channelID, labelName, countStr string) {
+	// 数値に変換
+	count, err := strconv.Atoi(countStr)
+	if err != nil || count < 1 {
+		c.String(200, "レビュワー数は1以上の整数で指定してください。")
+		return
+	}
+
+	var config models.ChannelConfig
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
+
+	if result.Error != nil {
+		// 設定がまだない場合は新規作成
+		config = models.ChannelConfig{
+			ID:             uuid.NewString(),
+			SlackChannelID: channelID,
+			LabelName:      labelName,
+			ReviewerCount:  count,
+			IsActive:       true,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}
+		db.Create(&config)
+		c.String(200, fmt.Sprintf("ラベル「%s」のレビュワー割り当て人数を %d人 に設定しました。", labelName, count))
+		return
+	}
+
+	// 既存設定を更新
+	config.ReviewerCount = count
+	config.UpdatedAt = time.Now()
+	db.Save(&config)
+
+	c.String(200, fmt.Sprintf("ラベル「%s」のレビュワー割り当て人数を %d人 に更新しました。", labelName, count))
 }
