@@ -239,7 +239,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					// タスクを正式な状態に更新
 					updates := map[string]interface{}{
 						"slack_ts":   slackTs,
-						"reviewer":   reviewerID,
+						"reviewer":   strings.Join(reviewerIDs, ","),
 						"status":     taskStatus,
 						"updated_at": time.Now(),
 					}
