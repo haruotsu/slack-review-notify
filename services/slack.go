@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"slack-review-notify/models"
+	"sort"
 	"strings"
 	"time"
 
@@ -150,6 +151,59 @@ func GetReviewerWorkload(db *gorm.DB, reviewerID string) int {
 		Where("reviewer LIKE ? AND status != ?", "%"+reviewerID+"%", "done").
 		Count(&count)
 	return int(count)
+}
+
+// CleanUserIDFromMention メンション形式からユーザーIDを抽出する関数
+func CleanUserIDFromMention(mention string) string {
+	// <@U12345> 形式から U12345 を抽出
+	mention = strings.TrimSpace(mention)
+	mention = strings.TrimPrefix(mention, "<@")
+	mention = strings.TrimSuffix(mention, ">")
+	mention = strings.TrimPrefix(mention, "@")
+	return mention
+}
+
+// SelectReviewersByWorkload 未完了タスク数が少ない順にN人のレビュワーを選出する関数
+func SelectReviewersByWorkload(db *gorm.DB, channelID, labelName, excludeCreatorID string, count int) []string {
+	var config models.ChannelConfig
+	if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config).Error; err != nil {
+		return []string{}
+	}
+	if config.ReviewerList == "" {
+		return []string{config.DefaultMentionID}
+	}
+	reviewers := strings.Split(config.ReviewerList, ",")
+	type ReviewerWorkload struct {
+		UserID   string
+		Workload int
+	}
+	var workloads []ReviewerWorkload
+	for _, r := range reviewers {
+		userID := CleanUserIDFromMention(strings.TrimSpace(r))
+		if userID == "" || userID == excludeCreatorID {
+			continue
+		}
+		workload := GetReviewerWorkload(db, userID)
+		workloads = append(workloads, ReviewerWorkload{userID, workload})
+	}
+	if len(workloads) == 0 {
+		return []string{config.DefaultMentionID}
+	}
+	sort.Slice(workloads, func(i, j int) bool {
+		return workloads[i].Workload < workloads[j].Workload
+	})
+	n := count
+	if n <= 0 {
+		n = 1
+	}
+	if n > len(workloads) {
+		n = len(workloads)
+	}
+	var selected []string
+	for i := 0; i < n; i++ {
+		selected = append(selected, workloads[i].UserID)
+	}
+	return selected
 }
 
 // SendSlackMessageOffHours は営業時間外用のメンション抜きメッセージを送信する
