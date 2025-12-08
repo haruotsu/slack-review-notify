@@ -706,6 +706,21 @@ func TestFormatReviewerMentions(t *testing.T) {
 			input:    "  user1   @user2  ",
 			expected: "<@user1> <@user2>",
 		},
+		{
+			name:     "複数レビュワーID（カンマ区切り）",
+			input:    "user1,user2",
+			expected: "<@user1> <@user2>",
+		},
+		{
+			name:     "複数レビュワーID（カンマ+スペース区切り）",
+			input:    "user1, user2, user3",
+			expected: "<@user1> <@user2> <@user3>",
+		},
+		{
+			name:     "複数レビュワーID（カンマ+@付き）",
+			input:    "@user1,@user2",
+			expected: "<@user1> <@user2>",
+		},
 	}
 
 	for _, tc := range tests {
