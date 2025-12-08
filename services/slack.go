@@ -936,3 +936,20 @@ func PostLabelRemovedNotification(task models.ReviewTask, removedLabels []string
 
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
+
+// PostPRClosedNotification は、PRがcloseされたことをスレッドに通知する
+func PostPRClosedNotification(task models.ReviewTask, merged bool) error {
+	if IsTestMode {
+		log.Printf("test mode: would post PR closed notification for task: %s (merged: %v)", task.ID, merged)
+		return nil
+	}
+
+	var message string
+	if merged {
+		message = "🎉 PRがマージされました！お疲れさまでした！"
+	} else {
+		message = "🔒 PRがクローズされました。"
+	}
+
+	return PostToThread(task.SlackChannel, task.SlackTS, message)
+}
