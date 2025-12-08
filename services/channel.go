@@ -13,8 +13,9 @@ func CleanupArchivedChannels(db *gorm.DB) {
 	var configs []models.ChannelConfig
 	db.Where("is_active = ?", true).Find(&configs)
 
+	slackClient := GetSlackClient()
 	for _, config := range configs {
-		isArchived, err := IsChannelArchived(config.SlackChannelID)
+		isArchived, err := slackClient.IsChannelArchived(config.SlackChannelID)
 		if err != nil {
 			log.Printf("channel status check error (channel: %s): %v", config.SlackChannelID, err)
 			continue

@@ -157,7 +157,8 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			db.Save(&taskToUpdate)
 
 			// 一時停止を通知
-			err := services.SendReminderPausedMessage(taskToUpdate, duration)
+			slackClient := services.GetSlackClient()
+			err := slackClient.SendReminderPausedMessage(taskToUpdate, duration)
 			if err != nil {
 				log.Printf("pause reminder send error: %v", err)
 			}
@@ -196,8 +197,9 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			// レビュー完了通知をスレッドに投稿
+			slackClient := services.GetSlackClient()
 			message := fmt.Sprintf("✅ <@%s> さんがレビューを完了しました！感謝！👏", slackUserID)
-			if err := services.PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
+			if err := slackClient.PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
 				log.Printf("review done notification error: %v", err)
 			}
 
@@ -261,8 +263,9 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 					}
 				} else {
 					// レビュワーが1人しかいない場合は通知メッセージを送信
+					slackClient := services.GetSlackClient()
 					message := "レビュワーが1人しか登録されていないため、変更できません。他のレビュワーを登録してください。"
-					if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
+					if err := slackClient.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
 						log.Printf("notification error: %v", err)
 					}
 				}
@@ -274,7 +277,8 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			db.Save(&taskToUpdate)
 
 			// レビュワーが変更されたことを通知
-			err := services.SendReviewerChangedMessage(taskToUpdate, oldReviewerID)
+			slackClient := services.GetSlackClient()
+			err := slackClient.SendReviewerChangedMessage(taskToUpdate, oldReviewerID)
 			if err != nil {
 				log.Printf("reviewer change notification error: %v", err)
 			}
