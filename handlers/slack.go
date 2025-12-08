@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -237,36 +236,48 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				db.Save(&taskToUpdate)
 			}
 
-			// 新しいレビュワーをランダムに選択
-			newReviewerID := services.SelectRandomReviewer(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName)
-
-			// 新しいレビュワーが前と同じであれば、再度選択
-			// (レビュワーリストが1人しかない場合は同じになる)
+			// チャンネル設定を取得
 			var config models.ChannelConfig
-			if newReviewerID == oldReviewerID && db.Where("slack_channel_id = ? AND label_name = ?", taskToUpdate.SlackChannel, taskToUpdate.LabelName).First(&config).Error == nil {
-				reviewers := strings.Split(config.ReviewerList, ",")
-				if len(reviewers) > 1 {
-					// リストから古いレビュワー以外を選ぶ
-					validReviewers := []string{}
-					for _, r := range reviewers {
-						if trimmed := strings.TrimSpace(r); trimmed != "" && trimmed != oldReviewerID {
-							validReviewers = append(validReviewers, trimmed)
-						}
-					}
+			if err := db.Where("slack_channel_id = ? AND label_name = ?", taskToUpdate.SlackChannel, taskToUpdate.LabelName).First(&config).Error; err != nil {
+				log.Printf("channel config not found: %v", err)
+				c.JSON(http.StatusNotFound, gin.H{"error": "channel config not found"})
+				return
+			}
 
-					if len(validReviewers) > 0 {
-						r := rand.New(rand.NewSource(time.Now().UnixNano()))
-						randomIndex := r.Intn(len(validReviewers))
-						newReviewerID = validReviewers[randomIndex]
-					}
-				} else {
-					// レビュワーが1人しかいない場合は通知メッセージを送信
-					message := "レビュワーが1人しか登録されていないため、変更できません。他のレビュワーを登録してください。"
-					if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
-						log.Printf("notification error: %v", err)
-					}
+			// レビュワーリストを確認
+			reviewers := []string{}
+			for _, r := range strings.Split(config.ReviewerList, ",") {
+				if trimmed := strings.TrimSpace(r); trimmed != "" {
+					reviewers = append(reviewers, trimmed)
 				}
 			}
+
+			// レビュワーが1人しかいない場合は変更しない
+			if len(reviewers) <= 1 {
+				message := "レビュワーが1人しか登録されていないため、変更できません。他のレビュワーを登録してください。"
+				if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
+					log.Printf("notification error: %v", err)
+				}
+				c.Status(http.StatusOK)
+				return
+			}
+
+			// 新しいレビュワーを負荷ベースで選択（現在のレビュワーを除外）
+			// 注: excludeCreatorIDに古いレビュワーIDを渡して除外
+			newReviewers := services.SelectReviewersByWorkload(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName, oldReviewerID, int(config.ReviewerCount))
+
+			if len(newReviewers) == 0 {
+				// レビュワーが選択できない場合は通知メッセージを送信
+				message := "新しいレビュワーを選択できませんでした。レビュワーリストを確認してください。"
+				if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
+					log.Printf("notification error: %v", err)
+				}
+				c.Status(http.StatusOK)
+				return
+			}
+
+			// 新しいレビュワーIDを設定（カンマ区切りで連結）
+			newReviewerID := strings.Join(newReviewers, ",")
 
 			// レビュワーを更新
 			taskToUpdate.Reviewer = newReviewerID
