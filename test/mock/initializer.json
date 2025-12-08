@@ -1,0 +1,46 @@
+{
+  "expectations": [
+    {
+      "id": "slack-api-mock",
+      "httpRequest": {
+        "method": "POST",
+        "path": "/api/chat.postMessage"
+      },
+      "httpResponse": {
+        "statusCode": 200,
+        "headers": {
+          "Content-Type": ["application/json"]
+        },
+        "body": {
+          "ok": true,
+          "channel": "C1234567890",
+          "ts": "1503435956.000247",
+          "message": {
+            "text": "Here's a message for you",
+            "username": "test-bot",
+            "bot_id": "B19LU7CSY",
+            "type": "message",
+            "subtype": "bot_message",
+            "ts": "1503435956.000247"
+          }
+        }
+      }
+    },
+    {
+      "id": "github-webhook-mock",
+      "httpRequest": {
+        "method": "POST",
+        "path": "/webhook"
+      },
+      "httpResponse": {
+        "statusCode": 200,
+        "headers": {
+          "Content-Type": ["application/json"]
+        },
+        "body": {
+          "status": "success"
+        }
+      }
+    }
+  ]
+}

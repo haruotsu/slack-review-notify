@@ -10,3 +10,8 @@
 slack-review-notify
 CLAUDE.local.md
 coverage.html
+
+# Staging deployment
+deploy/staging/.env
+deploy/staging/backups/
+deploy/staging/ssl/

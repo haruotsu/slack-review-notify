@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -22,11 +24,30 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 		eventType := c.GetHeader("X-GitHub-Event")
 		log.Printf("GitHub Webhook received: event_type=%s", eventType)
 
-		payload, err := github.ValidatePayload(c.Request, []byte(os.Getenv("GITHUB_WEBHOOK_SECRET")))
-		if err != nil {
-			log.Printf("Webhook validation error: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-			return
+		var payload []byte
+		var err error
+
+		// テストモードまたは署名シークレットが未設定の場合は署名検証をスキップ
+		webhookSecret := os.Getenv("GITHUB_WEBHOOK_SECRET")
+		if services.IsTestMode || webhookSecret == "" {
+			// 署名検証をスキップしてペイロードを直接読み取る
+			bodyBytes, err := io.ReadAll(c.Request.Body)
+			if err != nil {
+				log.Printf("Failed to read request body: %v", err)
+				c.JSON(http.StatusBadRequest, gin.H{"error": "cannot read payload"})
+				return
+			}
+			// ボディを復元（後続の処理で使用するため）
+			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			payload = bodyBytes
+		} else {
+			// 本番環境では署名検証を実行
+			payload, err = github.ValidatePayload(c.Request, []byte(webhookSecret))
+			if err != nil {
+				log.Printf("Webhook validation error: %v", err)
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+				return
+			}
 		}
 
 		event, err := github.ParseWebHook(github.WebHookType(c.Request), payload)
@@ -92,9 +113,10 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 
 	notified := false
 
+	slackClient := services.GetSlackClient()
 	for _, config := range configs {
 		// チャンネルがアーカイブされているか確認
-		isArchived, checkErr := services.IsChannelArchived(config.SlackChannelID)
+		isArchived, checkErr := slackClient.IsChannelArchived(config.SlackChannelID)
 		if checkErr != nil {
 			log.Printf("channel status check error (channel: %s): %v", config.SlackChannelID, checkErr)
 		}
@@ -198,7 +220,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					if !services.IsWithinBusinessHours(&config, time.Now()) {
 						// 営業時間外の場合：メンション抜きメッセージを送信
 						var err error
-						slackTs, slackChannelID, err = services.SendSlackMessageOffHours(
+						slackTs, slackChannelID, err = slackClient.SendSlackMessageOffHours(
 							pr.GetHTMLURL(),
 							pr.GetTitle(),
 							config.SlackChannelID,
@@ -217,7 +239,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					} else {
 						// 営業時間内の場合：通常のメンション付きメッセージを送信
 						var err error
-						slackTs, slackChannelID, err = services.SendSlackMessage(
+						slackTs, slackChannelID, err = slackClient.SendSlackMessage(
 							pr.GetHTMLURL(),
 							pr.GetTitle(),
 							config.SlackChannelID,
@@ -259,7 +281,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 
 					// 営業時間内で、レビュワーが割り当てられた場合のみスレッドに通知
 					if taskStatus == "in_review" && reviewerID != "" {
-						if err := services.PostReviewerAssignedMessageWithChangeButton(tempTask); err != nil {
+						if err := slackClient.PostReviewerAssignedMessageWithChangeButton(tempTask); err != nil {
 							log.Printf("reviewer assigned notification error: %v", err)
 						}
 					}
@@ -355,14 +377,15 @@ func handleUnlabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEven
 			// 削除されたラベルを特定
 			missingLabels := services.GetMissingLabels(matchingConfig, pr.Labels)
 
+			slackClient := services.GetSlackClient()
 			// Slackメッセージを更新してタスク完了を通知
-			if err := services.UpdateSlackMessageForCompletedTask(task); err != nil {
+			if err := slackClient.UpdateSlackMessageForCompletedTask(task); err != nil {
 				log.Printf("failed to update slack message for completed task: %v", err)
 				continue
 			}
 
 			// ラベル削除による完了をスレッドに通知
-			if err := services.PostLabelRemovedNotification(task, missingLabels); err != nil {
+			if err := slackClient.PostLabelRemovedNotification(task, missingLabels); err != nil {
 				log.Printf("failed to post label removed notification: %v", err)
 				// 通知失敗してもタスクは完了状態にする
 			}
@@ -472,9 +495,10 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	}
 
 	// 各チャンネルの最新タスクについて完了通知を送信
+	slackClient := services.GetSlackClient()
 	for channel, latestTask := range channelLatestTasks {
 		// レビュー完了通知をスレッドに投稿（最新タスクのみ）
-		if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
+		if err := slackClient.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
 			log.Printf("failed to send review completed notification: %v", err)
 			// チャンネル関連のエラー（アーカイブ済み、権限なしなど）の場合はタスクを完了にする
 			if !services.IsChannelRelatedError(err) {

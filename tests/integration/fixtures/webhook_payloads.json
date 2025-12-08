@@ -1,0 +1,187 @@
+{
+  "pull_request_labeled": {
+    "action": "labeled",
+    "number": 123,
+    "pull_request": {
+      "id": 1234567890,
+      "number": 123,
+      "state": "open",
+      "title": "Add new feature for user authentication",
+      "html_url": "https://github.com/owner/repo/pull/123",
+      "user": {
+        "login": "contributor1",
+        "id": 12345,
+        "avatar_url": "https://avatars.githubusercontent.com/u/12345?v=4"
+      },
+      "created_at": "2025-12-08T10:00:00Z",
+      "updated_at": "2025-12-08T10:30:00Z"
+    },
+    "label": {
+      "id": 987654321,
+      "name": "needs-review",
+      "color": "d73a4a"
+    },
+    "repository": {
+      "id": 111111111,
+      "name": "repo",
+      "full_name": "owner/repo",
+      "private": false,
+      "owner": {
+        "login": "owner",
+        "id": 22222
+      },
+      "html_url": "https://github.com/owner/repo"
+    },
+    "sender": {
+      "login": "contributor1",
+      "id": 12345
+    }
+  },
+  "pull_request_labeled_urgent": {
+    "action": "labeled",
+    "number": 124,
+    "pull_request": {
+      "id": 1234567891,
+      "number": 124,
+      "state": "open",
+      "title": "Fix bug in payment processing",
+      "html_url": "https://github.com/owner/repo/pull/124",
+      "user": {
+        "login": "contributor2",
+        "id": 12346,
+        "avatar_url": "https://avatars.githubusercontent.com/u/12346?v=4"
+      },
+      "created_at": "2025-12-08T11:00:00Z",
+      "updated_at": "2025-12-08T11:15:00Z"
+    },
+    "label": {
+      "id": 987654322,
+      "name": "urgent-review",
+      "color": "ff0000"
+    },
+    "repository": {
+      "id": 111111111,
+      "name": "repo",
+      "full_name": "owner/repo",
+      "private": false,
+      "owner": {
+        "login": "owner",
+        "id": 22222
+      },
+      "html_url": "https://github.com/owner/repo"
+    },
+    "sender": {
+      "login": "contributor2",
+      "id": 12346
+    }
+  },
+  "pull_request_labeled_backend": {
+    "action": "labeled",
+    "number": 126,
+    "pull_request": {
+      "id": 1234567893,
+      "number": 126,
+      "state": "open",
+      "title": "Implement GraphQL API endpoints",
+      "html_url": "https://github.com/owner/backend-repo/pull/126",
+      "user": {
+        "login": "backend-dev",
+        "id": 12347,
+        "avatar_url": "https://avatars.githubusercontent.com/u/12347?v=4"
+      },
+      "created_at": "2025-12-08T09:00:00Z",
+      "updated_at": "2025-12-08T09:45:00Z"
+    },
+    "label": {
+      "id": 987654323,
+      "name": "backend-review",
+      "color": "0e8a16"
+    },
+    "repository": {
+      "id": 111111112,
+      "name": "backend-repo",
+      "full_name": "owner/backend-repo",
+      "private": false,
+      "owner": {
+        "login": "owner",
+        "id": 22222
+      },
+      "html_url": "https://github.com/owner/backend-repo"
+    },
+    "sender": {
+      "login": "backend-dev",
+      "id": 12347
+    }
+  },
+  "pull_request_unlabeled": {
+    "action": "unlabeled",
+    "number": 123,
+    "pull_request": {
+      "id": 1234567890,
+      "number": 123,
+      "state": "open",
+      "title": "Add new feature for user authentication",
+      "html_url": "https://github.com/owner/repo/pull/123",
+      "user": {
+        "login": "contributor1",
+        "id": 12345,
+        "avatar_url": "https://avatars.githubusercontent.com/u/12345?v=4"
+      },
+      "created_at": "2025-12-08T10:00:00Z",
+      "updated_at": "2025-12-08T12:00:00Z"
+    },
+    "label": {
+      "id": 987654321,
+      "name": "needs-review",
+      "color": "d73a4a"
+    },
+    "repository": {
+      "id": 111111111,
+      "name": "repo",
+      "full_name": "owner/repo",
+      "private": false,
+      "owner": {
+        "login": "owner",
+        "id": 22222
+      },
+      "html_url": "https://github.com/owner/repo"
+    },
+    "sender": {
+      "login": "contributor1",
+      "id": 12345
+    }
+  },
+  "pull_request_opened": {
+    "action": "opened",
+    "number": 128,
+    "pull_request": {
+      "id": 1234567895,
+      "number": 128,
+      "state": "open",
+      "title": "Add documentation for API",
+      "html_url": "https://github.com/owner/repo/pull/128",
+      "user": {
+        "login": "docs-contributor",
+        "id": 12348,
+        "avatar_url": "https://avatars.githubusercontent.com/u/12348?v=4"
+      },
+      "created_at": "2025-12-08T13:00:00Z",
+      "updated_at": "2025-12-08T13:00:00Z"
+    },
+    "repository": {
+      "id": 111111111,
+      "name": "repo",
+      "full_name": "owner/repo",
+      "private": false,
+      "owner": {
+        "login": "owner",
+        "id": 22222
+      },
+      "html_url": "https://github.com/owner/repo"
+    },
+    "sender": {
+      "login": "docs-contributor",
+      "id": 12348
+    }
+  }
+}

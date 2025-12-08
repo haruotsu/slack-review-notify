@@ -45,7 +45,8 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 		reviewerID := SelectRandomReviewer(db, task.SlackChannel, labelName)
 
 		// スレッドに営業時間通知を送信
-		if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
+		slackClient := GetSlackClient()
+		if err := slackClient.PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
 			log.Printf("business hours notification error (task: %s): %v", task.ID, err)
 			continue
 		}
@@ -64,7 +65,7 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 
 		// レビュワーが設定された場合は変更ボタン付きの通知も送信
 		if reviewerID != "" {
-			if err := PostReviewerAssignedMessageWithChangeButton(task); err != nil {
+			if err := slackClient.PostReviewerAssignedMessageWithChangeButton(task); err != nil {
 				log.Printf("reviewer assigned notification error: %v", err)
 			}
 		}
@@ -114,6 +115,7 @@ func CheckInReviewTasks(db *gorm.DB) {
 		}
 
 		// 営業時間外かチェック
+		slackClient := GetSlackClient()
 		isOutsideBusinessHours := !IsWithinBusinessHours(&config, now)
 		if isOutsideBusinessHours {
 			// 営業時間外で、まだ営業時間外リマインドを送っていない場合
@@ -122,7 +124,7 @@ func CheckInReviewTasks(db *gorm.DB) {
 				reminderTime := now.Add(-time.Duration(reminderInterval) * time.Minute)
 				if task.UpdatedAt.Before(reminderTime) {
 					// 営業時間外用のリマインドメッセージを送信
-					err := SendOutOfHoursReminderMessage(db, task)
+					err := slackClient.SendOutOfHoursReminderMessage(db, task)
 					if err != nil {
 						log.Printf("out of hours reminder send error (task id: %s): %v", task.ID, err)
 
@@ -161,7 +163,7 @@ func CheckInReviewTasks(db *gorm.DB) {
 			// 通常のリマインド処理
 			reminderTime := now.Add(-time.Duration(reminderInterval) * time.Minute)
 			if task.UpdatedAt.Before(reminderTime) {
-				err := SendReviewerReminderMessage(db, task)
+				err := slackClient.SendReviewerReminderMessage(db, task)
 				if err != nil {
 					log.Printf("reviewer reminder send error (task id: %s): %v", task.ID, err)
 

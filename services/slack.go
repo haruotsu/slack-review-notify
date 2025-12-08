@@ -20,6 +20,24 @@ import (
 // テストモードかどうかを示すフラグ
 var IsTestMode bool
 
+// defaultSlackClient はデフォルトの Slack クライアント（依存性注入用）
+var defaultSlackClient SlackClient
+
+// init 関数でデフォルトクライアントを初期化
+func init() {
+	defaultSlackClient = NewRealSlackClient()
+}
+
+// SetSlackClient はテスト時にモッククライアントを設定するための関数
+func SetSlackClient(client SlackClient) {
+	defaultSlackClient = client
+}
+
+// GetSlackClient は現在の Slack クライアントを取得する
+func GetSlackClient() SlackClient {
+	return defaultSlackClient
+}
+
 type SlackMessage struct {
 	Channel string  `json:"channel"`
 	Blocks  []Block `json:"blocks"`
