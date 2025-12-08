@@ -173,6 +173,24 @@ func SelectReviewersByWorkload(db *gorm.DB, channelID, labelName, excludeCreator
 		return []string{config.DefaultMentionID}
 	}
 	reviewers := strings.Split(config.ReviewerList, ",")
+
+	// 除外するIDのリストを作成（カンマ区切り、スペース区切りの両方に対応）
+	excludeIDs := make(map[string]bool)
+	if excludeCreatorID != "" {
+		var excludeList []string
+		if strings.Contains(excludeCreatorID, ",") {
+			excludeList = strings.Split(excludeCreatorID, ",")
+		} else {
+			excludeList = strings.Fields(excludeCreatorID)
+		}
+		for _, id := range excludeList {
+			cleanID := CleanUserIDFromMention(strings.TrimSpace(id))
+			if cleanID != "" {
+				excludeIDs[cleanID] = true
+			}
+		}
+	}
+
 	type ReviewerWorkload struct {
 		UserID   string
 		Workload int
@@ -180,7 +198,7 @@ func SelectReviewersByWorkload(db *gorm.DB, channelID, labelName, excludeCreator
 	var workloads []ReviewerWorkload
 	for _, r := range reviewers {
 		userID := CleanUserIDFromMention(strings.TrimSpace(r))
-		if userID == "" || userID == excludeCreatorID {
+		if userID == "" || excludeIDs[userID] {
 			continue
 		}
 		workload := GetReviewerWorkload(db, userID)
@@ -265,7 +283,8 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 	// レビュワーが設定されている場合は追加
 	var reviewerText string
 	if task.Reviewer != "" {
-		reviewerText = fmt.Sprintf("\n\n🎯 *レビュワー*: @%s さん、よろしくお願いします！", task.Reviewer)
+		reviewerMentions := formatReviewerMentions(task.Reviewer)
+		reviewerText = fmt.Sprintf("\n\n🎯 *レビュワー*: %s さん、よろしくお願いします！", reviewerMentions)
 	}
 
 	message := fmt.Sprintf("🌅 *おはようございます！* %s\n\n📋 こちらのPRのレビューをお願いします。%s", mentionText, reviewerText)
@@ -501,7 +520,8 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 		return fmt.Errorf("channel is archived: %s", task.SlackChannel)
 	}
 
-	message := fmt.Sprintf("@%s レビューしてくれたら嬉しいです...👀", task.Reviewer)
+	reviewerMentions := formatReviewerMentions(task.Reviewer)
+	message := fmt.Sprintf("%s レビューしてくれたら嬉しいです...👀", reviewerMentions)
 
 	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder", "リマインダーを停止")
 	blocks := CreateMessageWithActionBlocks(message, pauseSelect)
@@ -657,7 +677,8 @@ func IsChannelArchived(channelID string) (bool, error) {
 
 // 自動割り当てされたレビュワーを表示し、変更ボタンを表示する関数
 func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
-	message := fmt.Sprintf("自動でレビュワーが割り当てられました: @%s レビューをお願いします！", task.Reviewer)
+	reviewerMentions := formatReviewerMentions(task.Reviewer)
+	message := fmt.Sprintf("自動でレビュワーが割り当てられました: %s レビューをお願いします！", reviewerMentions)
 
 	changeButton := CreateChangeReviewerButton(task.ID)
 	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder_initial", "リマインダーを停止")
@@ -696,13 +717,19 @@ func formatReviewerMentions(reviewerIDs string) string {
 		return ""
 	}
 
-	// スペースで分割してIDを抽出
-	ids := strings.Fields(reviewerIDs)
+	// カンマまたはスペースで分割してIDを抽出（両方に対応）
+	var ids []string
+	if strings.Contains(reviewerIDs, ",") {
+		ids = strings.Split(reviewerIDs, ",")
+	} else {
+		ids = strings.Fields(reviewerIDs)
+	}
 
 	var mentions []string
 	for _, id := range ids {
-		// @記号を取り除く
-		cleanID := strings.TrimPrefix(id, "@")
+		// 前後の空白と@記号を取り除く
+		cleanID := strings.TrimSpace(id)
+		cleanID = strings.TrimPrefix(cleanID, "@")
 		if cleanID != "" {
 			mentions = append(mentions, fmt.Sprintf("<@%s>", cleanID))
 		}
@@ -792,7 +819,8 @@ func GetNextBusinessDayMorningWithConfig(now time.Time, config *models.ChannelCo
 
 // SendOutOfHoursReminderMessage は営業時間外のリマインドメッセージを送信する
 func SendOutOfHoursReminderMessage(db *gorm.DB, task models.ReviewTask) error {
-	message := fmt.Sprintf("@%s レビューしてくれたら嬉しいです...👀\n\n営業時間外のため、次回のリマインドは翌営業日に送信します。", task.Reviewer)
+	reviewerMentions := formatReviewerMentions(task.Reviewer)
+	message := fmt.Sprintf("%s レビューしてくれたら嬉しいです...👀\n\n営業時間外のため、次回のリマインドは翌営業日に送信します。", reviewerMentions)
 
 	pauseSelect := CreateStopOnlyPauseReminderSelect(task.ID, "pause_reminder", "リマインダーを停止")
 	blocks := CreateMessageWithActionBlocks(message, pauseSelect)

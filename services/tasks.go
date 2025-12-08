@@ -41,17 +41,15 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 			continue // 営業時間外なので処理をスキップ
 		}
 
-		// レビュワーを負荷ベースで選択（1人）
+		// レビュワーを負荷ベースで選択
 		reviewerCount := 1
 		if config.ReviewerCount > 0 {
 			reviewerCount = config.ReviewerCount
 		}
 		reviewers := SelectReviewersByWorkload(db, task.SlackChannel, labelName, "", reviewerCount)
 
-		var reviewerID string
-		if len(reviewers) > 0 {
-			reviewerID = reviewers[0]
-		}
+		// 複数レビュワーをカンマ区切りで結合
+		reviewerIDs := strings.Join(reviewers, ",")
 
 		// スレッドに営業時間通知を送信
 		if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
@@ -61,7 +59,7 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 
 		// タスクの状態を更新
 		task.Status = "in_review"
-		task.Reviewer = reviewerID
+		task.Reviewer = reviewerIDs
 		task.UpdatedAt = time.Now()
 
 		if err := db.Save(&task).Error; err != nil {
@@ -72,7 +70,7 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 		log.Printf("waiting_business_hours task activated: %s", task.ID)
 
 		// レビュワーが設定された場合は変更ボタン付きの通知も送信
-		if reviewerID != "" {
+		if reviewerIDs != "" {
 			if err := PostReviewerAssignedMessageWithChangeButton(task); err != nil {
 				log.Printf("reviewer assigned notification error: %v", err)
 			}
