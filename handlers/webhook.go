@@ -179,7 +179,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 				go func() {
 					var slackTs, slackChannelID string
 					var taskStatus string
-					var reviewerID string
+					var reviewerIDs []string
 
 					// 営業時間外判定
 					creatorGithubUsername := pr.GetUser().GetLogin()
@@ -199,7 +199,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 						)
 						taskStatus = "waiting_business_hours"
 						// レビュワーは翌営業日朝に設定する
-						reviewerID = ""
+						reviewerIDs = []string{}
 						if err != nil {
 							log.Printf("off-hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
 							// エラー時はタスクを削除
@@ -218,8 +218,8 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 							creatorSlackID,
 						)
 						taskStatus = "in_review"
-						// ランダムにレビュワーを選択
-						reviewerID = services.SelectRandomReviewer(db, config.SlackChannelID, config.LabelName)
+						// ワークロードベースでレビュワーを選択
+						reviewerIDs = services.SelectReviewersByWorkload(db, config.SlackChannelID, config.LabelName, creatorSlackID, config.ReviewerCount)
 						if err != nil {
 							log.Printf("business hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
 							// エラー時はタスクを削除
@@ -231,7 +231,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 
 					// タスクを正式な状態に更新
 					tempTask.SlackTS = slackTs
-					tempTask.Reviewer = reviewerID
+					tempTask.Reviewer = strings.Join(reviewerIDs, ",")
 					tempTask.Status = taskStatus
 					tempTask.UpdatedAt = time.Now()
 
@@ -243,7 +243,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, tempTask.PRURL)
 
 					// 営業時間内で、レビュワーが割り当てられた場合のみスレッドに通知
-					if taskStatus == "in_review" && reviewerID != "" {
+					if taskStatus == "in_review" && len(reviewerIDs) > 0 {
 						if err := services.PostReviewerAssignedMessageWithChangeButton(tempTask); err != nil {
 							log.Printf("reviewer assigned notification error: %v", err)
 						}
