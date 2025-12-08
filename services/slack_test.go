@@ -811,3 +811,244 @@ func TestGetReviewerWorkload(t *testing.T) {
 	workload = GetReviewerWorkload(db, "UNKNOWN")
 	assert.Equal(t, 0, workload, "存在しないレビュワーのワークロードは0であること")
 }
+
+// TestSelectReviewersByWorkload は SelectReviewersByWorkload 関数のテスト
+func TestSelectReviewersByWorkload(t *testing.T) {
+	db := setupTestDB(t)
+
+	// テスト用のチャンネル設定を作成
+	testConfig := models.ChannelConfig{
+		ID:               "test-config-1",
+		SlackChannelID:   "C12345",
+		LabelName:        "needs-review",
+		DefaultMentionID: "U_DEFAULT",
+		ReviewerList:     "U_REVIEWER1,U_REVIEWER2,U_REVIEWER3,U_REVIEWER4",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	db.Create(&testConfig)
+
+	// テスト用のタスクを作成してワークロードを設定
+	// U_REVIEWER1: 0件
+	// U_REVIEWER2: 1件
+	task1 := models.ReviewTask{
+		ID:           "task-1",
+		PRURL:        "https://github.com/owner/repo/pull/1",
+		Repo:         "owner/repo",
+		PRNumber:     1,
+		Title:        "Test PR 1",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Reviewer:     "U_REVIEWER2",
+		Status:       "pending",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task1)
+
+	// U_REVIEWER3: 2件
+	task2 := models.ReviewTask{
+		ID:           "task-2",
+		PRURL:        "https://github.com/owner/repo/pull/2",
+		Repo:         "owner/repo",
+		PRNumber:     2,
+		Title:        "Test PR 2",
+		SlackTS:      "1234.5679",
+		SlackChannel: "C12345",
+		Reviewer:     "U_REVIEWER3",
+		Status:       "pending",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task2)
+
+	task3 := models.ReviewTask{
+		ID:           "task-3",
+		PRURL:        "https://github.com/owner/repo/pull/3",
+		Repo:         "owner/repo",
+		PRNumber:     3,
+		Title:        "Test PR 3",
+		SlackTS:      "1234.5680",
+		SlackChannel: "C12345",
+		Reviewer:     "U_REVIEWER3",
+		Status:       "in_review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task3)
+
+	// U_REVIEWER4: 3件
+	task4 := models.ReviewTask{
+		ID:           "task-4",
+		PRURL:        "https://github.com/owner/repo/pull/4",
+		Repo:         "owner/repo",
+		PRNumber:     4,
+		Title:        "Test PR 4",
+		SlackTS:      "1234.5681",
+		SlackChannel: "C12345",
+		Reviewer:     "U_REVIEWER4",
+		Status:       "pending",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task4)
+
+	task5 := models.ReviewTask{
+		ID:           "task-5",
+		PRURL:        "https://github.com/owner/repo/pull/5",
+		Repo:         "owner/repo",
+		PRNumber:     5,
+		Title:        "Test PR 5",
+		SlackTS:      "1234.5682",
+		SlackChannel: "C12345",
+		Reviewer:     "U_REVIEWER4",
+		Status:       "in_review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task5)
+
+	task6 := models.ReviewTask{
+		ID:           "task-6",
+		PRURL:        "https://github.com/owner/repo/pull/6",
+		Repo:         "owner/repo",
+		PRNumber:     6,
+		Title:        "Test PR 6",
+		SlackTS:      "1234.5683",
+		SlackChannel: "C12345",
+		Reviewer:     "U_REVIEWER4",
+		Status:       "snoozed",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task6)
+
+	t.Run("1人選出_ワークロード最小のレビュワー", func(t *testing.T) {
+		// U_REVIEWER1 が選出される（ワークロード0件）
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "", 1)
+		assert.Equal(t, 1, len(reviewers))
+		assert.Equal(t, "U_REVIEWER1", reviewers[0])
+	})
+
+	t.Run("2人選出_ワークロード順", func(t *testing.T) {
+		// U_REVIEWER1(0件) と U_REVIEWER2(1件) が選出される
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "", 2)
+		assert.Equal(t, 2, len(reviewers))
+		assert.Equal(t, "U_REVIEWER1", reviewers[0])
+		assert.Equal(t, "U_REVIEWER2", reviewers[1])
+	})
+
+	t.Run("3人選出_ワークロード順", func(t *testing.T) {
+		// U_REVIEWER1(0件), U_REVIEWER2(1件), U_REVIEWER3(2件) が選出される
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "", 3)
+		assert.Equal(t, 3, len(reviewers))
+		assert.Equal(t, "U_REVIEWER1", reviewers[0])
+		assert.Equal(t, "U_REVIEWER2", reviewers[1])
+		assert.Equal(t, "U_REVIEWER3", reviewers[2])
+	})
+
+	t.Run("4人選出_全員選出", func(t *testing.T) {
+		// 全員選出される
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "", 4)
+		assert.Equal(t, 4, len(reviewers))
+		assert.Equal(t, "U_REVIEWER1", reviewers[0])
+		assert.Equal(t, "U_REVIEWER2", reviewers[1])
+		assert.Equal(t, "U_REVIEWER3", reviewers[2])
+		assert.Equal(t, "U_REVIEWER4", reviewers[3])
+	})
+
+	t.Run("5人選出_リスト以上の人数を要求", func(t *testing.T) {
+		// 全員選出される（上限あり）
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "", 5)
+		assert.Equal(t, 4, len(reviewers))
+	})
+
+	t.Run("PR作成者を除外_単一ID", func(t *testing.T) {
+		// U_REVIEWER1 を除外して2人選出
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "U_REVIEWER1", 2)
+		assert.Equal(t, 2, len(reviewers))
+		assert.Equal(t, "U_REVIEWER2", reviewers[0])
+		assert.Equal(t, "U_REVIEWER3", reviewers[1])
+	})
+
+	t.Run("PR作成者を除外_メンション形式", func(t *testing.T) {
+		// <@U_REVIEWER1> 形式で除外
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "<@U_REVIEWER1>", 2)
+		assert.Equal(t, 2, len(reviewers))
+		assert.Equal(t, "U_REVIEWER2", reviewers[0])
+		assert.Equal(t, "U_REVIEWER3", reviewers[1])
+	})
+
+	t.Run("PR作成者を除外_複数ID_カンマ区切り", func(t *testing.T) {
+		// U_REVIEWER1 と U_REVIEWER2 を除外して2人選出
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "U_REVIEWER1,U_REVIEWER2", 2)
+		assert.Equal(t, 2, len(reviewers))
+		assert.Equal(t, "U_REVIEWER3", reviewers[0])
+		assert.Equal(t, "U_REVIEWER4", reviewers[1])
+	})
+
+	t.Run("PR作成者を除外_複数ID_スペース区切り", func(t *testing.T) {
+		// U_REVIEWER1 と U_REVIEWER2 を除外して2人選出
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "U_REVIEWER1 U_REVIEWER2", 2)
+		assert.Equal(t, 2, len(reviewers))
+		assert.Equal(t, "U_REVIEWER3", reviewers[0])
+		assert.Equal(t, "U_REVIEWER4", reviewers[1])
+	})
+
+	t.Run("count=0_最低1人選出", func(t *testing.T) {
+		// count=0 でも最低1人選出される
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "", 0)
+		assert.Equal(t, 1, len(reviewers))
+		assert.Equal(t, "U_REVIEWER1", reviewers[0])
+	})
+
+	t.Run("count=-1_最低1人選出", func(t *testing.T) {
+		// count=-1 でも最低1人選出される
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "", -1)
+		assert.Equal(t, 1, len(reviewers))
+		assert.Equal(t, "U_REVIEWER1", reviewers[0])
+	})
+
+	t.Run("レビュワーリストが空_デフォルトメンション先を返す", func(t *testing.T) {
+		// レビュワーリストが空の設定を作成
+		emptyConfig := models.ChannelConfig{
+			ID:               "empty-config",
+			SlackChannelID:   "C_EMPTY",
+			LabelName:        "needs-review",
+			DefaultMentionID: "U_DEFAULT",
+			ReviewerList:     "",
+			IsActive:         true,
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		}
+		db.Create(&emptyConfig)
+
+		reviewers := SelectReviewersByWorkload(db, "C_EMPTY", "needs-review", "", 2)
+		assert.Equal(t, 1, len(reviewers))
+		assert.Equal(t, "U_DEFAULT", reviewers[0])
+	})
+
+	t.Run("存在しないチャンネル_空配列を返す", func(t *testing.T) {
+		reviewers := SelectReviewersByWorkload(db, "C_NONEXISTENT", "needs-review", "", 2)
+		assert.Equal(t, 0, len(reviewers))
+	})
+
+	t.Run("全員除外_デフォルトメンション先を返す", func(t *testing.T) {
+		// 全員を除外
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "U_REVIEWER1,U_REVIEWER2,U_REVIEWER3,U_REVIEWER4", 2)
+		assert.Equal(t, 1, len(reviewers))
+		assert.Equal(t, "U_DEFAULT", reviewers[0])
+	})
+
+	t.Run("ワークロードソートの正確性", func(t *testing.T) {
+		// 全員選出してワークロード順を確認
+		reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "", 10)
+		assert.Equal(t, 4, len(reviewers))
+		// ワークロード: U_REVIEWER1(0) < U_REVIEWER2(1) < U_REVIEWER3(2) < U_REVIEWER4(3)
+		assert.Equal(t, "U_REVIEWER1", reviewers[0])
+		assert.Equal(t, "U_REVIEWER2", reviewers[1])
+		assert.Equal(t, "U_REVIEWER3", reviewers[2])
+		assert.Equal(t, "U_REVIEWER4", reviewers[3])
+	})
+}
