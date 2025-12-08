@@ -12,6 +12,7 @@ type ChannelConfig struct {
 	LabelName                string `gorm:"index:idx_channel_label,unique:true"` // 通知対象ラベル名
 	DefaultMentionID         string // デフォルトのメンション先（ユーザーID）
 	ReviewerList             string // レビュワーリスト（カンマ区切り）
+	ReviewerCount            int    `gorm:"default:1"` // レビュワー割り当て数（デフォルト1人）
 	RepositoryList           string // 通知対象リポジトリのリスト（カンマ区切り）
 	IsActive                 bool   // 有効/無効フラグ
 	ReminderInterval         int    // リマインド頻度（分単位、デフォルト30分）

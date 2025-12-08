@@ -1,0 +1,276 @@
+# レビュワーN人選出機能
+
+このタスクファイルは、slack-review-notifyにレビュワーN人選出機能を追加します。
+
+---
+
+## タスク1: モデル拡張
+
+models/channel_config.go に ReviewerCount フィールドを追加してください。
+
+### 実装
+- `ReviewerCount int` フィールドを追加
+- GORMタグ: `gorm:"default:1"`
+- コメント: レビュワー割り当て数（デフォルト1人）
+
+### 確認
+- `go build`
+
+---
+
+## タスク2: GetReviewerWorkload関数の実装
+
+services/slack.go に GetReviewerWorkload 関数を追加してください。
+
+### 実装
+指定されたレビュワーの未完了タスク数を返す関数：
+
+```go
+func GetReviewerWorkload(db *gorm.DB, reviewerID string) int {
+    var count int64
+    db.Model(&models.ReviewTask{}).
+      Where("reviewer LIKE ? AND status != ?", "%"+reviewerID+"%", "done").
+      Count(&count)
+    return int(count)
+}
+```
+
+### 確認
+- `go build`
+
+---
+
+## タスク3: SelectReviewersByWorkload関数の実装
+
+services/slack.go に SelectReviewersByWorkload 関数を追加してください。
+
+### 実装
+未完了タスク数が少ない順にN人のレビュワーを選出する関数：
+
+```go
+func SelectReviewersByWorkload(db *gorm.DB, channelID, labelName, excludeCreatorID string, count int) []string {
+    var config models.ChannelConfig
+    if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config).Error; err != nil {
+        return []string{}
+    }
+
+    if config.ReviewerList == "" {
+        return []string{config.DefaultMentionID}
+    }
+
+    reviewers := strings.Split(config.ReviewerList, ",")
+
+    type ReviewerWorkload struct {
+        UserID   string
+        Workload int
+    }
+
+    var workloads []ReviewerWorkload
+    for _, r := range reviewers {
+        userID := CleanUserIDFromMention(strings.TrimSpace(r))
+        if userID == "" || userID == excludeCreatorID {
+            continue
+        }
+        workload := GetReviewerWorkload(db, userID)
+        workloads = append(workloads, ReviewerWorkload{userID, workload})
+    }
+
+    if len(workloads) == 0 {
+        return []string{config.DefaultMentionID}
+    }
+
+    sort.Slice(workloads, func(i, j int) bool {
+        return workloads[i].Workload < workloads[j].Workload
+    })
+
+    n := count
+    if n <= 0 {
+        n = 1
+    }
+    if n > len(workloads) {
+        n = len(workloads)
+    }
+
+    var selected []string
+    for i := 0; i < n; i++ {
+        selected = append(selected, workloads[i].UserID)
+    }
+
+    return selected
+}
+```
+
+必要なimport (sort) も追加してください。
+
+### 確認
+- `go build`
+
+---
+
+## タスク4: set-reviewer-countコマンドの追加
+
+handlers/command.go に set-reviewer-count コマンドを追加してください。
+
+### 実装
+コマンド形式: `/slack-review-notify [ラベル名] set-reviewer-count 3`
+
+- potentialSubCommands に "set-reviewer-count" を追加
+- コマンド処理のケース文を追加
+- setReviewerCount ハンドラ関数を実装
+- 入力値のバリデーション（1以上の整数）
+- 既存設定の更新または新規作成
+- showConfig 関数に ReviewerCount 表示を追加
+- ヘルプメッセージに説明を追加
+
+### 確認
+- `go build`
+
+---
+
+## タスク5: 既存コードの修正 - webhook.go
+
+handlers/webhook.go の SelectRandomReviewer 呼び出しを SelectReviewersByWorkload に置き換えてください。
+
+### 実装
+- SelectRandomReviewer の呼び出しを探す
+- SelectReviewersByWorkload に置き換え
+- config.ReviewerCount を引数として渡す
+- 戻り値が []string になるので、複数レビュワー対応に修正
+
+### 確認
+- `go build`
+
+---
+
+## タスク6: 既存コードの修正 - slack.go
+
+handlers/slack.go の「変わってほしい！」ボタン処理を SelectReviewersByWorkload に置き換えてください。
+
+### 実装
+- ボタンハンドラ内の SelectRandomReviewer 呼び出しを探す
+- SelectReviewersByWorkload に置き換え
+- 複数レビュワー対応に修正
+
+### 確認
+- `go build`
+
+---
+
+## タスク7: 既存コードの修正 - tasks.go
+
+services/tasks.go の SelectRandomReviewer 呼び出しを確認・修正してください。
+
+### 実装
+- SelectRandomReviewer の呼び出しがあれば SelectReviewersByWorkload に置き換え
+- なければそのまま
+
+### 確認
+- `go build`
+
+---
+
+## タスク8: 複数レビュワーメンション対応
+
+services/slack.go の SendSlackMessage 等で複数レビュワーのメンションに対応してください。
+
+### 実装
+- ReviewTask.Reviewer フィールドをスペース区切りで複数ID保存できるように修正
+- メンション文字列の生成処理を複数対応に修正
+
+### 確認
+- `go build`
+
+---
+
+## タスク9: 複数レビュワーリマインド対応
+
+services/slack.go の SendReviewerReminderMessage で複数レビュワーに対応してください。
+
+### 実装
+- リマインドメッセージで複数レビュワーにメンションできるように修正
+
+### 確認
+- `go build`
+
+---
+
+## タスク10: ユニットテスト追加 - GetReviewerWorkload
+
+services/slack_test.go に GetReviewerWorkload のテストを追加してください。
+
+### 実装
+- TestGetReviewerWorkload 関数を作成
+- 複数のシナリオをテスト
+
+### 確認
+- `go test ./services`
+
+---
+
+## タスク11: ユニットテスト追加 - SelectReviewersByWorkload
+
+services/slack_test.go に SelectReviewersByWorkload のテストを追加してください。
+
+### 実装
+- TestSelectReviewersByWorkload 関数を作成
+- N人選出のロジックをテスト
+- PR作成者除外をテスト
+- ワークロード順のソートをテスト
+
+### 確認
+- `go test ./services`
+
+---
+
+## タスク12: コマンドテスト追加
+
+handlers/command_test.go に set-reviewer-count コマンドのテストを追加してください。
+
+### 実装
+- TestSetReviewerCount 関数を作成
+- 正常系・異常系のテスト
+
+### 確認
+- `go test ./handlers`
+
+---
+
+## タスク13: 既存テスト修正
+
+SelectRandomReviewer 関連の既存テストを新ロジックに対応させてください。
+
+### 実装
+- 既存のテストで SelectRandomReviewer を使っている箇所を確認
+- 必要に応じて SelectReviewersByWorkload に修正
+- テストが通るように調整
+
+### 確認
+- `go test ./...`
+
+---
+
+## タスク14: README更新
+
+README.md に set-reviewer-count コマンドの説明を追加してください。
+
+### 実装
+コマンド一覧セクションに以下を追加：
+```markdown
+- `/slack-review-notify [ラベル名] set-reviewer-count 3`: レビュワー人数を設定（デフォルト1人）
+```
+
+### 確認
+- `cat README.md | grep set-reviewer-count`
+
+---
+
+## タスク15: 最終テスト
+
+全体のテストを実行して、すべてが正常に動作することを確認してください。
+
+### 実装
+特になし（確認のみ）
+
+### 確認
+- `go test ./...`
+- `go build`
