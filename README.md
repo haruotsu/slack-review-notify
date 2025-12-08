@@ -219,8 +219,73 @@ make clean
 
 ポートは8080です。
 
-### Docker Composeでのテスト環境
-テスト環境用のDocker Composeを利用して、隔離された環境でテストを実行できます。
+## 統合テスト
+
+### 統合テストの概要
+本プロジェクトでは、実際のコンポーネント間の連携を検証するための統合テストを提供しています。統合テストは以下をカバーします：
+
+- **Webhookハンドリング**: GitHubからのWebhookを受信してSlackに通知
+- **Slackコマンド処理**: `/slack-review-notify`コマンドによる設定管理
+- **Slackインタラクション**: ボタンクリックなどのインタラクティブ要素
+- **リマインダー機能**: 定期的なレビューリマインドの動作
+- **エンドツーエンドシナリオ**: 実際の使用フローを模したシナリオテスト
+
+### テスト環境のセットアップ
+
+統合テストは隔離されたDocker Compose環境で実行されます。以下のコンポーネントが自動的にセットアップされます：
+
+- **アプリケーションコンテナ**: テスト対象のslack-review-notifyアプリ（ポート8080）
+- **モックサーバー**: Slack/GitHub APIのモック用（ポート1080）
+- **テスト用データベース**: 永続化ボリュームを使用したSQLiteデータベース
+
+#### 必要な環境変数
+
+統合テストに必要な環境変数は以下の通りです（すべてオプション、未設定時はデフォルト値を使用）：
+
+```bash
+# Slack設定（デフォルト: xoxb-test-token）
+export SLACK_BOT_TOKEN=xoxb-test-token
+
+# Slack署名検証用シークレット（デフォルト: test-signing-secret）
+export SLACK_SIGNING_SECRET=test-signing-secret
+
+# GitHub Webhook署名検証（テストモードでは空にして署名検証をスキップ）
+export GITHUB_WEBHOOK_SECRET=
+
+# テスト用データベースパス（デフォルト: test_integration.db）
+export DB_PATH=test_integration.db
+
+# テストモード有効化（デフォルト: true）
+export TEST_MODE=true
+```
+
+**重要**: テストモードでは`GITHUB_WEBHOOK_SECRET`を空にすることで、GitHub Webhookの署名検証をスキップします。これにより、実際のGitHubシークレットなしでテストを実行できます。
+
+### テスト実行方法
+
+#### 統合テストスクリプトを使用する（推奨）
+
+最も簡単な方法は、専用スクリプトを使用することです：
+
+```bash
+# 統合テストを自動実行
+./scripts/run-integration-tests.sh
+```
+
+このスクリプトは以下を自動的に実行します：
+
+1. **環境変数チェック**: 必要な環境変数の確認とデフォルト値の設定
+2. **テスト用DBセットアップ**: 既存のテストDBを削除して新規作成
+3. **Docker Composeサービス起動**: アプリケーションとモックサーバーを起動
+4. **ヘルスチェック**: アプリケーションが正常に起動するまで待機
+5. **ユニットテスト実行**: `go test ./...`でユニットテストを実行
+6. **統合テスト実行**: `tests/integration`ディレクトリの統合テストを実行
+7. **カバレッジレポート生成**: テストカバレッジを集計して表示
+8. **自動クリーンアップ**: テスト後にDocker Composeサービスを停止・削除
+
+#### 手動でテスト環境を起動する
+
+Docker Compose環境を手動で管理したい場合：
 
 ```bash
 # テスト環境の起動
@@ -232,6 +297,9 @@ docker-compose -f docker-compose.test.yml logs -f app
 # ヘルスチェックの確認
 docker-compose -f docker-compose.test.yml ps
 
+# 統合テストの実行
+go test -v ./tests/integration/...
+
 # テスト環境の停止
 docker-compose -f docker-compose.test.yml down
 
@@ -239,44 +307,37 @@ docker-compose -f docker-compose.test.yml down
 docker-compose -f docker-compose.test.yml down -v
 ```
 
-**構成:**
-- アプリケーションコンテナ（ポート8080）
-- モックサーバー（ポート1080）- 将来的なSlack/GitHubモック用
-- テスト用SQLiteデータベース（永続化ボリューム）
-- ヘルスチェック機能付き
+#### 個別のテストケースを実行する
 
-### 統合テスト実行スクリプト
-統合テストを自動実行するスクリプトが用意されています。
+特定のテストケースのみを実行する場合：
 
 ```bash
-# 統合テストの実行
-./scripts/run-integration-tests.sh
+# 特定のパッケージのテスト
+go test -v ./tests/integration/
+
+# 特定のテスト関数を実行
+go test -v ./tests/integration/ -run TestWebhookHandler
+
+# レースコンディションの検出を有効化
+go test -v -race ./tests/integration/
+
+# カバレッジ付きで実行
+go test -v -coverprofile=coverage.out ./tests/integration/
 ```
 
-**スクリプトの機能:**
-- 環境変数のチェック
-- テスト用DBのセットアップ
-- Docker Composeサービスの起動
-- ユニットテストと統合テストの実行
-- カバレッジレポートの生成
-- テスト後の自動クリーンアップ
-- 実行結果のサマリー表示
+### テストデータとフィクスチャ
 
-**環境変数（オプション）:**
-```bash
-# テスト用のトークンを指定する場合
-export SLACK_BOT_TOKEN=xoxb-test-token
-export SLACK_SIGNING_SECRET=test-signing-secret
-export GITHUB_WEBHOOK_SECRET=test-webhook-secret
-export DB_PATH=test_integration.db
-export TEST_MODE=true
+統合テストでは、`tests/integration/fixtures`ディレクトリにテストデータ（フィクスチャ）を格納しています：
 
-# スクリプト実行
-./scripts/run-integration-tests.sh
-```
+- **channel_configs.json**: チャンネル設定のサンプルデータ
+- **review_tasks.json**: レビュータスクのサンプルデータ
+- **webhook_payloads.json**: GitHub Webhookペイロードのサンプル
 
-### CI/CD統合テスト
-GitHub Actionsを使用した統合テスト環境が設定されています。
+フィクスチャの詳細については、[tests/integration/fixtures/README.md](./tests/integration/fixtures/README.md)を参照してください。
+
+### CI/CDでの統合テスト
+
+GitHub Actionsを使用した自動統合テストが設定されています。
 
 **トリガー条件:**
 - `staging` ブランチへのプッシュ
@@ -295,6 +356,118 @@ GitHub Actionsを使用した統合テスト環境が設定されています。
 - `GITHUB_WEBHOOK_SECRET_TEST`: テスト用GitHub Webhook Secret（オプション）
 
 詳細は `.github/workflows/integration-test.yml` を参照してください。
+
+### トラブルシューティング
+
+#### アプリケーションが起動しない
+
+**症状**: `docker-compose up`後にアプリケーションが起動しない
+
+**確認事項**:
+```bash
+# コンテナのログを確認
+docker-compose -f docker-compose.test.yml logs app
+
+# コンテナのステータスを確認
+docker-compose -f docker-compose.test.yml ps
+
+# ヘルスチェックが失敗していないか確認
+docker inspect slack-review-notify-test | grep -A 10 Health
+```
+
+**対処法**:
+- 環境変数が正しく設定されているか確認
+- ポート8080が他のプロセスで使用されていないか確認
+- データベースファイルのパーミッションを確認
+
+#### テストが失敗する
+
+**症状**: 統合テストが一部失敗する
+
+**確認事項**:
+```bash
+# 詳細ログ付きでテストを実行
+go test -v -race ./tests/integration/... 2>&1 | tee test.log
+
+# テストDBの状態を確認
+sqlite3 test_integration.db ".tables"
+sqlite3 test_integration.db "SELECT * FROM channel_configs;"
+```
+
+**対処法**:
+- テスト用DBが古い状態の場合は削除して再実行: `rm test_integration.db`
+- Docker Composeサービスを再起動: `docker-compose -f docker-compose.test.yml restart`
+- キャッシュをクリア: `go clean -testcache`
+
+#### ポート競合エラー
+
+**症状**: `bind: address already in use`エラーが発生
+
+**確認事項**:
+```bash
+# 8080ポートを使用しているプロセスを確認
+lsof -i :8080
+
+# 1080ポートを使用しているプロセスを確認
+lsof -i :1080
+```
+
+**対処法**:
+- 既存のDocker Composeサービスを停止: `docker-compose -f docker-compose.test.yml down`
+- 競合しているプロセスを停止
+- 別のポートを使用するようにdocker-compose.test.ymlを編集
+
+#### データベースロックエラー
+
+**症状**: `database is locked`エラーが発生
+
+**対処法**:
+```bash
+# すべてのテストプロセスを終了
+pkill -f "go test"
+
+# テストDBファイルを削除
+rm -f test_integration.db*
+
+# Docker Composeを完全にクリーンアップ
+docker-compose -f docker-compose.test.yml down -v
+
+# 再度テストを実行
+./scripts/run-integration-tests.sh
+```
+
+#### モックサーバーが起動しない
+
+**症状**: MockServerコンテナが起動しない
+
+**確認事項**:
+```bash
+# モックサーバーのログを確認
+docker-compose -f docker-compose.test.yml logs mock-server
+
+# 初期化ファイルが存在するか確認
+ls -la test/mock/initializer.json
+```
+
+**対処法**:
+- `test/mock`ディレクトリが存在するか確認
+- `test/mock/initializer.json`を作成: `mkdir -p test/mock && echo '{}' > test/mock/initializer.json`
+- Docker Composeサービスを再起動
+
+#### CI/CDでテストが失敗する
+
+**症状**: ローカルでは成功するがCI/CDで失敗する
+
+**確認事項**:
+- GitHub Secretsが正しく設定されているか確認
+- CI/CDログで具体的なエラーメッセージを確認
+- タイムアウト設定が十分か確認
+
+**対処法**:
+- ローカルでCI/CDと同じ環境変数を使用してテスト
+- テストのタイムアウト時間を延長
+- GitHub Actionsのジョブログを詳細に確認
+
 
 ### デプロイ
 アプリをk8sやAWS EC2などお好きな環境で実行してください。
