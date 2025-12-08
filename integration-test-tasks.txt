@@ -1,0 +1,263 @@
+# Integration/Stagingテスト環境構築
+
+このタスクファイルは、slack-review-notifyにintegration/stagingテスト環境を導入します。
+特定のSlackワークスペースを使用した実際の動作確認を自動化します。
+
+---
+
+## タスク1: テスト用環境変数の定義
+
+.env.example に staging/integration テスト用の環境変数を追加してください。
+
+### 実装
+- `SLACK_TEST_WORKSPACE_TOKEN`: テスト用Slackワークスペースのトークン
+- `SLACK_TEST_CHANNEL_ID`: テスト用チャンネルID
+- `SLACK_TEST_USER_ID`: テスト用ユーザーID
+- `GITHUB_TEST_WEBHOOK_SECRET`: テスト用GitHubウェブフックシークレット
+- `TEST_MODE`: テストモードフラグ（true/false）
+
+### 確認
+- `cat .env.example | grep SLACK_TEST`
+
+---
+
+## タスク2: テスト用設定ファイルの作成
+
+tests/integration/ ディレクトリを作成し、設定ファイルを用意してください。
+
+### 実装
+- `tests/integration/` ディレクトリを作成
+- `tests/integration/config.go` を作成
+- テスト用DB、Slack設定を読み込む関数を実装
+- テスト前後のクリーンアップ処理を実装
+
+### 確認
+- `ls -la tests/integration/`
+- `go build ./tests/integration`
+
+---
+
+## タスク3: Slackクライアントのモック対応
+
+services/slack.go のSlackクライアントをインターフェース化してください。
+
+### 実装
+- `SlackClient` インターフェースを定義
+- 実際のSlack APIクライアントの実装
+- モッククライアントの実装（テスト用）
+- 依存性注入できるように既存コードを修正
+
+### 確認
+- `go build`
+- `go test ./services`
+
+---
+
+## タスク4: テスト用Slackメッセージ送信関数
+
+tests/integration/slack_helper.go を作成してください。
+
+### 実装
+テスト用のヘルパー関数を実装：
+- `SendTestMessage(channelID, text string)`: テストメッセージ送信
+- `DeleteTestMessage(channelID, ts string)`: テストメッセージ削除
+- `GetChannelMessages(channelID string, limit int)`: チャンネルメッセージ取得
+- `WaitForMessage(channelID, expectedText string, timeout time.Duration)`: メッセージ待機
+
+### 確認
+- `go build ./tests/integration`
+
+---
+
+## タスク5: GitHub Webhook統合テスト
+
+tests/integration/webhook_test.go を作成してください。
+
+### 実装
+実際のSlackワークスペースに対するテスト：
+- `TestGitHubWebhookIntegration`: PR作成時のSlack通知確認
+- `TestReviewRequestNotification`: レビューリクエスト通知確認
+- `TestPRMergedNotification`: PRマージ時の通知確認
+- テスト用チャンネル設定の作成・削除
+
+### 確認
+- `go test ./tests/integration -v -run TestGitHubWebhook`
+
+---
+
+## タスク6: Slackボタン操作統合テスト
+
+tests/integration/slack_action_test.go を作成してください。
+
+### 実装
+Slackボタン操作のテスト：
+- `TestDoneButtonAction`: 「完了」ボタン押下テスト
+- `TestChangeReviewerAction`: 「変わってほしい！」ボタン押下テスト
+- `TestRemindButtonAction`: リマインドボタン押下テスト
+- ボタン押下後のメッセージ更新確認
+
+### 確認
+- `go test ./tests/integration -v -run TestSlackAction`
+
+---
+
+## タスク7: コマンド実行統合テスト
+
+tests/integration/command_test.go を作成してください。
+
+### 実装
+Slackコマンド実行のテスト：
+- `TestSetChannelCommand`: チャンネル設定コマンドテスト
+- `TestSetReviewerCommand`: レビュワー設定コマンドテスト
+- `TestSetReviewerCountCommand`: レビュワー人数設定コマンドテスト
+- `TestShowConfigCommand`: 設定表示コマンドテスト
+- `TestListCommand`: タスク一覧表示コマンドテスト
+
+### 確認
+- `go test ./tests/integration -v -run TestCommand`
+
+---
+
+## タスク8: リマインダー機能統合テスト
+
+tests/integration/reminder_test.go を作成してください。
+
+### 実装
+リマインダー機能のテスト：
+- `TestReminderScheduling`: リマインダー予約テスト
+- `TestBusinessHoursReminder`: 営業時間内リマインダーテスト
+- `TestOutOfHoursReminder`: 営業時間外リマインダーテスト
+- タスクチェッカーの動作確認
+
+### 確認
+- `go test ./tests/integration -v -run TestReminder`
+
+---
+
+## タスク9: エンドツーエンドシナリオテスト
+
+tests/integration/e2e_test.go を作成してください。
+
+### 実装
+完全なフローのテスト：
+- `TestFullWorkflow`: PR作成→レビュワー通知→レビュー完了→マージの一連の流れ
+- `TestMultipleReviewers`: 複数レビュワー割り当てフロー
+- `TestReviewerChange`: レビュワー変更フロー
+- テスト用のクリーンアップ処理
+
+### 確認
+- `go test ./tests/integration -v -run TestFullWorkflow`
+
+---
+
+## タスク10: テスト用Docker Compose設定
+
+docker-compose.test.yml を作成してください。
+
+### 実装
+テスト環境用のDocker Compose設定：
+- アプリケーションコンテナ
+- テスト用DBコンテナ（SQLite or PostgreSQL）
+- 環境変数の設定
+- ヘルスチェック設定
+
+### 確認
+- `docker-compose -f docker-compose.test.yml config`
+
+---
+
+## タスク11: CI/CD統合テスト設定
+
+.github/workflows/integration-test.yml を作成してください。
+
+### 実装
+GitHub Actionsでの統合テスト実行設定：
+- テスト環境のセットアップ
+- Slackトークン等のシークレット設定
+- 統合テストの実行
+- テスト結果のレポート
+- stagingブランチへのプッシュ時のみ実行
+
+### 確認
+- `cat .github/workflows/integration-test.yml`
+
+---
+
+## タスク12: テストデータ管理
+
+tests/integration/fixtures/ ディレクトリとフィクスチャファイルを作成してください。
+
+### 実装
+- `tests/integration/fixtures/` ディレクトリ作成
+- `channel_configs.json`: テスト用チャンネル設定
+- `review_tasks.json`: テスト用レビュータスク
+- `webhook_payloads.json`: テスト用GitHubウェブフックペイロード
+- フィクスチャ読み込みヘルパー関数
+
+### 確認
+- `ls -la tests/integration/fixtures/`
+- `go build ./tests/integration`
+
+---
+
+## タスク13: テスト実行スクリプト
+
+scripts/run-integration-tests.sh を作成してください。
+
+### 実装
+統合テスト実行スクリプト：
+- 環境変数のチェック
+- テスト用DBのセットアップ
+- 統合テストの実行
+- テスト後のクリーンアップ
+- 実行結果のサマリー表示
+
+### 確認
+- `bash scripts/run-integration-tests.sh --help`
+
+---
+
+## タスク14: README更新
+
+README.md に統合テストの説明を追加してください。
+
+### 実装
+以下のセクションを追加：
+- 統合テストの概要
+- テスト環境のセットアップ方法
+- 必要な環境変数の説明
+- テスト実行方法
+- トラブルシューティング
+
+### 確認
+- `cat README.md | grep -A 10 "統合テスト"`
+
+---
+
+## タスク15: ステージング環境デプロイ設定
+
+deploy/staging/ ディレクトリと設定ファイルを作成してください。
+
+### 実装
+- `deploy/staging/` ディレクトリ作成
+- `deploy/staging/docker-compose.yml`: ステージング用Docker Compose
+- `deploy/staging/.env.example`: ステージング環境変数例
+- `deploy/staging/README.md`: デプロイ手順書
+
+### 確認
+- `ls -la deploy/staging/`
+- `docker-compose -f deploy/staging/docker-compose.yml config`
+
+---
+
+## タスク16: 最終テスト
+
+全体のテストを実行して、統合テストが正常に動作することを確認してください。
+
+### 実装
+特になし（確認のみ）
+
+### 確認
+- `go test ./...`
+- `go test ./tests/integration -v`
+- `bash scripts/run-integration-tests.sh`
