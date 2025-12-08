@@ -583,11 +583,10 @@ func TestSelectRandomReviewer(t *testing.T) {
 
 	db.Create(&testConfig)
 
-	// 関数を実行
-	reviewerID := SelectRandomReviewer(db, "C12345", "needs-review")
-
-	// アサーション
-	assert.Contains(t, []string{"U23456", "U34567"}, reviewerID)
+	// 関数を実行（新ロジック：SelectReviewersByWorkloadを使って1人選出）
+	reviewers := SelectReviewersByWorkload(db, "C12345", "needs-review", "", 1)
+	assert.Equal(t, 1, len(reviewers))
+	assert.Contains(t, []string{"U23456", "U34567"}, reviewers[0])
 
 	// レビュワーリストが空の場合のテスト
 	emptyConfig := models.ChannelConfig{
@@ -602,12 +601,13 @@ func TestSelectRandomReviewer(t *testing.T) {
 	}
 
 	db.Create(&emptyConfig)
-	defaultReviewer := SelectRandomReviewer(db, "C67890", "needs-review")
-	assert.Equal(t, "U12345", defaultReviewer)
+	defaultReviewers := SelectReviewersByWorkload(db, "C67890", "needs-review", "", 1)
+	assert.Equal(t, 1, len(defaultReviewers))
+	assert.Equal(t, "U12345", defaultReviewers[0])
 
 	// 存在しないチャンネル/ラベルのテスト
-	nonExistentReviewer := SelectRandomReviewer(db, "nonexistent", "needs-review")
-	assert.Equal(t, "", nonExistentReviewer)
+	nonExistentReviewers := SelectReviewersByWorkload(db, "nonexistent", "needs-review", "", 1)
+	assert.Equal(t, 0, len(nonExistentReviewers))
 }
 
 func TestSendReviewCompletedAutoNotification(t *testing.T) {
