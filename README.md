@@ -219,6 +219,32 @@ make clean
 
 ポートは8080です。
 
+### Docker Composeでのテスト環境
+テスト環境用のDocker Composeを利用して、隔離された環境でテストを実行できます。
+
+```bash
+# テスト環境の起動
+docker-compose -f docker-compose.test.yml --env-file .env.test up -d
+
+# ログの確認
+docker-compose -f docker-compose.test.yml logs -f app
+
+# ヘルスチェックの確認
+docker-compose -f docker-compose.test.yml ps
+
+# テスト環境の停止
+docker-compose -f docker-compose.test.yml down
+
+# テスト環境の完全削除（ボリュームも削除）
+docker-compose -f docker-compose.test.yml down -v
+```
+
+**構成:**
+- アプリケーションコンテナ（ポート8080）
+- モックサーバー（ポート1080）- 将来的なSlack/GitHubモック用
+- テスト用SQLiteデータベース（永続化ボリューム）
+- ヘルスチェック機能付き
+
 ### デプロイ
 アプリをk8sやAWS EC2などお好きな環境で実行してください。
 

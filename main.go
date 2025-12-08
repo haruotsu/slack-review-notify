@@ -43,6 +43,13 @@ func main() {
 
 	r := gin.Default()
 
+	// ヘルスチェックエンドポイント
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status": "ok",
+		})
+	})
+
 	// Slackボタン押下イベント
 	r.POST("/slack/actions", handlers.HandleSlackAction(db))
 

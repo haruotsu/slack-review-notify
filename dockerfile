@@ -9,8 +9,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-# CGO_ENABLED=1 に変更
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o slack-review-notify
+# CGO_ENABLED=1 に変更（アーキテクチャはビルド環境に合わせて自動設定）
+RUN CGO_ENABLED=1 GOOS=linux go build -o slack-review-notify
 
 # 実行用イメージ
 FROM alpine:latest
