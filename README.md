@@ -71,6 +71,7 @@ DB_PATH=review_tasks.db  # デフォルト: review_tasks.db（省略可能）
 - `/slack-review-notify [ラベル名] add-reviewer @user1,@user2`: レビュワーを追加
 - `/slack-review-notify [ラベル名] show-reviewers`: 登録されたレビュワーリストを表示
 - `/slack-review-notify [ラベル名] clear-reviewers`: レビュワーリストをクリア
+- `/slack-review-notify [ラベル名] set-reviewer-count 3`: レビュワー人数を設定（デフォルト1人）
 - `/slack-review-notify [ラベル名] add-repo owner/repo`: 通知対象リポジトリを追加
 - `/slack-review-notify [ラベル名] remove-repo owner/repo`: 通知対象リポジトリを削除
 - `/slack-review-notify [ラベル名] set-label 新ラベル名`: ラベル名を変更
