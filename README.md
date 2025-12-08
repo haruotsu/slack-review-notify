@@ -245,6 +245,27 @@ docker-compose -f docker-compose.test.yml down -v
 - テスト用SQLiteデータベース（永続化ボリューム）
 - ヘルスチェック機能付き
 
+### CI/CD統合テスト
+GitHub Actionsを使用した統合テスト環境が設定されています。
+
+**トリガー条件:**
+- `staging` ブランチへのプッシュ
+- `staging` ブランチへのPull Request
+- 手動実行（workflow_dispatch）
+
+**実行内容:**
+1. **統合テスト**: Docker Compose環境での自動テスト実行
+2. **Lint**: golangci-lintによるコード品質チェック
+3. **ビルド**: バイナリのビルド確認
+4. **Dockerビルド**: Dockerイメージのビルド確認
+
+**必要なシークレット設定（GitHub Settings > Secrets）:**
+- `SLACK_BOT_TOKEN_TEST`: テスト用Slack Bot Token（オプション、未設定時はモック値を使用）
+- `SLACK_SIGNING_SECRET_TEST`: テスト用Slack Signing Secret（オプション）
+- `GITHUB_WEBHOOK_SECRET_TEST`: テスト用GitHub Webhook Secret（オプション）
+
+詳細は `.github/workflows/integration-test.yml` を参照してください。
+
 ### デプロイ
 アプリをk8sやAWS EC2などお好きな環境で実行してください。
 

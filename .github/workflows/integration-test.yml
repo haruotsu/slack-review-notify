@@ -1,0 +1,225 @@
+name: Integration Tests
+
+on:
+  push:
+    branches:
+      - staging
+  pull_request:
+    branches:
+      - staging
+  workflow_dispatch:  # 手動実行を許可
+
+env:
+  GO_VERSION: '1.25'
+
+jobs:
+  integration-test:
+    name: Run Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Create test directory structure
+        run: |
+          mkdir -p test/mock
+          mkdir -p test/integration
+
+      - name: Create mock server initializer (if not exists)
+        run: |
+          if [ ! -f test/mock/initializer.json ]; then
+            echo '{}' > test/mock/initializer.json
+          fi
+
+      - name: Start Docker Compose services
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN_TEST || 'xoxb-test-token' }}
+          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET_TEST || 'test-signing-secret' }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET_TEST || 'test-webhook-secret' }}
+        run: |
+          docker-compose -f docker-compose.test.yml up -d
+          echo "Waiting for services to be healthy..."
+          sleep 10
+
+      - name: Wait for application health check
+        run: |
+          max_attempts=30
+          attempt=0
+          until curl -f http://localhost:8080/health || [ $attempt -eq $max_attempts ]; do
+            attempt=$((attempt + 1))
+            echo "Waiting for application to be ready... (attempt $attempt/$max_attempts)"
+            sleep 2
+          done
+          if [ $attempt -eq $max_attempts ]; then
+            echo "Application failed to become healthy"
+            docker-compose -f docker-compose.test.yml logs
+            exit 1
+          fi
+          echo "Application is healthy"
+
+      - name: Run unit tests
+        run: |
+          go test -v -race -coverprofile=coverage.unit.out ./...
+
+      - name: Run integration tests
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN_TEST || 'xoxb-test-token' }}
+          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET_TEST || 'test-signing-secret' }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET_TEST || 'test-webhook-secret' }}
+          DB_PATH: test_integration.db
+          TEST_MODE: "true"
+        run: |
+          # 統合テストを実行（test/integrationディレクトリがある場合）
+          if [ -d "test/integration" ]; then
+            go test -v -race -tags=integration -coverprofile=coverage.integration.out ./test/integration/...
+          else
+            echo "No integration tests found in test/integration directory"
+          fi
+
+      - name: Generate coverage report
+        if: always()
+        run: |
+          if [ -f coverage.unit.out ]; then
+            go tool cover -func=coverage.unit.out -o=coverage.unit.txt
+            echo "### Unit Test Coverage" >> $GITHUB_STEP_SUMMARY
+            tail -n 1 coverage.unit.txt >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f coverage.integration.out ]; then
+            go tool cover -func=coverage.integration.out -o=coverage.integration.txt
+            echo "### Integration Test Coverage" >> $GITHUB_STEP_SUMMARY
+            tail -n 1 coverage.integration.txt >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload coverage to artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage.*.out
+            coverage.*.txt
+          retention-days: 30
+
+      - name: Show Docker Compose logs on failure
+        if: failure()
+        run: |
+          echo "=== Application Logs ==="
+          docker-compose -f docker-compose.test.yml logs app
+          echo "=== Mock Server Logs ==="
+          docker-compose -f docker-compose.test.yml logs mock-server
+
+      - name: Cleanup Docker Compose
+        if: always()
+        run: |
+          docker-compose -f docker-compose.test.yml down -v
+          rm -f test_integration.db
+
+  lint:
+    name: Run Linters
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build binary
+        run: |
+          make build
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: slack-review-notify-binary
+          path: slack-review-notify
+          retention-days: 7
+
+  docker-build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./dockerfile
+          push: false
+          tags: slack-review-notify:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [integration-test, lint, build, docker-build]
+    if: always()
+
+    steps:
+      - name: Check job results
+        run: |
+          echo "## Integration Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Integration Tests: ${{ needs.integration-test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Lint: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Build: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Docker Build: ${{ needs.docker-build.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # いずれかのジョブが失敗した場合はエラーとする
+          if [[ "${{ needs.integration-test.result }}" != "success" ]] || \
+             [[ "${{ needs.lint.result }}" != "success" ]] || \
+             [[ "${{ needs.build.result }}" != "success" ]] || \
+             [[ "${{ needs.docker-build.result }}" != "success" ]]; then
+            echo "❌ Some jobs failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ All jobs succeeded" >> $GITHUB_STEP_SUMMARY
+          fi
