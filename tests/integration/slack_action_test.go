@@ -431,7 +431,7 @@ func TestRemindButtonAction(t *testing.T) {
 func signSlackRequest(body string, timestamp string) string {
 	secret := os.Getenv("SLACK_SIGNING_SECRET")
 	if secret == "" {
-		secret = "test-signing-secret"
+		secret = "test_signing_secret_12345"
 	}
 
 	sig := fmt.Sprintf("v0:%s:%s", timestamp, body)

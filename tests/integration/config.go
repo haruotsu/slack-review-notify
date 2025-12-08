@@ -12,12 +12,13 @@ import (
 
 // TestConfig holds configuration for integration tests
 type TestConfig struct {
-	DB              *gorm.DB
-	SlackBotToken   string
-	OriginalDBPath  string
-	TestDBPath      string
-	CleanupFuncs    []func()
-	IsSlackMockMode bool
+	DB                 *gorm.DB
+	SlackBotToken      string
+	SlackSigningSecret string
+	OriginalDBPath     string
+	TestDBPath         string
+	CleanupFuncs       []func()
+	IsSlackMockMode    bool
 }
 
 // SetupTestDB creates an in-memory or file-based test database
@@ -83,11 +84,17 @@ func SetupTestEnvironment(t *testing.T, useFileDB bool) *TestConfig {
 	// Setup environment variables
 	config.OriginalDBPath = os.Getenv("DB_PATH")
 	config.SlackBotToken = os.Getenv("SLACK_BOT_TOKEN")
+	config.SlackSigningSecret = os.Getenv("SLACK_SIGNING_SECRET")
 
 	// Set test environment variables
 	testSlackToken := "xoxb-test-token-integration"
 	if err := os.Setenv("SLACK_BOT_TOKEN", testSlackToken); err != nil {
 		t.Fatalf("failed to set SLACK_BOT_TOKEN: %v", err)
+	}
+
+	testSigningSecret := "test_signing_secret_12345"
+	if err := os.Setenv("SLACK_SIGNING_SECRET", testSigningSecret); err != nil {
+		t.Fatalf("failed to set SLACK_SIGNING_SECRET: %v", err)
 	}
 
 	if dbPath != "" {
@@ -108,6 +115,12 @@ func SetupTestEnvironment(t *testing.T, useFileDB bool) *TestConfig {
 			_ = os.Setenv("SLACK_BOT_TOKEN", config.SlackBotToken)
 		} else {
 			_ = os.Unsetenv("SLACK_BOT_TOKEN")
+		}
+
+		if config.SlackSigningSecret != "" {
+			_ = os.Setenv("SLACK_SIGNING_SECRET", config.SlackSigningSecret)
+		} else {
+			_ = os.Unsetenv("SLACK_SIGNING_SECRET")
 		}
 	})
 
