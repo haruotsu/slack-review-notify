@@ -75,7 +75,8 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
 				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
 				"set-business-hours-start", "set-business-hours-end", "set-timezone",
-				"map-user", "show-user-mappings", "remove-user-mapping"}
+				"map-user", "show-user-mappings", "remove-user-mapping",
+				"set-required-approvals"}
 
 			isSubCommand := false
 			for _, cmd := range potentialSubCommands {
@@ -239,6 +240,13 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			case "remove-user-mapping":
 				removeUserMapping(c, db, params)
 
+			case "set-required-approvals":
+				if params == "" {
+					c.String(200, "必要なapprove数を指定してください。例: /slack-review-notify "+labelName+" set-required-approvals 2")
+					return
+				}
+				setRequiredApprovals(c, db, channelID, labelName, strings.TrimSpace(params))
+
 			default:
 				c.String(200, "不明なコマンドです。/slack-review-notify help で使い方を確認してください。")
 			}
@@ -347,6 +355,7 @@ func showHelp(c *gin.Context) {
 • /slack-review-notify [ラベル名] set-business-hours-start 09:00 - 営業開始時間を設定
 • /slack-review-notify [ラベル名] set-business-hours-end 18:00 - 営業終了時間を設定
 • /slack-review-notify [ラベル名] set-timezone Asia/Tokyo - タイムゾーンを設定
+• /slack-review-notify [ラベル名] set-required-approvals N - 必要なapprove数を設定（1〜10）
 • /slack-review-notify [ラベル名] activate - 通知を有効化
 • /slack-review-notify [ラベル名] deactivate - 通知を無効化
 
@@ -416,15 +425,21 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 		timezone = "Asia/Tokyo" // デフォルトタイムゾーン
 	}
 
+	requiredApprovals := config.RequiredApprovals
+	if requiredApprovals <= 0 {
+		requiredApprovals = 1
+	}
+
 	response := fmt.Sprintf(`*このチャンネルのラベル「%s」のレビュー通知設定*
 - ステータス: %s
 - メンション先: <@%s>
 - レビュワーリスト: %s
 - 通知対象リポジトリ: %s
 - レビュワー割り当て後のリマインド頻度: %d分
-- 営業時間: %s - %s (%s)`,
+- 営業時間: %s - %s (%s)
+- 必要なapprove数: %d`,
 		labelName, status, config.DefaultMentionID, formatReviewerList(config.ReviewerList),
-		config.RepositoryList, reviewerReminderInterval, config.BusinessHoursStart, config.BusinessHoursEnd, timezone)
+		config.RepositoryList, reviewerReminderInterval, config.BusinessHoursStart, config.BusinessHoursEnd, timezone, requiredApprovals)
 
 	c.String(200, response)
 }
@@ -1085,4 +1100,36 @@ func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername string) {
 	}
 
 	c.String(200, fmt.Sprintf("GitHubユーザー `%s` のマッピングを削除しました。", githubUsername))
+}
+
+// 必要なapprove数を設定
+func setRequiredApprovals(c *gin.Context, db *gorm.DB, channelID, labelName, countStr string) {
+	count, err := strconv.Atoi(countStr)
+	if err != nil || count < 1 || count > 10 {
+		c.String(200, "必要なapprove数は1〜10の整数で指定してください。")
+		return
+	}
+
+	var config models.ChannelConfig
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
+	if result.Error != nil {
+		config = models.ChannelConfig{
+			ID:                uuid.NewString(),
+			SlackChannelID:    channelID,
+			LabelName:         labelName,
+			RequiredApprovals: count,
+			IsActive:          true,
+			CreatedAt:         time.Now(),
+			UpdatedAt:         time.Now(),
+		}
+		db.Create(&config)
+		c.String(200, fmt.Sprintf("ラベル「%s」の必要なapprove数を %d に設定しました。", labelName, count))
+		return
+	}
+
+	config.RequiredApprovals = count
+	config.UpdatedAt = time.Now()
+	db.Save(&config)
+
+	c.String(200, fmt.Sprintf("ラベル「%s」の必要なapprove数を %d に更新しました。", labelName, count))
 }

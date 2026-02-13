@@ -41,8 +41,21 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 			continue // 営業時間外なので処理をスキップ
 		}
 
-		// レビュワーをランダム選択
-		reviewerID := SelectRandomReviewer(db, task.SlackChannel, labelName)
+		// レビュワーをランダム選択（PR作成者を除外）
+		excludeIDs := []string{}
+		if task.PRAuthorSlackID != "" {
+			excludeIDs = append(excludeIDs, task.PRAuthorSlackID)
+		}
+		requiredApprovals := config.RequiredApprovals
+		if requiredApprovals <= 0 {
+			requiredApprovals = 1
+		}
+		reviewerIDs := SelectRandomReviewers(db, task.SlackChannel, labelName, requiredApprovals, excludeIDs)
+		reviewerID := ""
+		if len(reviewerIDs) > 0 {
+			reviewerID = reviewerIDs[0]
+		}
+		reviewersStr := strings.Join(reviewerIDs, ",")
 
 		// スレッドに営業時間通知を送信
 		if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
@@ -53,6 +66,7 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 		// タスクの状態を更新
 		task.Status = "in_review"
 		task.Reviewer = reviewerID
+		task.Reviewers = reviewersStr
 		task.UpdatedAt = time.Now()
 
 		if err := db.Save(&task).Error; err != nil {

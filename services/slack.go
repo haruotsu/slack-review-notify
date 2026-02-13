@@ -143,6 +143,117 @@ func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) strin
 	return validReviewers[randomIndex]
 }
 
+// SelectRandomReviewers は指定人数のレビュワーをランダム選択する（excludeIDs を除外）
+func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, count int, excludeIDs []string) []string {
+	var config models.ChannelConfig
+
+	if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config).Error; err != nil {
+		log.Printf("failed to get channel config: %v", err)
+		return []string{}
+	}
+
+	if config.ReviewerList == "" {
+		return []string{config.DefaultMentionID}
+	}
+
+	reviewers := strings.Split(config.ReviewerList, ",")
+
+	excludeSet := make(map[string]bool)
+	for _, id := range excludeIDs {
+		if id != "" {
+			excludeSet[id] = true
+		}
+	}
+
+	var candidates []string
+	for _, r := range reviewers {
+		if trimmed := strings.TrimSpace(r); trimmed != "" && !excludeSet[trimmed] {
+			candidates = append(candidates, trimmed)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return []string{config.DefaultMentionID}
+	}
+
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rng.Shuffle(len(candidates), func(i, j int) {
+		candidates[i], candidates[j] = candidates[j], candidates[i]
+	})
+
+	if count > len(candidates) {
+		count = len(candidates)
+	}
+
+	return candidates[:count]
+}
+
+// GetPendingReviewers は未approveのレビュワーリストを返す
+func GetPendingReviewers(task models.ReviewTask) []string {
+	if task.Reviewers == "" {
+		if task.Reviewer != "" {
+			return []string{task.Reviewer}
+		}
+		return nil
+	}
+
+	approvedSet := make(map[string]bool)
+	if task.ApprovedBy != "" {
+		for _, id := range strings.Split(task.ApprovedBy, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				approvedSet[trimmed] = true
+			}
+		}
+	}
+
+	var pending []string
+	for _, id := range strings.Split(task.Reviewers, ",") {
+		if trimmed := strings.TrimSpace(id); trimmed != "" && !approvedSet[trimmed] {
+			pending = append(pending, trimmed)
+		}
+	}
+	return pending
+}
+
+// AddApproval は task.ApprovedBy にレビュワーを追加する（重複防止）。新規追加なら true を返す
+func AddApproval(task *models.ReviewTask, slackUserID string) bool {
+	if slackUserID == "" {
+		return false
+	}
+
+	if task.ApprovedBy != "" {
+		for _, id := range strings.Split(task.ApprovedBy, ",") {
+			if strings.TrimSpace(id) == slackUserID {
+				return false
+			}
+		}
+		task.ApprovedBy = task.ApprovedBy + "," + slackUserID
+	} else {
+		task.ApprovedBy = slackUserID
+	}
+	return true
+}
+
+// IsReviewFullyApproved は必要なapprove数を満たしているか判定する
+func IsReviewFullyApproved(task models.ReviewTask, requiredApprovals int) bool {
+	if requiredApprovals <= 0 {
+		requiredApprovals = 1
+	}
+
+	if task.ApprovedBy == "" {
+		return false
+	}
+
+	count := 0
+	for _, id := range strings.Split(task.ApprovedBy, ",") {
+		if strings.TrimSpace(id) != "" {
+			count++
+		}
+	}
+
+	return count >= requiredApprovals
+}
+
 // SendSlackMessageOffHours は営業時間外用のメンション抜きメッセージを送信する
 func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID string) (string, string, error) {
 	var message string
@@ -438,7 +549,19 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 		return fmt.Errorf("channel is archived: %s", task.SlackChannel)
 	}
 
-	message := fmt.Sprintf("@%s レビューしてくれたら嬉しいです...👀", task.Reviewer)
+	// 未approveのレビュワーのみメンション
+	pendingReviewers := GetPendingReviewers(task)
+	var mentionParts []string
+	for _, id := range pendingReviewers {
+		mentionParts = append(mentionParts, fmt.Sprintf("<@%s>", id))
+	}
+	var mentionText string
+	if len(mentionParts) > 0 {
+		mentionText = strings.Join(mentionParts, " ")
+	} else if task.Reviewer != "" {
+		mentionText = fmt.Sprintf("<@%s>", task.Reviewer)
+	}
+	message := fmt.Sprintf("%s レビューしてくれたら嬉しいです...👀", mentionText)
 
 	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder", "リマインダーを停止")
 	blocks := CreateMessageWithActionBlocks(message, pauseSelect)
@@ -594,7 +717,18 @@ func IsChannelArchived(channelID string) (bool, error) {
 
 // 自動割り当てされたレビュワーを表示し、変更ボタンを表示する関数
 func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
-	message := fmt.Sprintf("自動でレビュワーが割り当てられました: @%s レビューをお願いします！", task.Reviewer)
+	var message string
+	if task.Reviewers != "" {
+		var mentions []string
+		for _, id := range strings.Split(task.Reviewers, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				mentions = append(mentions, fmt.Sprintf("<@%s>", trimmed))
+			}
+		}
+		message = fmt.Sprintf("自動でレビュワーが割り当てられました: %s レビューをお願いします！", strings.Join(mentions, " "))
+	} else {
+		message = fmt.Sprintf("自動でレビュワーが割り当てられました: <@%s> レビューをお願いします！", task.Reviewer)
+	}
 
 	changeButton := CreateChangeReviewerButton(task.ID)
 	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder_initial", "リマインダーを停止")

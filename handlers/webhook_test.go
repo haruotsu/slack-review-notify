@@ -1196,3 +1196,245 @@ func TestHandleReviewSubmittedEvent_OldTasksAlsoCompleted(t *testing.T) {
 	// モックが使用されたことを確認
 	assert.True(t, gock.IsDone(), "最新のタスクにのみSlack通知が送られるべき")
 }
+
+// --- 複数レビュワー対応のWebhookテスト ---
+
+func TestHandleReviewSubmittedEvent_PartialApproval(t *testing.T) {
+	// テスト用DB
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	// レビュー通知のモック
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// 部分approve時の進捗メッセージのモック
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// RequiredApprovals=2のチャンネル設定
+	config := models.ChannelConfig{
+		ID:                "config-partial",
+		SlackChannelID:    "C_PARTIAL",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		RequiredApprovals: 2,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	// UserMapping
+	userMapping := models.UserMapping{
+		ID:             "mapping-1",
+		GithubUsername: "reviewer1",
+		SlackUserID:    "UREVIEWER1",
+	}
+	db.Create(&userMapping)
+
+	// 2人アサインされたタスク
+	task := models.ReviewTask{
+		ID:           "partial-task",
+		PRURL:        "https://github.com/owner/repo/pull/200",
+		Repo:         "owner/repo",
+		PRNumber:     200,
+		Title:        "Partial Approval PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C_PARTIAL",
+		Reviewer:     "UREVIEWER1",
+		Reviewers:    "UREVIEWER1,UREVIEWER2",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+	}
+	db.Create(&task)
+
+	// 1人目がapprove
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 200, "html_url": "https://github.com/owner/repo/pull/200"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "approved", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// タスクはまだin_reviewのまま（1/2 approve）
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "partial-task").First(&updatedTask)
+	assert.Equal(t, "in_review", updatedTask.Status, "1/2 approveなのでまだin_review")
+	assert.Contains(t, updatedTask.ApprovedBy, "UREVIEWER1")
+}
+
+func TestHandleReviewSubmittedEvent_FullApproval(t *testing.T) {
+	// テスト用DB
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	// レビュー通知のモック
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// RequiredApprovals=2のチャンネル設定
+	config := models.ChannelConfig{
+		ID:                "config-full",
+		SlackChannelID:    "C_FULL",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		RequiredApprovals: 2,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	// UserMapping
+	userMapping := models.UserMapping{
+		ID:             "mapping-2",
+		GithubUsername: "reviewer2",
+		SlackUserID:    "UREVIEWER2",
+	}
+	db.Create(&userMapping)
+
+	// 既に1人approveされたタスク
+	task := models.ReviewTask{
+		ID:           "full-task",
+		PRURL:        "https://github.com/owner/repo/pull/201",
+		Repo:         "owner/repo",
+		PRNumber:     201,
+		Title:        "Full Approval PR",
+		SlackTS:      "1234.5679",
+		SlackChannel: "C_FULL",
+		Reviewer:     "UREVIEWER1",
+		Reviewers:    "UREVIEWER1,UREVIEWER2",
+		ApprovedBy:   "UREVIEWER1",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+	}
+	db.Create(&task)
+
+	// 2人目がapprove
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 201, "html_url": "https://github.com/owner/repo/pull/201"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "approved", "user": {"login": "reviewer2"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// タスクがcompletedになっている（2/2 approve）
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "full-task").First(&updatedTask)
+	assert.Equal(t, "completed", updatedTask.Status, "2/2 approveなのでcompleted")
+	assert.Contains(t, updatedTask.ApprovedBy, "UREVIEWER1")
+	assert.Contains(t, updatedTask.ApprovedBy, "UREVIEWER2")
+}
+
+func TestHandleReviewSubmittedEvent_BackwardCompat(t *testing.T) {
+	// テスト用DB - RequiredApprovals=1（デフォルト）で既存動作
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	// レビュー通知のモック
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// RequiredApprovals未設定（デフォルト=1）のチャンネル設定
+	config := models.ChannelConfig{
+		ID:               "config-compat",
+		SlackChannelID:   "C_COMPAT",
+		LabelName:        "needs-review",
+		DefaultMentionID: "UDEFAULT",
+		IsActive:         true,
+	}
+	db.Create(&config)
+
+	// 旧データ形式のタスク（Reviewers空）
+	task := models.ReviewTask{
+		ID:           "compat-task",
+		PRURL:        "https://github.com/owner/repo/pull/202",
+		Repo:         "owner/repo",
+		PRNumber:     202,
+		Title:        "Backward Compat PR",
+		SlackTS:      "1234.5680",
+		SlackChannel: "C_COMPAT",
+		Reviewer:     "UOLD",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+	}
+	db.Create(&task)
+
+	// approveイベント
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 202, "html_url": "https://github.com/owner/repo/pull/202"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "approved", "user": {"login": "unknownUser"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// RequiredApprovals=1なので1回のapproveでcompleted
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "compat-task").First(&updatedTask)
+	assert.Equal(t, "completed", updatedTask.Status, "RequiredApprovals=1で1回approveなのでcompleted")
+}

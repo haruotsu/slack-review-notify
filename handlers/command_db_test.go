@@ -22,7 +22,7 @@ func setupCommandIntegrationTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("fail to open test db: %v", err)
 	}
 
-	if err := db.AutoMigrate(&models.ChannelConfig{}, &models.ReviewTask{}); err != nil {
+	if err := db.AutoMigrate(&models.ChannelConfig{}, &models.ReviewTask{}, &models.UserMapping{}); err != nil {
 		t.Fatalf("fail to migrate test db: %v", err)
 	}
 
@@ -170,6 +170,90 @@ func TestSetTimezoneCommand_Integration(t *testing.T) {
 				err := db.Where("slack_channel_id = ? AND label_name = ?", tt.channelID, labelName).First(&config).Error
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedTimezone, config.Timezone)
+			}
+		})
+	}
+}
+
+func TestSetRequiredApprovals_Integration(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	tests := []struct {
+		name              string
+		text              string
+		channelID         string
+		expectedApprovals int
+		expectedStatus    int
+		expectsError      bool
+	}{
+		{
+			name:              "正常なapprove数設定",
+			text:              "needs-review set-required-approvals 2",
+			channelID:         "C_APPROVALS",
+			expectedApprovals: 2,
+			expectedStatus:    200,
+			expectsError:      false,
+		},
+		{
+			name:              "デフォルトラベルでのapprove数設定",
+			text:              "set-required-approvals 3",
+			channelID:         "C_APPROVALS2",
+			expectedApprovals: 3,
+			expectedStatus:    200,
+			expectsError:      false,
+		},
+		{
+			name:           "範囲外の値（0）",
+			text:           "needs-review set-required-approvals 0",
+			channelID:      "C_APPROVALS",
+			expectedStatus: 200,
+			expectsError:   true,
+		},
+		{
+			name:           "範囲外の値（11）",
+			text:           "needs-review set-required-approvals 11",
+			channelID:      "C_APPROVALS",
+			expectedStatus: 200,
+			expectsError:   true,
+		},
+		{
+			name:           "無効な値（文字列）",
+			text:           "needs-review set-required-approvals abc",
+			channelID:      "C_APPROVALS",
+			expectedStatus: 200,
+			expectsError:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			req := setupHTTPRequest(t, tt.text, tt.channelID)
+			w := httptest.NewRecorder()
+
+			router := gin.New()
+			router.POST("/slack/command", HandleSlackCommand(db))
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			if !tt.expectsError {
+				var config models.ChannelConfig
+				labelName := "needs-review"
+
+				err := db.Where("slack_channel_id = ? AND label_name = ?", tt.channelID, labelName).First(&config).Error
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedApprovals, config.RequiredApprovals)
+			}
+
+			if tt.expectsError {
+				body := w.Body.String()
+				assert.Contains(t, body, "1〜10の整数")
 			}
 		})
 	}

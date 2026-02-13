@@ -33,7 +33,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	}
 
 	// マイグレーションを実行
-	if err := db.AutoMigrate(&models.ChannelConfig{}, &models.ReviewTask{}); err != nil {
+	if err := db.AutoMigrate(&models.ChannelConfig{}, &models.ReviewTask{}, &models.UserMapping{}); err != nil {
 		t.Fatalf("fail to migrate test db: %v", err)
 	}
 
