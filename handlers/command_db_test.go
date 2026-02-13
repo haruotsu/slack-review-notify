@@ -22,7 +22,7 @@ func setupCommandIntegrationTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("fail to open test db: %v", err)
 	}
 
-	if err := db.AutoMigrate(&models.ChannelConfig{}, &models.ReviewTask{}, &models.UserMapping{}); err != nil {
+	if err := db.AutoMigrate(&models.ChannelConfig{}, &models.ReviewTask{}, &models.UserMapping{}, &models.ReviewerAvailability{}); err != nil {
 		t.Fatalf("fail to migrate test db: %v", err)
 	}
 
@@ -257,4 +257,150 @@ func TestSetRequiredApprovals_Integration(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSetAway_Integration(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	tests := []struct {
+		name           string
+		text           string
+		channelID      string
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:           "無期限離席設定",
+			text:           "set-away <@U12345>",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectedBody:   "離席に設定しました",
+		},
+		{
+			name:           "日付付き離席設定",
+			text:           "set-away <@U67890> until 2099-12-31 reason 休暇",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectedBody:   "2099-12-31 まで",
+		},
+		{
+			name:           "理由のみ離席設定",
+			text:           "set-away <@U11111> reason 育児休業",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectedBody:   "育児休業",
+		},
+		{
+			name:           "ユーザー未指定",
+			text:           "set-away",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectedBody:   "離席に設定するユーザーを指定してください",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			req := setupHTTPRequest(t, tt.text, tt.channelID)
+			w := httptest.NewRecorder()
+
+			router := gin.New()
+			router.POST("/slack/command", HandleSlackCommand(db))
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			assert.Contains(t, w.Body.String(), tt.expectedBody)
+		})
+	}
+
+	// upsert テスト: 同じユーザーを再度設定しても1レコード
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "U12345").Count(&count)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestUnsetAway_Integration(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	// まず離席を設定
+	gin.SetMode(gin.TestMode)
+	req := setupHTTPRequest(t, "set-away <@UAWAY>", "C12345")
+	w := httptest.NewRecorder()
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+	router.ServeHTTP(w, req)
+	assert.Equal(t, 200, w.Code)
+
+	// 離席を解除
+	req2 := setupHTTPRequest(t, "unset-away <@UAWAY>", "C12345")
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	assert.Equal(t, 200, w2.Code)
+	assert.Contains(t, w2.Body.String(), "離席を解除しました")
+
+	// DB にレコードがないことを確認
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UAWAY").Count(&count)
+	assert.Equal(t, int64(0), count)
+
+	// 存在しないユーザーの解除
+	req3 := setupHTTPRequest(t, "unset-away <@UNOTEXIST>", "C12345")
+	w3 := httptest.NewRecorder()
+	router.ServeHTTP(w3, req3)
+	assert.Equal(t, 200, w3.Code)
+	assert.Contains(t, w3.Body.String(), "離席に設定されていません")
+}
+
+func TestShowAvailability_Integration(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	// 離席者がいない場合
+	req := setupHTTPRequest(t, "show-availability", "C12345")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "離席中のユーザーはいません")
+
+	// 離席者を追加
+	req2 := setupHTTPRequest(t, "set-away <@USHOW1> reason 休暇", "C12345")
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	assert.Equal(t, 200, w2.Code)
+
+	req3 := setupHTTPRequest(t, "set-away <@USHOW2> until 2099-12-31 reason 育児休業", "C12345")
+	w3 := httptest.NewRecorder()
+	router.ServeHTTP(w3, req3)
+	assert.Equal(t, 200, w3.Code)
+
+	// 離席者一覧を確認
+	req4 := setupHTTPRequest(t, "show-availability", "C12345")
+	w4 := httptest.NewRecorder()
+	router.ServeHTTP(w4, req4)
+	assert.Equal(t, 200, w4.Code)
+	body := w4.Body.String()
+	assert.Contains(t, body, "現在離席中のユーザー")
+	assert.Contains(t, body, "USHOW1")
+	assert.Contains(t, body, "USHOW2")
+	assert.Contains(t, body, "休暇")
+	assert.Contains(t, body, "育児休業")
 }

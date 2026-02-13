@@ -76,7 +76,8 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
 				"set-business-hours-start", "set-business-hours-end", "set-timezone",
 				"map-user", "show-user-mappings", "remove-user-mapping",
-				"set-required-approvals"}
+				"set-required-approvals",
+				"set-away", "unset-away", "show-availability"}
 
 			isSubCommand := false
 			for _, cmd := range potentialSubCommands {
@@ -247,6 +248,15 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				}
 				setRequiredApprovals(c, db, channelID, labelName, strings.TrimSpace(params))
 
+			case "set-away":
+				setAway(c, db, params)
+
+			case "unset-away":
+				unsetAway(c, db, params)
+
+			case "show-availability":
+				showAvailability(c, db)
+
 			default:
 				c.String(200, "不明なコマンドです。/slack-review-notify help で使い方を確認してください。")
 			}
@@ -363,6 +373,11 @@ func showHelp(c *gin.Context) {
 • /slack-review-notify map-user <github-username> @slack-user - GitHubユーザーとSlackユーザーを紐付け
 • /slack-review-notify show-user-mappings - 登録済みのユーザーマッピング一覧を表示
 • /slack-review-notify remove-user-mapping <github-username> - ユーザーマッピングを削除
+
+*離席管理:*
+• /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由] - ユーザーを離席に設定
+• /slack-review-notify unset-away @user - ユーザーの離席を解除
+• /slack-review-notify show-availability - 離席中のユーザー一覧を表示
 
 [ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します`
 
@@ -1100,6 +1115,139 @@ func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername string) {
 	}
 
 	c.String(200, fmt.Sprintf("GitHubユーザー `%s` のマッピングを削除しました。", githubUsername))
+}
+
+// ユーザーを離席に設定
+func setAway(c *gin.Context, db *gorm.DB, params string) {
+	if params == "" {
+		c.String(200, "離席に設定するユーザーを指定してください。例: /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由]")
+		return
+	}
+
+	parts := strings.Fields(params)
+	if len(parts) == 0 {
+		c.String(200, "離席に設定するユーザーを指定してください。")
+		return
+	}
+
+	slackUserID := cleanUserID(parts[0])
+	if slackUserID == "" {
+		c.String(200, "有効なユーザーIDを指定してください。")
+		return
+	}
+
+	var awayUntil *time.Time
+	var reason string
+
+	// パラメータ解析: until と reason キーワード
+	for i := 1; i < len(parts); i++ {
+		switch parts[i] {
+		case "until":
+			if i+1 < len(parts) {
+				i++
+				parsed, err := time.Parse("2006-01-02", parts[i])
+				if err != nil {
+					c.String(200, "日付形式が無効です。YYYY-MM-DD形式で指定してください（例: 2025-06-01）")
+					return
+				}
+				// 指定日の終わり（23:59:59）に設定
+				endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, time.Local)
+				awayUntil = &endOfDay
+			}
+		case "reason":
+			if i+1 < len(parts) {
+				reason = strings.Join(parts[i+1:], " ")
+				i = len(parts) // ループ終了
+			}
+		}
+	}
+
+	// 既存レコードがあれば更新、なければ新規作成（upsert）
+	var existing models.ReviewerAvailability
+	result := db.Where("slack_user_id = ?", slackUserID).First(&existing)
+	if result.Error == nil {
+		existing.AwayUntil = awayUntil
+		existing.Reason = reason
+		existing.UpdatedAt = time.Now()
+		db.Save(&existing)
+	} else {
+		record := models.ReviewerAvailability{
+			ID:          uuid.NewString(),
+			SlackUserID: slackUserID,
+			AwayUntil:   awayUntil,
+			Reason:      reason,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		db.Create(&record)
+	}
+
+	// 応答メッセージ作成
+	response := fmt.Sprintf("<@%s> を離席に設定しました", slackUserID)
+	if awayUntil != nil {
+		response += fmt.Sprintf("（%s まで", awayUntil.Format("2006-01-02"))
+	} else {
+		response += "（無期限"
+	}
+	if reason != "" {
+		response += fmt.Sprintf("、理由: %s）", reason)
+	} else {
+		response += "）"
+	}
+
+	c.String(200, response)
+}
+
+// ユーザーの離席を解除
+func unsetAway(c *gin.Context, db *gorm.DB, params string) {
+	if params == "" {
+		c.String(200, "離席を解除するユーザーを指定してください。例: /slack-review-notify unset-away @user")
+		return
+	}
+
+	slackUserID := cleanUserID(strings.TrimSpace(params))
+	if slackUserID == "" {
+		c.String(200, "有効なユーザーIDを指定してください。")
+		return
+	}
+
+	result := db.Unscoped().Where("slack_user_id = ?", slackUserID).Delete(&models.ReviewerAvailability{})
+	if result.RowsAffected == 0 {
+		c.String(200, fmt.Sprintf("<@%s> は離席に設定されていません。", slackUserID))
+		return
+	}
+
+	c.String(200, fmt.Sprintf("<@%s> の離席を解除しました", slackUserID))
+}
+
+// 離席中のユーザー一覧を表示
+func showAvailability(c *gin.Context, db *gorm.DB) {
+	var records []models.ReviewerAvailability
+	now := time.Now()
+
+	// AwayUntil が nil（無期限）または現在時刻より未来のレコードを取得
+	db.Where("away_until IS NULL OR away_until > ?", now).Find(&records)
+
+	if len(records) == 0 {
+		c.String(200, "現在離席中のユーザーはいません")
+		return
+	}
+
+	response := "*現在離席中のユーザー*\n"
+	for _, r := range records {
+		line := fmt.Sprintf("• <@%s> - ", r.SlackUserID)
+		if r.AwayUntil != nil {
+			line += fmt.Sprintf("%s まで", r.AwayUntil.Format("2006-01-02"))
+		} else {
+			line += "無期限"
+		}
+		if r.Reason != "" {
+			line += fmt.Sprintf("（理由: %s）", r.Reason)
+		}
+		response += line + "\n"
+	}
+
+	c.String(200, response)
 }
 
 // 必要なapprove数を設定

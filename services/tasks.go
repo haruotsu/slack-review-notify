@@ -252,3 +252,14 @@ func CleanupOldTasks(db *gorm.DB) {
 		log.Printf("total task deleted: %d", totalDeleted)
 	}
 }
+
+// CleanupExpiredAvailability は期限切れの離席レコードを物理削除する
+func CleanupExpiredAvailability(db *gorm.DB) {
+	now := time.Now()
+	result := db.Unscoped().Where("away_until IS NOT NULL AND away_until < ?", now).Delete(&models.ReviewerAvailability{})
+	if result.Error != nil {
+		log.Printf("expired availability cleanup error: %v", result.Error)
+	} else if result.RowsAffected > 0 {
+		log.Printf("expired availability records deleted: %d", result.RowsAffected)
+	}
+}

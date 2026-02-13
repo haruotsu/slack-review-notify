@@ -872,3 +872,82 @@ func TestIsReviewFullyApproved(t *testing.T) {
 	// requiredApprovals 0以下 → 1として扱う
 	assert.False(t, IsReviewFullyApproved(task4, 0))
 }
+
+func TestGetAwayUserIDs(t *testing.T) {
+	db := setupTestDB(t)
+
+	now := time.Now()
+	future := now.Add(24 * time.Hour)
+	past := now.Add(-24 * time.Hour)
+
+	// 無期限離席
+	db.Create(&models.ReviewerAvailability{
+		ID:          "away-1",
+		SlackUserID: "U_AWAY1",
+		AwayUntil:   nil,
+		Reason:      "育児休業",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// 未来まで離席
+	db.Create(&models.ReviewerAvailability{
+		ID:          "away-2",
+		SlackUserID: "U_AWAY2",
+		AwayUntil:   &future,
+		Reason:      "休暇",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// 期限切れ（返さない）
+	db.Create(&models.ReviewerAvailability{
+		ID:          "away-3",
+		SlackUserID: "U_EXPIRED",
+		AwayUntil:   &past,
+		Reason:      "過去の離席",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	ids := GetAwayUserIDs(db)
+	assert.Contains(t, ids, "U_AWAY1")
+	assert.Contains(t, ids, "U_AWAY2")
+	assert.NotContains(t, ids, "U_EXPIRED")
+}
+
+func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
+	db := setupTestDB(t)
+
+	now := time.Now()
+	future := now.Add(24 * time.Hour)
+
+	// チャンネル設定
+	testConfig := models.ChannelConfig{
+		ID:               "away-test-id",
+		SlackChannelID:   "C_AWAY",
+		LabelName:        "needs-review",
+		DefaultMentionID: "UDEFAULT",
+		ReviewerList:     "U1,U2,U3",
+		IsActive:         true,
+	}
+	db.Create(&testConfig)
+
+	// U2 を離席に設定
+	db.Create(&models.ReviewerAvailability{
+		ID:          "away-u2",
+		SlackUserID: "U2",
+		AwayUntil:   &future,
+		Reason:      "休暇",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// 100回繰り返して、U2 が選ばれないことを確認
+	for i := 0; i < 100; i++ {
+		result := SelectRandomReviewers(db, "C_AWAY", "needs-review", 2, nil)
+		for _, id := range result {
+			assert.NotEqual(t, "U2", id, "離席中のU2が選択された")
+		}
+	}
+}

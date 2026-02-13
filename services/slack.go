@@ -143,6 +143,21 @@ func SelectRandomReviewer(db *gorm.DB, channelID string, labelName string) strin
 	return validReviewers[randomIndex]
 }
 
+// GetAwayUserIDs は現在離席中のユーザーIDを返す
+func GetAwayUserIDs(db *gorm.DB) []string {
+	var records []models.ReviewerAvailability
+	now := time.Now()
+
+	// AwayUntil が nil（無期限）または現在時刻より未来のレコードを取得
+	db.Where("away_until IS NULL OR away_until > ?", now).Find(&records)
+
+	ids := make([]string, 0, len(records))
+	for _, r := range records {
+		ids = append(ids, r.SlackUserID)
+	}
+	return ids
+}
+
 // SelectRandomReviewers は指定人数のレビュワーをランダム選択する（excludeIDs を除外）
 func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, count int, excludeIDs []string) []string {
 	var config models.ChannelConfig
@@ -158,8 +173,16 @@ func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, coun
 
 	reviewers := strings.Split(config.ReviewerList, ",")
 
+	// 離席中ユーザーも除外対象に追加
+	awayIDs := GetAwayUserIDs(db)
+
 	excludeSet := make(map[string]bool)
 	for _, id := range excludeIDs {
+		if id != "" {
+			excludeSet[id] = true
+		}
+	}
+	for _, id := range awayIDs {
 		if id != "" {
 			excludeSet[id] = true
 		}

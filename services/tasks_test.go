@@ -324,3 +324,54 @@ func TestCheckInReviewTasks_ReminderInterval(t *testing.T) {
 	// task3は60分間隔で20分前なのでリマインド送信されないはず
 	assert.False(t, updatedTask3.UpdatedAt.After(beforeExecution), "task3 should not be updated")
 }
+
+func TestCleanupExpiredAvailability(t *testing.T) {
+	db := setupTestDB(t)
+
+	now := time.Now()
+	future := now.Add(24 * time.Hour)
+	past := now.Add(-24 * time.Hour)
+
+	// 無期限離席（削除されない）
+	db.Create(&models.ReviewerAvailability{
+		ID:          "perm-away",
+		SlackUserID: "U_PERM",
+		AwayUntil:   nil,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// 未来の離席（削除されない）
+	db.Create(&models.ReviewerAvailability{
+		ID:          "future-away",
+		SlackUserID: "U_FUTURE",
+		AwayUntil:   &future,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// 期限切れの離席（削除される）
+	db.Create(&models.ReviewerAvailability{
+		ID:          "expired-away",
+		SlackUserID: "U_EXPIRED",
+		AwayUntil:   &past,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	CleanupExpiredAvailability(db)
+
+	var count int64
+
+	// 無期限レコードは残る
+	db.Model(&models.ReviewerAvailability{}).Where("id = ?", "perm-away").Count(&count)
+	assert.Equal(t, int64(1), count)
+
+	// 未来レコードは残る
+	db.Model(&models.ReviewerAvailability{}).Where("id = ?", "future-away").Count(&count)
+	assert.Equal(t, int64(1), count)
+
+	// 期限切れレコードは削除される
+	db.Unscoped().Model(&models.ReviewerAvailability{}).Where("id = ?", "expired-away").Count(&count)
+	assert.Equal(t, int64(0), count)
+}
