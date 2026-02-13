@@ -84,7 +84,7 @@ func runTaskChecker(db *gorm.DB) {
 			// 古いタスクの削除処理
 			services.CleanupOldTasks(db)
 
-			// 期限切れの離席レコードを削除
+			// 期限切れの休暇レコードを削除
 			services.CleanupExpiredAvailability(db)
 		}
 	}

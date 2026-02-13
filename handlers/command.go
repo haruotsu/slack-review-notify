@@ -374,10 +374,10 @@ func showHelp(c *gin.Context) {
 • /slack-review-notify show-user-mappings - 登録済みのユーザーマッピング一覧を表示
 • /slack-review-notify remove-user-mapping <github-username> - ユーザーマッピングを削除
 
-*離席管理:*
-• /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由] - ユーザーを離席に設定
-• /slack-review-notify unset-away @user - ユーザーの離席を解除
-• /slack-review-notify show-availability - 離席中のユーザー一覧を表示
+*休暇管理:*
+• /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由] - ユーザーを休暇に設定
+• /slack-review-notify unset-away @user - ユーザーの休暇を解除
+• /slack-review-notify show-availability - 休暇中のユーザー一覧を表示
 
 [ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します`
 
@@ -1117,16 +1117,16 @@ func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername string) {
 	c.String(200, fmt.Sprintf("GitHubユーザー `%s` のマッピングを削除しました。", githubUsername))
 }
 
-// ユーザーを離席に設定
+// ユーザーを休暇に設定
 func setAway(c *gin.Context, db *gorm.DB, params string) {
 	if params == "" {
-		c.String(200, "離席に設定するユーザーを指定してください。例: /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由]")
+		c.String(200, "休暇に設定するユーザーを指定してください。例: /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由]")
 		return
 	}
 
 	parts := strings.Fields(params)
 	if len(parts) == 0 {
-		c.String(200, "離席に設定するユーザーを指定してください。")
+		c.String(200, "休暇に設定するユーザーを指定してください。")
 		return
 	}
 
@@ -1183,7 +1183,7 @@ func setAway(c *gin.Context, db *gorm.DB, params string) {
 	}
 
 	// 応答メッセージ作成
-	response := fmt.Sprintf("<@%s> を離席に設定しました", slackUserID)
+	response := fmt.Sprintf("<@%s> を休暇に設定しました", slackUserID)
 	if awayUntil != nil {
 		response += fmt.Sprintf("（%s まで", awayUntil.Format("2006-01-02"))
 	} else {
@@ -1198,10 +1198,10 @@ func setAway(c *gin.Context, db *gorm.DB, params string) {
 	c.String(200, response)
 }
 
-// ユーザーの離席を解除
+// ユーザーの休暇を解除
 func unsetAway(c *gin.Context, db *gorm.DB, params string) {
 	if params == "" {
-		c.String(200, "離席を解除するユーザーを指定してください。例: /slack-review-notify unset-away @user")
+		c.String(200, "休暇を解除するユーザーを指定してください。例: /slack-review-notify unset-away @user")
 		return
 	}
 
@@ -1213,14 +1213,14 @@ func unsetAway(c *gin.Context, db *gorm.DB, params string) {
 
 	result := db.Unscoped().Where("slack_user_id = ?", slackUserID).Delete(&models.ReviewerAvailability{})
 	if result.RowsAffected == 0 {
-		c.String(200, fmt.Sprintf("<@%s> は離席に設定されていません。", slackUserID))
+		c.String(200, fmt.Sprintf("<@%s> は休暇に設定されていません。", slackUserID))
 		return
 	}
 
-	c.String(200, fmt.Sprintf("<@%s> の離席を解除しました", slackUserID))
+	c.String(200, fmt.Sprintf("<@%s> の休暇を解除しました", slackUserID))
 }
 
-// 離席中のユーザー一覧を表示
+// 休暇中のユーザー一覧を表示
 func showAvailability(c *gin.Context, db *gorm.DB) {
 	var records []models.ReviewerAvailability
 	now := time.Now()
@@ -1229,11 +1229,11 @@ func showAvailability(c *gin.Context, db *gorm.DB) {
 	db.Where("away_until IS NULL OR away_until > ?", now).Find(&records)
 
 	if len(records) == 0 {
-		c.String(200, "現在離席中のユーザーはいません")
+		c.String(200, "現在休暇中のユーザーはいません")
 		return
 	}
 
-	response := "*現在離席中のユーザー*\n"
+	response := "*現在休暇中のユーザー*\n"
 	for _, r := range records {
 		line := fmt.Sprintf("• <@%s> - ", r.SlackUserID)
 		if r.AwayUntil != nil {

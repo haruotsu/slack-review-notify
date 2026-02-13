@@ -880,7 +880,7 @@ func TestGetAwayUserIDs(t *testing.T) {
 	future := now.Add(24 * time.Hour)
 	past := now.Add(-24 * time.Hour)
 
-	// 無期限離席
+	// 無期限休暇
 	db.Create(&models.ReviewerAvailability{
 		ID:          "away-1",
 		SlackUserID: "U_AWAY1",
@@ -890,7 +890,7 @@ func TestGetAwayUserIDs(t *testing.T) {
 		UpdatedAt:   now,
 	})
 
-	// 未来まで離席
+	// 未来まで休暇
 	db.Create(&models.ReviewerAvailability{
 		ID:          "away-2",
 		SlackUserID: "U_AWAY2",
@@ -905,7 +905,7 @@ func TestGetAwayUserIDs(t *testing.T) {
 		ID:          "away-3",
 		SlackUserID: "U_EXPIRED",
 		AwayUntil:   &past,
-		Reason:      "過去の離席",
+		Reason:      "過去の休暇",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
@@ -933,7 +933,7 @@ func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
 	}
 	db.Create(&testConfig)
 
-	// U2 を離席に設定
+	// U2 を休暇に設定
 	db.Create(&models.ReviewerAvailability{
 		ID:          "away-u2",
 		SlackUserID: "U2",
@@ -947,7 +947,7 @@ func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		result := SelectRandomReviewers(db, "C_AWAY", "needs-review", 2, nil)
 		for _, id := range result {
-			assert.NotEqual(t, "U2", id, "離席中のU2が選択された")
+			assert.NotEqual(t, "U2", id, "休暇中のU2が選択された")
 		}
 	}
 }

@@ -332,7 +332,7 @@ func TestCleanupExpiredAvailability(t *testing.T) {
 	future := now.Add(24 * time.Hour)
 	past := now.Add(-24 * time.Hour)
 
-	// 無期限離席（削除されない）
+	// 無期限休暇（削除されない）
 	db.Create(&models.ReviewerAvailability{
 		ID:          "perm-away",
 		SlackUserID: "U_PERM",
@@ -341,7 +341,7 @@ func TestCleanupExpiredAvailability(t *testing.T) {
 		UpdatedAt:   now,
 	})
 
-	// 未来の離席（削除されない）
+	// 未来の休暇（削除されない）
 	db.Create(&models.ReviewerAvailability{
 		ID:          "future-away",
 		SlackUserID: "U_FUTURE",
@@ -350,7 +350,7 @@ func TestCleanupExpiredAvailability(t *testing.T) {
 		UpdatedAt:   now,
 	})
 
-	// 期限切れの離席（削除される）
+	// 期限切れの休暇（削除される）
 	db.Create(&models.ReviewerAvailability{
 		ID:          "expired-away",
 		SlackUserID: "U_EXPIRED",

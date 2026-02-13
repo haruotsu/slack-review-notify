@@ -253,7 +253,7 @@ func CleanupOldTasks(db *gorm.DB) {
 	}
 }
 
-// CleanupExpiredAvailability は期限切れの離席レコードを物理削除する
+// CleanupExpiredAvailability は期限切れの休暇レコードを物理削除する
 func CleanupExpiredAvailability(db *gorm.DB) {
 	now := time.Now()
 	result := db.Unscoped().Where("away_until IS NOT NULL AND away_until < ?", now).Delete(&models.ReviewerAvailability{})
