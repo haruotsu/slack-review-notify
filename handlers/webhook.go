@@ -529,8 +529,8 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 		// 全員approve済みか判定
 		fullyApproved := services.IsReviewFullyApproved(latestTask, requiredApprovals)
 
-		if fullyApproved || reviewState != "approved" {
-			// 全員approve済み or approve以外のレビュー → 既存ロジック通り全タスクをcompletedに
+		if fullyApproved {
+			// 全員approve済み → 全タスクをcompletedに
 			var channelTasks []models.ReviewTask
 			db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
 				repoFullName, pr.GetNumber(), channel,

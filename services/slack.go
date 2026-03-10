@@ -258,9 +258,23 @@ func AddApproval(task *models.ReviewTask, slackUserID string) bool {
 }
 
 // IsReviewFullyApproved は必要なapprove数を満たしているか判定する
+// 実際に割り当てられたレビュワー数が requiredApprovals 未満の場合、割り当て人数で判定する
 func IsReviewFullyApproved(task models.ReviewTask, requiredApprovals int) bool {
 	if requiredApprovals <= 0 {
 		requiredApprovals = 1
+	}
+
+	// 実際に割り当てられたレビュワー数を取得
+	if task.Reviewers != "" {
+		assignedCount := 0
+		for _, id := range strings.Split(task.Reviewers, ",") {
+			if strings.TrimSpace(id) != "" {
+				assignedCount++
+			}
+		}
+		if assignedCount > 0 && assignedCount < requiredApprovals {
+			requiredApprovals = assignedCount
+		}
 	}
 
 	if task.ApprovedBy == "" {

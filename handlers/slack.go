@@ -300,7 +300,16 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			} else {
 				// 後方互換: 単一レビュワーの変更
 				if taskToUpdate.Reviewers != "" {
-					taskToUpdate.Reviewers = strings.Replace(taskToUpdate.Reviewers, taskToUpdate.Reviewer, newReviewerID, 1)
+					var updatedReviewers []string
+					for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
+						trimmed := strings.TrimSpace(id)
+						if trimmed == taskToUpdate.Reviewer {
+							updatedReviewers = append(updatedReviewers, newReviewerID)
+						} else {
+							updatedReviewers = append(updatedReviewers, trimmed)
+						}
+					}
+					taskToUpdate.Reviewers = strings.Join(updatedReviewers, ",")
 				}
 			}
 
