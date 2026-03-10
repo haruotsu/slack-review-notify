@@ -257,6 +257,20 @@ func AddApproval(task *models.ReviewTask, slackUserID string) bool {
 	return true
 }
 
+// CountApprovals は task.ApprovedBy のapprove数を返す
+func CountApprovals(task models.ReviewTask) int {
+	if task.ApprovedBy == "" {
+		return 0
+	}
+	count := 0
+	for _, id := range strings.Split(task.ApprovedBy, ",") {
+		if strings.TrimSpace(id) != "" {
+			count++
+		}
+	}
+	return count
+}
+
 // IsReviewFullyApproved は必要なapprove数を満たしているか判定する
 // 実際に割り当てられたレビュワー数が requiredApprovals 未満の場合、割り当て人数で判定する
 func IsReviewFullyApproved(task models.ReviewTask, requiredApprovals int) bool {

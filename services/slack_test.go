@@ -871,6 +871,23 @@ func TestIsReviewFullyApproved(t *testing.T) {
 
 	// requiredApprovals 0以下 → 1として扱う
 	assert.False(t, IsReviewFullyApproved(task4, 0))
+
+	// 割り当て人数 < requiredApprovals の場合、割り当て人数で判定
+	task5 := models.ReviewTask{Reviewers: "U1", ApprovedBy: "U1"}
+	assert.True(t, IsReviewFullyApproved(task5, 3), "割り当て1人でapprove済みなら完了")
+
+	task6 := models.ReviewTask{Reviewers: "U1,U2", ApprovedBy: "U1"}
+	assert.False(t, IsReviewFullyApproved(task6, 3), "割り当て2人で1人approve済みなら未完了")
+
+	task7 := models.ReviewTask{Reviewers: "U1,U2", ApprovedBy: "U1,U2"}
+	assert.True(t, IsReviewFullyApproved(task7, 3), "割り当て2人で2人approve済みなら完了")
+}
+
+func TestCountApprovals(t *testing.T) {
+	assert.Equal(t, 0, CountApprovals(models.ReviewTask{}))
+	assert.Equal(t, 0, CountApprovals(models.ReviewTask{ApprovedBy: ""}))
+	assert.Equal(t, 1, CountApprovals(models.ReviewTask{ApprovedBy: "U1"}))
+	assert.Equal(t, 2, CountApprovals(models.ReviewTask{ApprovedBy: "U1,U2"}))
 }
 
 func TestGetAwayUserIDs(t *testing.T) {

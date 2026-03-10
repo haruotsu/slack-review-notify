@@ -559,7 +559,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					}
 				}
 			}
-		} else {
+		} else if reviewState == "approved" {
 			// 部分approve: タスクをin_reviewのまま維持、approved_byのみ更新
 			if err := db.Model(&models.ReviewTask{}).Where("id = ?", latestTask.ID).Updates(map[string]interface{}{
 				"approved_by": latestTask.ApprovedBy,
@@ -569,7 +569,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			}
 
 			// 進捗メッセージをスレッドに投稿
-			approvedCount := len(strings.Split(latestTask.ApprovedBy, ","))
+			approvedCount := services.CountApprovals(latestTask)
 			progressMsg := fmt.Sprintf("✅ %d/%d approved", approvedCount, requiredApprovals)
 			if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, progressMsg); err != nil {
 				log.Printf("failed to post approval progress: %v", err)
