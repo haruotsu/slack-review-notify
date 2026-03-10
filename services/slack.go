@@ -257,6 +257,29 @@ func AddApproval(task *models.ReviewTask, slackUserID string) bool {
 	return true
 }
 
+// RemoveApproval はApprovedByから指定ユーザーを削除する。削除した場合trueを返す。
+func RemoveApproval(task *models.ReviewTask, slackUserID string) bool {
+	if slackUserID == "" || task.ApprovedBy == "" {
+		return false
+	}
+
+	var remaining []string
+	found := false
+	for _, id := range strings.Split(task.ApprovedBy, ",") {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == slackUserID {
+			found = true
+		} else if trimmed != "" {
+			remaining = append(remaining, trimmed)
+		}
+	}
+	if !found {
+		return false
+	}
+	task.ApprovedBy = strings.Join(remaining, ",")
+	return true
+}
+
 // CountApprovals は task.ApprovedBy のapprove数を返す
 func CountApprovals(task models.ReviewTask) int {
 	if task.ApprovedBy == "" {

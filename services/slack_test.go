@@ -890,6 +890,36 @@ func TestCountApprovals(t *testing.T) {
 	assert.Equal(t, 2, CountApprovals(models.ReviewTask{ApprovedBy: "U1,U2"}))
 }
 
+func TestRemoveApproval(t *testing.T) {
+	t.Run("removes existing approval", func(t *testing.T) {
+		task := models.ReviewTask{ApprovedBy: "U1,U2,U3"}
+		assert.True(t, RemoveApproval(&task, "U2"))
+		assert.Equal(t, "U1,U3", task.ApprovedBy)
+	})
+
+	t.Run("removes last approval", func(t *testing.T) {
+		task := models.ReviewTask{ApprovedBy: "U1"}
+		assert.True(t, RemoveApproval(&task, "U1"))
+		assert.Equal(t, "", task.ApprovedBy)
+	})
+
+	t.Run("returns false for non-existent user", func(t *testing.T) {
+		task := models.ReviewTask{ApprovedBy: "U1,U2"}
+		assert.False(t, RemoveApproval(&task, "U999"))
+		assert.Equal(t, "U1,U2", task.ApprovedBy)
+	})
+
+	t.Run("returns false for empty ApprovedBy", func(t *testing.T) {
+		task := models.ReviewTask{ApprovedBy: ""}
+		assert.False(t, RemoveApproval(&task, "U1"))
+	})
+
+	t.Run("returns false for empty slackUserID", func(t *testing.T) {
+		task := models.ReviewTask{ApprovedBy: "U1"}
+		assert.False(t, RemoveApproval(&task, ""))
+	})
+}
+
 func TestGetAwayUserIDs(t *testing.T) {
 	db := setupTestDB(t)
 

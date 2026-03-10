@@ -55,7 +55,7 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 			}
 		case *github.PullRequestReviewEvent:
 			log.Printf("PullRequestReviewEvent received: action=%s", e.GetAction())
-			if e.Action != nil && *e.Action == "submitted" {
+			if e.Action != nil && (*e.Action == "submitted" || *e.Action == "dismissed") {
 				handleReviewSubmittedEvent(c, db, e)
 			}
 		default:
@@ -460,7 +460,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 	// レビューが「承認」「変更要求」「コメント」のいずれかの場合のみ処理
 	reviewState := review.GetState()
-	if reviewState != "approved" && reviewState != "changes_requested" && reviewState != "commented" {
+	if reviewState != "approved" && reviewState != "changes_requested" && reviewState != "commented" && reviewState != "dismissed" {
 		log.Printf("review state %s is not handled", reviewState)
 		return
 	}
@@ -497,8 +497,10 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 	// 各チャンネルの最新タスクについて通知を送信
 	for channel, latestTask := range channelLatestTasks {
-		// レビュー完了通知をスレッドに投稿（最新タスクのみ）
-		if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
+		// レビュー完了通知をスレッドに投稿（最新タスクのみ、dismissedは別処理）
+		if reviewState == "dismissed" {
+			// dismissedの処理は後段で行うのでスキップ
+		} else if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
 			log.Printf("failed to send review completed notification: %v", err)
 			if !services.IsChannelRelatedError(err) {
 				continue
@@ -509,10 +511,44 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 		if reviewState == "approved" {
 			approvalID := reviewerSlackID
 			if approvalID == "" {
-				// Slack IDが取得できない場合はGitHubユーザー名をフォールバックとして使用
 				approvalID = review.GetUser().GetLogin()
 			}
 			services.AddApproval(&latestTask, approvalID)
+		}
+
+		// dismissedの場合はapproveを取り消し、再レビュー依頼通知を送信
+		if reviewState == "dismissed" {
+			approvalID := reviewerSlackID
+			if approvalID == "" {
+				approvalID = review.GetUser().GetLogin()
+			}
+			if services.RemoveApproval(&latestTask, approvalID) {
+				if err := db.Model(&models.ReviewTask{}).Where("id = ?", latestTask.ID).Updates(map[string]interface{}{
+					"approved_by": latestTask.ApprovedBy,
+					"status":      "in_review",
+					"updated_at":  time.Now(),
+				}).Error; err != nil {
+					log.Printf("failed to update approved_by on dismiss: %v", err)
+				}
+				approvedCount := services.CountApprovals(latestTask)
+				requiredApprovals := 1
+				if latestTask.LabelName != "" {
+					var config models.ChannelConfig
+					if err := db.Where("slack_channel_id = ? AND label_name = ?", latestTask.SlackChannel, latestTask.LabelName).First(&config).Error; err == nil {
+						if config.RequiredApprovals > 0 {
+							requiredApprovals = config.RequiredApprovals
+						}
+					}
+				}
+				dismissMsg := fmt.Sprintf("⚠️ %s のapproveが取り消されました（%d/%d approved）。再レビューをお願いします。",
+					review.GetUser().GetLogin(), approvedCount, requiredApprovals)
+				if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, dismissMsg); err != nil {
+					log.Printf("failed to post dismiss notification: %v", err)
+				}
+				log.Printf("approval dismissed: id=%s, repo=%s, pr=%d, reviewer=%s",
+					latestTask.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
+			}
+			continue
 		}
 
 		// RequiredApprovalsを取得
@@ -530,6 +566,13 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 		fullyApproved := services.IsReviewFullyApproved(latestTask, requiredApprovals)
 
 		if fullyApproved {
+			// レビュー完了メッセージをスレッドに投稿
+			approvedCount := services.CountApprovals(latestTask)
+			completeMsg := fmt.Sprintf("🎉 %d/%d approved - レビュー完了！", approvedCount, requiredApprovals)
+			if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, completeMsg); err != nil {
+				log.Printf("failed to post review complete message: %v", err)
+			}
+
 			// 全員approve済み → 全タスクをcompletedに
 			var channelTasks []models.ReviewTask
 			db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
