@@ -1,7 +1,4 @@
 # slack-review-notify
-<p align="center">
-<img src="images/slack-review-notify-logo.png" width="40%">
-</p>
 
 **GitHub PRのレビュー依頼をラベルによってSlackに自動通知し、レビュワーのアサインおよびレビューのリマインドを行うツールです**。
 
