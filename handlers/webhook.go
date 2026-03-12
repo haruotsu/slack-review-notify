@@ -623,11 +623,30 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 		default:
 			// changes_requested, commented など
-			if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
+			if err := services.SendReviewCompletedAutoNotificationWithButton(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
 				log.Printf("failed to send review completed notification: %v", err)
 				if !services.IsChannelRelatedError(err) {
 					continue
 				}
+			}
+
+			// ReviewedByに追加してリマインダーを停止
+			oldReviewedBy := latestTask.ReviewedBy
+			if services.AddReviewed(&latestTask, approvalID) {
+				result := db.Model(&models.ReviewTask{}).
+					Where("id = ? AND (reviewed_by = ? OR reviewed_by IS NULL OR reviewed_by = '')", latestTask.ID, oldReviewedBy).
+					Updates(map[string]interface{}{
+						"reviewed_by": latestTask.ReviewedBy,
+						"updated_at":  time.Now(),
+					})
+				if result.Error != nil {
+					log.Printf("failed to update reviewed_by: %v", result.Error)
+				} else if result.RowsAffected == 0 {
+					log.Printf("CAS conflict on reviewed_by update, skipping: id=%s", latestTask.ID)
+					continue
+				}
+				log.Printf("reviewer marked as reviewed: id=%s, reviewer=%s, state=%s",
+					latestTask.ID, approvalID, reviewState)
 			}
 		}
 	}

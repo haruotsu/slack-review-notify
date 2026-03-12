@@ -17,6 +17,7 @@ type ReviewTask struct {
 	Reviewer            string
 	Reviewers           string // カンマ区切り: 全アサインレビュワーのSlack ID
 	ApprovedBy          string // カンマ区切り: approveしたレビュワーのSlack ID
+	ReviewedBy          string // カンマ区切り: コメント/changes_requestedしたレビュワーのSlack ID（リマインダー除外用）
 	PRAuthorSlackID     string // PR作成者のSlack ID（レビュワー除外用）
 	Status              string // "pending", "in_review", "paused", "archived", "done", "waiting_business_hours"
 	LabelName           string

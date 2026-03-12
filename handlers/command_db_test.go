@@ -296,6 +296,13 @@ func TestSetAway_Integration(t *testing.T) {
 			expectedBody:   "育児休業",
 		},
 		{
+			name:           "過去の日付は拒否",
+			text:           "set-away <@U99999> until 2020-01-01",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectedBody:   "過去の日付は指定できません",
+		},
+		{
 			name:           "ユーザー未指定",
 			text:           "set-away",
 			channelID:      "C12345",

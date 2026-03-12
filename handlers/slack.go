@@ -167,6 +167,53 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 
 		// 各アクションに対する処理
 		switch actionID {
+		case "request_re_review":
+			// 再レビュー依頼ボタンが押された場合
+			taskID := payload.Actions[0].Value
+			var taskToUpdate models.ReviewTask
+			if err := db.Where("id = ?", taskID).First(&taskToUpdate).Error; err != nil {
+				log.Printf("task id %s not found for re-review request: %v", taskID, err)
+				c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+				return
+			}
+
+			// ReviewedByをクリアしてリマインダーを再開
+			if taskToUpdate.ReviewedBy != "" {
+				// 再レビュー対象者を通知用に保存
+				reviewedReviewers := taskToUpdate.ReviewedBy
+				taskToUpdate.ReviewedBy = ""
+				taskToUpdate.UpdatedAt = time.Now()
+				if err := db.Save(&taskToUpdate).Error; err != nil {
+					log.Printf("failed to clear reviewed_by: %v", err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update task"})
+					return
+				}
+
+				// 再レビュー依頼メッセージをスレッドに投稿
+				var mentionParts []string
+				for _, id := range strings.Split(reviewedReviewers, ",") {
+					if trimmed := strings.TrimSpace(id); trimmed != "" {
+						mentionParts = append(mentionParts, fmt.Sprintf("<@%s>", trimmed))
+					}
+				}
+				message := fmt.Sprintf("🔄 <@%s> さんが再レビューを依頼しました。%s 対応をお願いします！",
+					slackUserID, strings.Join(mentionParts, " "))
+				if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
+					log.Printf("re-review notification error: %v", err)
+				}
+
+				log.Printf("re-review requested: task=%s, by=%s, targets=%s", taskID, slackUserID, reviewedReviewers)
+			} else {
+				// 既にReviewedByが空の場合
+				message := "現在リマインダー停止中のレビュワーはいません。"
+				if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
+					log.Printf("re-review notification error: %v", err)
+				}
+			}
+
+			c.Status(http.StatusOK)
+			return
+
 		case "review_done":
 			// tsとchannelを使ってタスクを検索（pending状態の場合は少し待ってからリトライ）
 			var task models.ReviewTask

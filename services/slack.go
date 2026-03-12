@@ -175,31 +175,50 @@ func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, coun
 	return candidates[:count]
 }
 
-// GetPendingReviewers は未approveのレビュワーリストを返す
+// GetPendingReviewers は未approveかつ未レビュー（コメント/changes_requested）のレビュワーリストを返す
 func GetPendingReviewers(task models.ReviewTask) []string {
 	if task.Reviewers == "" {
 		if task.Reviewer != "" {
+			// 単一レビュワーの場合もReviewedBy/ApprovedByをチェック
+			if isInCSV(task.ApprovedBy, task.Reviewer) || isInCSV(task.ReviewedBy, task.Reviewer) {
+				return nil
+			}
 			return []string{task.Reviewer}
 		}
 		return nil
 	}
 
-	approvedSet := make(map[string]bool)
-	if task.ApprovedBy != "" {
-		for _, id := range strings.Split(task.ApprovedBy, ",") {
-			if trimmed := strings.TrimSpace(id); trimmed != "" {
-				approvedSet[trimmed] = true
+	excludeSet := make(map[string]bool)
+	for _, csv := range []string{task.ApprovedBy, task.ReviewedBy} {
+		if csv != "" {
+			for _, id := range strings.Split(csv, ",") {
+				if trimmed := strings.TrimSpace(id); trimmed != "" {
+					excludeSet[trimmed] = true
+				}
 			}
 		}
 	}
 
 	var pending []string
 	for _, id := range strings.Split(task.Reviewers, ",") {
-		if trimmed := strings.TrimSpace(id); trimmed != "" && !approvedSet[trimmed] {
+		if trimmed := strings.TrimSpace(id); trimmed != "" && !excludeSet[trimmed] {
 			pending = append(pending, trimmed)
 		}
 	}
 	return pending
+}
+
+// isInCSV はカンマ区切り文字列に指定値が含まれるかチェックする
+func isInCSV(csv, value string) bool {
+	if csv == "" || value == "" {
+		return false
+	}
+	for _, id := range strings.Split(csv, ",") {
+		if strings.TrimSpace(id) == value {
+			return true
+		}
+	}
+	return false
 }
 
 // AddApproval は task.ApprovedBy にレビュワーを追加する（重複防止）。新規追加なら true を返す
@@ -241,6 +260,48 @@ func RemoveApproval(task *models.ReviewTask, slackUserID string) bool {
 		return false
 	}
 	task.ApprovedBy = strings.Join(remaining, ",")
+	return true
+}
+
+// AddReviewed は task.ReviewedBy にレビュワーを追加する（重複防止）。新規追加なら true を返す
+func AddReviewed(task *models.ReviewTask, slackUserID string) bool {
+	if slackUserID == "" {
+		return false
+	}
+
+	if task.ReviewedBy != "" {
+		for _, id := range strings.Split(task.ReviewedBy, ",") {
+			if strings.TrimSpace(id) == slackUserID {
+				return false
+			}
+		}
+		task.ReviewedBy = task.ReviewedBy + "," + slackUserID
+	} else {
+		task.ReviewedBy = slackUserID
+	}
+	return true
+}
+
+// RemoveReviewed はReviewedByから指定ユーザーを削除する。削除した場合trueを返す。
+func RemoveReviewed(task *models.ReviewTask, slackUserID string) bool {
+	if slackUserID == "" || task.ReviewedBy == "" {
+		return false
+	}
+
+	var remaining []string
+	found := false
+	for _, id := range strings.Split(task.ReviewedBy, ",") {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == slackUserID {
+			found = true
+		} else if trimmed != "" {
+			remaining = append(remaining, trimmed)
+		}
+	}
+	if !found {
+		return false
+	}
+	task.ReviewedBy = strings.Join(remaining, ",")
 	return true
 }
 
@@ -997,6 +1058,72 @@ func SendReviewCompletedAutoNotification(task models.ReviewTask, reviewerLogin s
 	}
 
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
+}
+
+// SendReviewCompletedAutoNotificationWithButton はレビュー完了通知に「再レビュー依頼」ボタンを付けて送信する
+func SendReviewCompletedAutoNotificationWithButton(task models.ReviewTask, reviewerLogin string, reviewState string) error {
+	var message string
+	var emoji string
+
+	switch reviewState {
+	case "changes_requested":
+		emoji = "🔄"
+		message = fmt.Sprintf("%s %sさんが変更を要求しました 感謝！👏", emoji, reviewerLogin)
+	case "commented":
+		emoji = "💬"
+		message = fmt.Sprintf("%s %sさんがレビューコメントを残しました 感謝！👏", emoji, reviewerLogin)
+	default:
+		emoji = "👀"
+		message = fmt.Sprintf("%s %sさんがレビューしました 感謝！👏", emoji, reviewerLogin)
+	}
+
+	reReviewButton := CreateButton("🔄 再レビュー依頼", "request_re_review", task.ID, "primary")
+	blocks := CreateMessageWithActionBlocks(message, reReviewButton)
+
+	return PostToThreadWithBlocks(task.SlackChannel, task.SlackTS, message, blocks)
+}
+
+// PostToThreadWithBlocks はブロック付きメッセージをスレッドに投稿する
+func PostToThreadWithBlocks(channel, ts, fallbackText string, blocks []map[string]interface{}) error {
+	body := map[string]interface{}{
+		"channel":   channel,
+		"thread_ts": ts,
+		"text":      fallbackText,
+		"blocks":    blocks,
+	}
+
+	jsonData, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return fmt.Errorf("failed to parse slack response: %v", err)
+	}
+
+	if !result.OK {
+		return fmt.Errorf("slack API error: %s", result.Error)
+	}
+
+	return nil
 }
 
 // PostLabelRemovedNotification はラベル削除によるタスク完了をスレッドに通知する
