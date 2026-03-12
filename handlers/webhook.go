@@ -468,7 +468,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	// 該当するタスクを検索（completed状態も含める）
 	var tasks []models.ReviewTask
 	result := db.Where("repo = ? AND pr_number = ? AND status IN ?",
-		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "waiting_business_hours", "completed"}).
+		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "snoozed", "waiting_business_hours", "completed"}).
 		Order("created_at DESC").
 		Find(&tasks)
 
@@ -623,27 +623,28 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 		default:
 			// changes_requested, commented など
-			if err := services.SendReviewCompletedAutoNotificationWithButton(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
+			if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
 				log.Printf("failed to send review completed notification: %v", err)
 				if !services.IsChannelRelatedError(err) {
 					continue
 				}
 			}
 
-			// タスクを修正待ち状態にしてリマインダーを全停止
-			if latestTask.Status == "in_review" {
-				result := db.Model(&models.ReviewTask{}).
-					Where("id = ? AND status = ?", latestTask.ID, "in_review").
-					Updates(map[string]interface{}{
-						"status":     "changes_requested",
-						"updated_at": time.Now(),
-					})
-				if result.Error != nil {
-					log.Printf("failed to update status to changes_requested: %v", result.Error)
-				} else if result.RowsAffected > 0 {
-					log.Printf("task paused for fixes: id=%s, reviewer=%s, state=%s",
-						latestTask.ID, approvalID, reviewState)
+			// 同一チャンネル・同一PRの全タスクをcompletedに更新（リマインド防止）
+			var channelTasks []models.ReviewTask
+			db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
+				repoFullName, pr.GetNumber(), channel,
+				[]string{"in_review", "pending", "snoozed", "waiting_business_hours"}).Find(&channelTasks)
+
+			for _, task := range channelTasks {
+				task.Status = "completed"
+				task.UpdatedAt = time.Now()
+				if err := db.Save(&task).Error; err != nil {
+					log.Printf("failed to update task status to completed: %v", err)
+					continue
 				}
+				log.Printf("task completed due to review (%s): id=%s, repo=%s, pr=%d, reviewer=%s",
+					reviewState, task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
 			}
 		}
 	}
