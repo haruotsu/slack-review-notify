@@ -1197,6 +1197,205 @@ func TestHandleReviewSubmittedEvent_OldTasksAlsoCompleted(t *testing.T) {
 	assert.True(t, gock.IsDone(), "最新のタスクにのみSlack通知が送られるべき")
 }
 
+// --- レビューコメント/変更要求時にタスクをcompletedにしてリマインドを停止するテスト ---
+
+func TestHandleReviewSubmittedEvent_CommentedCompletesTask(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	// Slack API通知モック
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		MatchHeader("Authorization", "Bearer test-token").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	task := models.ReviewTask{
+		ID:           "commented-task",
+		PRURL:        "https://github.com/owner/repo/pull/300",
+		Repo:         "owner/repo",
+		PRNumber:     300,
+		Title:        "Commented PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C_COMMENT",
+		Reviewer:     "UREVIEWER1",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-1 * time.Hour),
+		UpdatedAt:    time.Now().Add(-1 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 300, "html_url": "https://github.com/owner/repo/pull/300"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "commented", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "commented-task").First(&updatedTask)
+	assert.Equal(t, "completed", updatedTask.Status, "commentedレビュー後はcompletedになりリマインドが止まるべき")
+}
+
+func TestHandleReviewSubmittedEvent_ChangesRequestedCompletesTask(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	// Slack API通知モック
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		MatchHeader("Authorization", "Bearer test-token").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	task := models.ReviewTask{
+		ID:           "changes-requested-task",
+		PRURL:        "https://github.com/owner/repo/pull/301",
+		Repo:         "owner/repo",
+		PRNumber:     301,
+		Title:        "Changes Requested PR",
+		SlackTS:      "1234.5679",
+		SlackChannel: "C_CHANGES",
+		Reviewer:     "UREVIEWER1",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-1 * time.Hour),
+		UpdatedAt:    time.Now().Add(-1 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 301, "html_url": "https://github.com/owner/repo/pull/301"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "changes_requested", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "changes-requested-task").First(&updatedTask)
+	assert.Equal(t, "completed", updatedTask.Status, "changes_requestedレビュー後はcompletedになりリマインドが止まるべき")
+}
+
+func TestHandleReviewSubmittedEvent_CommentedCompletesOldTasksToo(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// 同一PR・同一チャンネルに古いタスク（in_review）
+	oldTask := models.ReviewTask{
+		ID:           "old-comment-task",
+		PRURL:        "https://github.com/owner/repo/pull/302",
+		Repo:         "owner/repo",
+		PRNumber:     302,
+		Title:        "Comment PR",
+		SlackTS:      "1234.1111",
+		SlackChannel: "C_COMMENT2",
+		Status:       "in_review",
+		Reviewer:     "UOLD",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		UpdatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&oldTask)
+
+	newTask := models.ReviewTask{
+		ID:           "new-comment-task",
+		PRURL:        "https://github.com/owner/repo/pull/302",
+		Repo:         "owner/repo",
+		PRNumber:     302,
+		Title:        "Comment PR",
+		SlackTS:      "1234.2222",
+		SlackChannel: "C_COMMENT2",
+		Status:       "in_review",
+		Reviewer:     "UNEW",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-1 * time.Hour),
+		UpdatedAt:    time.Now().Add(-1 * time.Hour),
+	}
+	db.Create(&newTask)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 302, "html_url": "https://github.com/owner/repo/pull/302"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "commented", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// 古いタスクもcompletedになっていること（リマインド防止）
+	var updatedOld models.ReviewTask
+	db.Where("id = ?", "old-comment-task").First(&updatedOld)
+	assert.Equal(t, "completed", updatedOld.Status)
+
+	var updatedNew models.ReviewTask
+	db.Where("id = ?", "new-comment-task").First(&updatedNew)
+	assert.Equal(t, "completed", updatedNew.Status)
+}
+
 // --- 複数レビュワー対応のWebhookテスト ---
 
 func TestHandleReviewSubmittedEvent_PartialApproval(t *testing.T) {
