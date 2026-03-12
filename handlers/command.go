@@ -249,7 +249,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				setRequiredApprovals(c, db, channelID, labelName, strings.TrimSpace(params))
 
 			case "set-away":
-				setAway(c, db, params)
+				setAway(c, db, channelID, labelName, params)
 
 			case "unset-away":
 				unsetAway(c, db, params)
@@ -1118,7 +1118,7 @@ func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername string) {
 }
 
 // ユーザーを休暇に設定
-func setAway(c *gin.Context, db *gorm.DB, params string) {
+func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params string) {
 	if params == "" {
 		c.String(200, "休暇に設定するユーザーを指定してください。例: /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由]")
 		return
@@ -1151,7 +1151,19 @@ func setAway(c *gin.Context, db *gorm.DB, params string) {
 					return
 				}
 				// 指定日の終わり（23:59:59）に設定
-				endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, time.Local)
+				// チャンネル設定からタイムゾーンを取得
+				timezone := "Asia/Tokyo"
+				var tzConfig models.ChannelConfig
+				if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&tzConfig).Error; err == nil {
+					if tzConfig.Timezone != "" {
+						timezone = tzConfig.Timezone
+					}
+				}
+				loc, err := time.LoadLocation(timezone)
+				if err != nil {
+					loc = time.UTC
+				}
+				endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
 				awayUntil = &endOfDay
 			}
 		case "reason":

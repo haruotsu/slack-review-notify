@@ -8,7 +8,7 @@ import (
 
 type ReviewerAvailability struct {
 	ID          string         `gorm:"primaryKey"`
-	SlackUserID string         `gorm:"index"`
+	SlackUserID string         `gorm:"uniqueIndex"`
 	AwayUntil   *time.Time     // nil の場合は無期限休暇
 	Reason      string         // 休暇理由（任意）
 	CreatedAt   time.Time

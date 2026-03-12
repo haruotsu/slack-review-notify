@@ -497,60 +497,6 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 	// 各チャンネルの最新タスクについて通知を送信
 	for channel, latestTask := range channelLatestTasks {
-		// レビュー完了通知をスレッドに投稿（最新タスクのみ、dismissedは別処理）
-		if reviewState == "dismissed" {
-			// dismissedの処理は後段で行うのでスキップ
-		} else if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
-			log.Printf("failed to send review completed notification: %v", err)
-			if !services.IsChannelRelatedError(err) {
-				continue
-			}
-		}
-
-		// approvedの場合のみapprove追跡を実行
-		if reviewState == "approved" {
-			approvalID := reviewerSlackID
-			if approvalID == "" {
-				approvalID = review.GetUser().GetLogin()
-			}
-			services.AddApproval(&latestTask, approvalID)
-		}
-
-		// dismissedの場合はapproveを取り消し、再レビュー依頼通知を送信
-		if reviewState == "dismissed" {
-			approvalID := reviewerSlackID
-			if approvalID == "" {
-				approvalID = review.GetUser().GetLogin()
-			}
-			if services.RemoveApproval(&latestTask, approvalID) {
-				if err := db.Model(&models.ReviewTask{}).Where("id = ?", latestTask.ID).Updates(map[string]interface{}{
-					"approved_by": latestTask.ApprovedBy,
-					"status":      "in_review",
-					"updated_at":  time.Now(),
-				}).Error; err != nil {
-					log.Printf("failed to update approved_by on dismiss: %v", err)
-				}
-				approvedCount := services.CountApprovals(latestTask)
-				requiredApprovals := 1
-				if latestTask.LabelName != "" {
-					var config models.ChannelConfig
-					if err := db.Where("slack_channel_id = ? AND label_name = ?", latestTask.SlackChannel, latestTask.LabelName).First(&config).Error; err == nil {
-						if config.RequiredApprovals > 0 {
-							requiredApprovals = config.RequiredApprovals
-						}
-					}
-				}
-				dismissMsg := fmt.Sprintf("⚠️ %s のapproveが取り消されました（%d/%d approved）。再レビューをお願いします。",
-					review.GetUser().GetLogin(), approvedCount, requiredApprovals)
-				if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, dismissMsg); err != nil {
-					log.Printf("failed to post dismiss notification: %v", err)
-				}
-				log.Printf("approval dismissed: id=%s, repo=%s, pr=%d, reviewer=%s",
-					latestTask.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
-			}
-			continue
-		}
-
 		// RequiredApprovalsを取得
 		requiredApprovals := 1
 		if latestTask.LabelName != "" {
@@ -562,64 +508,126 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			}
 		}
 
-		// 全員approve済みか判定
-		fullyApproved := services.IsReviewFullyApproved(latestTask, requiredApprovals)
+		approvalID := reviewerSlackID
+		if approvalID == "" {
+			approvalID = review.GetUser().GetLogin()
+		}
 
-		if fullyApproved {
-			// レビュー完了メッセージをスレッドに投稿
-			approvedCount := services.CountApprovals(latestTask)
-			completeMsg := fmt.Sprintf("🎉 %d/%d approved - レビュー完了！", approvedCount, requiredApprovals)
-			if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, completeMsg); err != nil {
-				log.Printf("failed to post review complete message: %v", err)
+		switch reviewState {
+		case "dismissed":
+			// approveを取り消し、再レビュー依頼通知を送信
+			if services.RemoveApproval(&latestTask, approvalID) {
+				// CAS: approved_byが変更されていない場合のみ更新（同時approve対策）
+				result := db.Model(&models.ReviewTask{}).
+					Where("id = ? AND approved_by = ?", latestTask.ID, latestTask.ApprovedBy).
+					Updates(map[string]interface{}{
+						"approved_by": latestTask.ApprovedBy,
+						"status":      "in_review",
+						"updated_at":  time.Now(),
+					})
+				if result.Error != nil {
+					log.Printf("failed to update approved_by on dismiss: %v", result.Error)
+				} else if result.RowsAffected == 0 {
+					log.Printf("CAS conflict on dismiss update, retrying: id=%s", latestTask.ID)
+					continue
+				}
+				approvedCount := services.CountApprovals(latestTask)
+				dismissMsg := fmt.Sprintf("⚠️ %s のapproveが取り消されました（%d/%d approved）。再レビューをお願いします。",
+					review.GetUser().GetLogin(), approvedCount, requiredApprovals)
+				if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, dismissMsg); err != nil {
+					log.Printf("failed to post dismiss notification: %v", err)
+				}
+				log.Printf("approval dismissed: id=%s, repo=%s, pr=%d, reviewer=%s",
+					latestTask.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
 			}
 
-			// 全員approve済み → 全タスクをcompletedに
-			var channelTasks []models.ReviewTask
-			db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
-				repoFullName, pr.GetNumber(), channel,
-				[]string{"in_review", "pending", "waiting_business_hours", "completed"}).Find(&channelTasks)
-
-			for _, task := range channelTasks {
-				if task.Status != "completed" {
-					task.Status = "completed"
-					task.ApprovedBy = latestTask.ApprovedBy
-					task.UpdatedAt = time.Now()
-					if err := db.Save(&task).Error; err != nil {
-						log.Printf("failed to update task status to completed: %v", err)
-						continue
-					}
-					if task.ID == latestTask.ID {
-						log.Printf("task auto-completed due to review: id=%s, repo=%s, pr=%d, reviewer=%s",
-							task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
-					} else {
-						log.Printf("old task also completed to prevent reminder: id=%s, repo=%s, pr=%d",
-							task.ID, repoFullName, pr.GetNumber())
-					}
-				} else {
-					if task.ID == latestTask.ID {
-						log.Printf("additional review notification sent for completed task: id=%s, repo=%s, pr=%d, reviewer=%s",
-							task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
-					}
+		case "approved":
+			// レビュー完了通知をスレッドに投稿
+			if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
+				log.Printf("failed to send review completed notification: %v", err)
+				if !services.IsChannelRelatedError(err) {
+					continue
 				}
 			}
-		} else if reviewState == "approved" {
-			// 部分approve: タスクをin_reviewのまま維持、approved_byのみ更新
-			if err := db.Model(&models.ReviewTask{}).Where("id = ?", latestTask.ID).Updates(map[string]interface{}{
-				"approved_by": latestTask.ApprovedBy,
-				"updated_at":  time.Now(),
-			}).Error; err != nil {
-				log.Printf("failed to update approved_by: %v", err)
+
+			// approve追跡: CAS的なwhere句で同時approve時の競合を防止
+			oldApprovedBy := latestTask.ApprovedBy
+			services.AddApproval(&latestTask, approvalID)
+
+			// 全員approve済みか判定
+			fullyApproved := services.IsReviewFullyApproved(latestTask, requiredApprovals)
+
+			if fullyApproved {
+				// レビュー完了メッセージをスレッドに投稿
+				approvedCount := services.CountApprovals(latestTask)
+				completeMsg := fmt.Sprintf("🎉 %d/%d approved - レビュー完了！", approvedCount, requiredApprovals)
+				if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, completeMsg); err != nil {
+					log.Printf("failed to post review complete message: %v", err)
+				}
+
+				// 全員approve済み → 全タスクをcompletedに
+				var channelTasks []models.ReviewTask
+				db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
+					repoFullName, pr.GetNumber(), channel,
+					[]string{"in_review", "pending", "waiting_business_hours", "completed"}).Find(&channelTasks)
+
+				for _, task := range channelTasks {
+					if task.Status != "completed" {
+						task.Status = "completed"
+						task.ApprovedBy = latestTask.ApprovedBy
+						task.UpdatedAt = time.Now()
+						if err := db.Save(&task).Error; err != nil {
+							log.Printf("failed to update task status to completed: %v", err)
+							continue
+						}
+						if task.ID == latestTask.ID {
+							log.Printf("task auto-completed due to review: id=%s, repo=%s, pr=%d, reviewer=%s",
+								task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
+						} else {
+							log.Printf("old task also completed to prevent reminder: id=%s, repo=%s, pr=%d",
+								task.ID, repoFullName, pr.GetNumber())
+						}
+					} else {
+						if task.ID == latestTask.ID {
+							log.Printf("additional review notification sent for completed task: id=%s, repo=%s, pr=%d, reviewer=%s",
+								task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
+						}
+					}
+				}
+			} else {
+				// 部分approve: CAS的なwhere句でapproved_byを更新（同時approve対策）
+				result := db.Model(&models.ReviewTask{}).
+					Where("id = ? AND (approved_by = ? OR approved_by IS NULL OR approved_by = '')", latestTask.ID, oldApprovedBy).
+					Updates(map[string]interface{}{
+						"approved_by": latestTask.ApprovedBy,
+						"updated_at":  time.Now(),
+					})
+				if result.Error != nil {
+					log.Printf("failed to update approved_by: %v", result.Error)
+				} else if result.RowsAffected == 0 {
+					log.Printf("CAS conflict on approval update, retrying: id=%s", latestTask.ID)
+					continue
+				}
+
+				// 進捗メッセージをスレッドに投稿
+				approvedCount := services.CountApprovals(latestTask)
+				progressMsg := fmt.Sprintf("✅ %d/%d approved", approvedCount, requiredApprovals)
+				if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, progressMsg); err != nil {
+					log.Printf("failed to post approval progress: %v", err)
+				}
+
+				log.Printf("partial approval for task: id=%s, approved=%d/%d",
+					latestTask.ID, approvedCount, requiredApprovals)
 			}
 
-			// 進捗メッセージをスレッドに投稿
-			approvedCount := services.CountApprovals(latestTask)
-			progressMsg := fmt.Sprintf("✅ %d/%d approved", approvedCount, requiredApprovals)
-			if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, progressMsg); err != nil {
-				log.Printf("failed to post approval progress: %v", err)
+		default:
+			// changes_requested, commented など
+			if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
+				log.Printf("failed to send review completed notification: %v", err)
+				if !services.IsChannelRelatedError(err) {
+					continue
+				}
 			}
-
-			log.Printf("partial approval for task: id=%s, approved=%d/%d",
-				latestTask.ID, approvedCount, requiredApprovals)
 		}
 	}
 }
