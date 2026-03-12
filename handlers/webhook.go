@@ -516,10 +516,11 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 		switch reviewState {
 		case "dismissed":
 			// approveを取り消し、再レビュー依頼通知を送信
+			oldApprovedBy := latestTask.ApprovedBy
 			if services.RemoveApproval(&latestTask, approvalID) {
 				// CAS: approved_byが変更されていない場合のみ更新（同時approve対策）
 				result := db.Model(&models.ReviewTask{}).
-					Where("id = ? AND approved_by = ?", latestTask.ID, latestTask.ApprovedBy).
+					Where("id = ? AND approved_by = ?", latestTask.ID, oldApprovedBy).
 					Updates(map[string]interface{}{
 						"approved_by": latestTask.ApprovedBy,
 						"status":      "in_review",
@@ -528,7 +529,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 				if result.Error != nil {
 					log.Printf("failed to update approved_by on dismiss: %v", result.Error)
 				} else if result.RowsAffected == 0 {
-					log.Printf("CAS conflict on dismiss update, retrying: id=%s", latestTask.ID)
+					log.Printf("CAS conflict on dismiss update, skipping: id=%s", latestTask.ID)
 					continue
 				}
 				approvedCount := services.CountApprovals(latestTask)
@@ -605,7 +606,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 				if result.Error != nil {
 					log.Printf("failed to update approved_by: %v", result.Error)
 				} else if result.RowsAffected == 0 {
-					log.Printf("CAS conflict on approval update, retrying: id=%s", latestTask.ID)
+					log.Printf("CAS conflict on approval update, skipping: id=%s", latestTask.ID)
 					continue
 				}
 

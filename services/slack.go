@@ -165,6 +165,9 @@ func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, coun
 		candidates[i], candidates[j] = candidates[j], candidates[i]
 	})
 
+	if count <= 0 {
+		return []string{}
+	}
 	if count > len(candidates) {
 		count = len(candidates)
 	}

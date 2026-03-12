@@ -1181,7 +1181,11 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params string) {
 		existing.AwayUntil = awayUntil
 		existing.Reason = reason
 		existing.UpdatedAt = time.Now()
-		db.Save(&existing)
+		if err := db.Save(&existing).Error; err != nil {
+			log.Printf("failed to update reviewer availability: %v", err)
+			c.String(200, "休暇設定の更新に失敗しました。")
+			return
+		}
 	} else {
 		record := models.ReviewerAvailability{
 			ID:          uuid.NewString(),
@@ -1191,7 +1195,11 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params string) {
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
 		}
-		db.Create(&record)
+		if err := db.Create(&record).Error; err != nil {
+			log.Printf("failed to create reviewer availability: %v", err)
+			c.String(200, "休暇設定の作成に失敗しました。")
+			return
+		}
 	}
 
 	// 応答メッセージ作成
