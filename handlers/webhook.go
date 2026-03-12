@@ -468,7 +468,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	// 該当するタスクを検索（completed状態も含める）
 	var tasks []models.ReviewTask
 	result := db.Where("repo = ? AND pr_number = ? AND status IN ?",
-		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "waiting_business_hours", "completed"}).
+		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "snoozed", "waiting_business_hours", "completed"}).
 		Order("created_at DESC").
 		Find(&tasks)
 
@@ -628,6 +628,23 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 				if !services.IsChannelRelatedError(err) {
 					continue
 				}
+			}
+
+			// 同一チャンネル・同一PRの全タスクをcompletedに更新（リマインド防止）
+			var channelTasks []models.ReviewTask
+			db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
+				repoFullName, pr.GetNumber(), channel,
+				[]string{"in_review", "pending", "snoozed", "waiting_business_hours"}).Find(&channelTasks)
+
+			for _, task := range channelTasks {
+				task.Status = "completed"
+				task.UpdatedAt = time.Now()
+				if err := db.Save(&task).Error; err != nil {
+					log.Printf("failed to update task status to completed: %v", err)
+					continue
+				}
+				log.Printf("task completed due to review (%s): id=%s, repo=%s, pr=%d, reviewer=%s",
+					reviewState, task.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())
 			}
 		}
 	}
