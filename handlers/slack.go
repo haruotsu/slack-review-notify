@@ -167,53 +167,6 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 
 		// 各アクションに対する処理
 		switch actionID {
-		case "request_re_review":
-			// 再レビュー依頼ボタンが押された場合
-			taskID := payload.Actions[0].Value
-			var taskToUpdate models.ReviewTask
-			if err := db.Where("id = ?", taskID).First(&taskToUpdate).Error; err != nil {
-				log.Printf("task id %s not found for re-review request: %v", taskID, err)
-				c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
-				return
-			}
-
-			// ステータスをin_reviewに戻してリマインダーを再開
-			if taskToUpdate.Status == "completed" || taskToUpdate.Status == "changes_requested" {
-				taskToUpdate.Status = "in_review"
-				taskToUpdate.UpdatedAt = time.Now()
-				if err := db.Save(&taskToUpdate).Error; err != nil {
-					log.Printf("failed to update status to in_review: %v", err)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update task"})
-					return
-				}
-
-				// 未approveのレビュワー全員にメンション
-				pendingReviewers := services.GetPendingReviewers(taskToUpdate)
-				var mentionParts []string
-				for _, id := range pendingReviewers {
-					mentionParts = append(mentionParts, fmt.Sprintf("<@%s>", id))
-				}
-				var mentionText string
-				if len(mentionParts) > 0 {
-					mentionText = strings.Join(mentionParts, " ") + " "
-				}
-				message := fmt.Sprintf("🔄 <@%s> さんが修正して再レビューを依頼しました。%s対応をお願いします！",
-					slackUserID, mentionText)
-				if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
-					log.Printf("re-review notification error: %v", err)
-				}
-
-				log.Printf("re-review requested: task=%s, by=%s", taskID, slackUserID)
-			} else {
-				message := fmt.Sprintf("現在のタスクステータスは「%s」のため、再レビュー依頼できません。", taskToUpdate.Status)
-				if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
-					log.Printf("re-review notification error: %v", err)
-				}
-			}
-
-			c.Status(http.StatusOK)
-			return
-
 		case "review_done":
 			// tsとchannelを使ってタスクを検索（pending状態の場合は少し待ってからリトライ）
 			var task models.ReviewTask

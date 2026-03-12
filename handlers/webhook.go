@@ -51,6 +51,8 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 					}
 				case "closed":
 					handleClosedEvent(c, db, e)
+				case "review_requested":
+					handleReviewRequestedEvent(c, db, e)
 				}
 			}
 		case *github.PullRequestReviewEvent:
@@ -442,6 +444,93 @@ func handleClosedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) 
 	}
 }
 
+// GitHubのre-request reviewボタンが押された際の処理
+func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) {
+	pr := e.PullRequest
+	repo := e.Repo
+	repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
+
+	requestedReviewer := e.GetRequestedReviewer()
+	if requestedReviewer == nil {
+		log.Printf("review_requested event has no requested reviewer (may be a team request), skipping: repo=%s, pr=%d",
+			repoFullName, pr.GetNumber())
+		return
+	}
+
+	senderLogin := e.GetSender().GetLogin()
+	reviewerLogin := requestedReviewer.GetLogin()
+
+	log.Printf("handling review_requested event: repo=%s, pr=%d, sender=%s, requested_reviewer=%s",
+		repoFullName, pr.GetNumber(), senderLogin, reviewerLogin)
+
+	// completedタスクを検索
+	var tasks []models.ReviewTask
+	if err := db.Where("repo = ? AND pr_number = ? AND status = ?",
+		repoFullName, pr.GetNumber(), "completed").
+		Order("created_at DESC").
+		Find(&tasks).Error; err != nil {
+		log.Printf("review_requested task search error: %v", err)
+		return
+	}
+
+	if len(tasks) == 0 {
+		log.Printf("no completed tasks found for review_requested event: repo=%s, pr=%d", repoFullName, pr.GetNumber())
+		return
+	}
+
+	// チャンネルごとに最新のタスクのみを抽出
+	channelLatestTasks := make(map[string]models.ReviewTask)
+	for _, task := range tasks {
+		if _, exists := channelLatestTasks[task.SlackChannel]; !exists {
+			channelLatestTasks[task.SlackChannel] = task
+		}
+	}
+
+	senderSlackID := services.GetSlackUserIDFromGitHub(db, senderLogin)
+	reviewerSlackID := services.GetSlackUserIDFromGitHub(db, reviewerLogin)
+
+	for _, latestTask := range channelLatestTasks {
+		// タスクをin_reviewに戻す
+		result := db.Model(&models.ReviewTask{}).
+			Where("id = ? AND status = ?", latestTask.ID, "completed").
+			Updates(map[string]interface{}{
+				"status":     "in_review",
+				"updated_at": time.Now(),
+			})
+		if result.Error != nil {
+			log.Printf("failed to update task to in_review: %v", result.Error)
+			continue
+		}
+		if result.RowsAffected == 0 {
+			log.Printf("task already updated (CAS miss): id=%s", latestTask.ID)
+			continue
+		}
+
+		log.Printf("task reactivated for re-review: id=%s, repo=%s, pr=%d", latestTask.ID, repoFullName, pr.GetNumber())
+
+		// スレッドに再レビュー依頼通知を投稿
+		var senderMention string
+		if senderSlackID != "" {
+			senderMention = fmt.Sprintf("<@%s>", senderSlackID)
+		} else {
+			senderMention = senderLogin
+		}
+
+		var reviewerMention string
+		if reviewerSlackID != "" {
+			reviewerMention = fmt.Sprintf("<@%s>", reviewerSlackID)
+		} else {
+			reviewerMention = reviewerLogin
+		}
+
+		message := fmt.Sprintf("🔄 %s さんが %s に再レビューを依頼しました。対応をお願いします！",
+			senderMention, reviewerMention)
+		if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, message); err != nil {
+			log.Printf("re-review notification error: %v", err)
+		}
+	}
+}
+
 // レビューが提出された際の処理
 func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestReviewEvent) {
 	pr := e.PullRequest
@@ -623,7 +712,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 		default:
 			// changes_requested, commented など
-			if err := services.SendReviewCompletedAutoNotificationWithButton(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
+			if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
 				log.Printf("failed to send review completed notification: %v", err)
 				if !services.IsChannelRelatedError(err) {
 					continue
