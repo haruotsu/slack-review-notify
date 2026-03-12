@@ -1512,6 +1512,90 @@ func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnChangesRequested(t *te
 	assert.Equal(t, "completed", updatedTask.Status, "snoozed状態のタスクもchanges_requestedレビュー後にcompletedになるべき")
 }
 
+// --- snoozed状態のタスクがfully approved時にcompletedになるテスト ---
+
+func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnFullApproval(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	// レビュー通知 + 完了メッセージ + approve通知
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// RequiredApprovals=1のチャンネル設定
+	config := models.ChannelConfig{
+		ID:                "config-snoozed-approve",
+		SlackChannelID:    "C_SNOOZED_APPROVE",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		RequiredApprovals: 1,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	userMapping := models.UserMapping{
+		ID:             "mapping-snoozed",
+		GithubUsername: "reviewer1",
+		SlackUserID:    "UREVIEWER1",
+	}
+	db.Create(&userMapping)
+
+	// snoozed状態のタスク
+	task := models.ReviewTask{
+		ID:           "snoozed-approve-task",
+		PRURL:        "https://github.com/owner/repo/pull/600",
+		Repo:         "owner/repo",
+		PRNumber:     600,
+		Title:        "Snoozed Approve PR",
+		SlackTS:      "1234.6000",
+		SlackChannel: "C_SNOOZED_APPROVE",
+		Reviewer:     "UREVIEWER1",
+		Reviewers:    "UREVIEWER1",
+		Status:       "snoozed",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		UpdatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 600, "html_url": "https://github.com/owner/repo/pull/600"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "approved", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "snoozed-approve-task").First(&updatedTask)
+	assert.Equal(t, "completed", updatedTask.Status, "snoozed状態でもfully approved時はcompletedになるべき")
+}
+
 // --- 複数レビュワー対応のWebhookテスト ---
 
 func TestHandleReviewSubmittedEvent_PartialApproval(t *testing.T) {
