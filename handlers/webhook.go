@@ -623,7 +623,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 		default:
 			// changes_requested, commented など
-			if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
+			if err := services.SendReviewCompletedAutoNotificationWithButton(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
 				log.Printf("failed to send review completed notification: %v", err)
 				if !services.IsChannelRelatedError(err) {
 					continue

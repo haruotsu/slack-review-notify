@@ -178,7 +178,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			// ステータスをin_reviewに戻してリマインダーを再開
-			if taskToUpdate.Status == "changes_requested" {
+			if taskToUpdate.Status == "completed" || taskToUpdate.Status == "changes_requested" {
 				taskToUpdate.Status = "in_review"
 				taskToUpdate.UpdatedAt = time.Now()
 				if err := db.Save(&taskToUpdate).Error; err != nil {
