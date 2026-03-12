@@ -468,7 +468,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	// 該当するタスクを検索（completed状態も含める）
 	var tasks []models.ReviewTask
 	result := db.Where("repo = ? AND pr_number = ? AND status IN ?",
-		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "waiting_business_hours", "completed"}).
+		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "snoozed", "waiting_business_hours", "completed"}).
 		Order("created_at DESC").
 		Find(&tasks)
 
@@ -634,7 +634,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			var channelTasks []models.ReviewTask
 			db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
 				repoFullName, pr.GetNumber(), channel,
-				[]string{"in_review", "pending", "waiting_business_hours"}).Find(&channelTasks)
+				[]string{"in_review", "pending", "snoozed", "waiting_business_hours"}).Find(&channelTasks)
 
 			for _, task := range channelTasks {
 				task.Status = "completed"

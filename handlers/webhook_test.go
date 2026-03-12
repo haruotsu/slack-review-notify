@@ -1396,6 +1396,122 @@ func TestHandleReviewSubmittedEvent_CommentedCompletesOldTasksToo(t *testing.T) 
 	assert.Equal(t, "completed", updatedNew.Status)
 }
 
+func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnComment(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// snoozed状態のタスク
+	task := models.ReviewTask{
+		ID:           "snoozed-comment-task",
+		PRURL:        "https://github.com/owner/repo/pull/400",
+		Repo:         "owner/repo",
+		PRNumber:     400,
+		Title:        "Snoozed PR",
+		SlackTS:      "1234.9999",
+		SlackChannel: "C_SNOOZED",
+		Reviewer:     "UREVIEWER1",
+		Status:       "snoozed",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		UpdatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 400, "html_url": "https://github.com/owner/repo/pull/400"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "commented", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "snoozed-comment-task").First(&updatedTask)
+	assert.Equal(t, "completed", updatedTask.Status, "snoozed状態のタスクもcommentedレビュー後にcompletedになるべき")
+}
+
+func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnChangesRequested(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// snoozed状態のタスク
+	task := models.ReviewTask{
+		ID:           "snoozed-changes-task",
+		PRURL:        "https://github.com/owner/repo/pull/401",
+		Repo:         "owner/repo",
+		PRNumber:     401,
+		Title:        "Snoozed Changes PR",
+		SlackTS:      "1234.8888",
+		SlackChannel: "C_SNOOZED2",
+		Reviewer:     "UREVIEWER1",
+		Status:       "snoozed",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		UpdatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 401, "html_url": "https://github.com/owner/repo/pull/401"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "changes_requested", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "snoozed-changes-task").First(&updatedTask)
+	assert.Equal(t, "completed", updatedTask.Status, "snoozed状態のタスクもchanges_requestedレビュー後にcompletedになるべき")
+}
+
 // --- 複数レビュワー対応のWebhookテスト ---
 
 func TestHandleReviewSubmittedEvent_PartialApproval(t *testing.T) {
