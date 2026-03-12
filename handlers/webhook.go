@@ -659,7 +659,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 				var channelTasks []models.ReviewTask
 				db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
 					repoFullName, pr.GetNumber(), channel,
-					[]string{"in_review", "pending", "waiting_business_hours", "completed"}).Find(&channelTasks)
+					[]string{"in_review", "pending", "snoozed", "waiting_business_hours", "completed"}).Find(&channelTasks)
 
 				for _, task := range channelTasks {
 					if task.Status != "completed" {
