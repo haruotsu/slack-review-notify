@@ -566,50 +566,6 @@ func TestGetNextBusinessDayMorning(t *testing.T) {
 	assert.True(t, result.After(time.Now().Add(-time.Second)), "結果は現在時刻以降であること")
 }
 
-func TestSelectRandomReviewer(t *testing.T) {
-	db := setupTestDB(t)
-
-	// テストデータ作成
-	testConfig := models.ChannelConfig{
-		ID:               "test-id",
-		SlackChannelID:   "C12345",
-		LabelName:        "needs-review",
-		DefaultMentionID: "U12345",
-		ReviewerList:     "U23456,U34567",
-		IsActive:         true,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-	}
-
-	db.Create(&testConfig)
-
-	// 関数を実行
-	reviewerID := SelectRandomReviewer(db, "C12345", "needs-review")
-
-	// アサーション
-	assert.Contains(t, []string{"U23456", "U34567"}, reviewerID)
-
-	// レビュワーリストが空の場合のテスト
-	emptyConfig := models.ChannelConfig{
-		ID:               "empty-id",
-		SlackChannelID:   "C67890",
-		LabelName:        "needs-review",
-		DefaultMentionID: "U12345",
-		ReviewerList:     "",
-		IsActive:         true,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-	}
-
-	db.Create(&emptyConfig)
-	defaultReviewer := SelectRandomReviewer(db, "C67890", "needs-review")
-	assert.Equal(t, "U12345", defaultReviewer)
-
-	// 存在しないチャンネル/ラベルのテスト
-	nonExistentReviewer := SelectRandomReviewer(db, "nonexistent", "needs-review")
-	assert.Equal(t, "", nonExistentReviewer)
-}
-
 func TestSendReviewCompletedAutoNotification(t *testing.T) {
 	// テスト前の環境変数を保存し、テスト後に復元
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
@@ -713,5 +669,288 @@ func TestFormatReviewerMentions(t *testing.T) {
 			result := formatReviewerMentions(tc.input)
 			assert.Equal(t, tc.expected, result)
 		})
+	}
+}
+
+// --- 複数レビュワー対応のテスト ---
+
+func TestSelectRandomReviewers_Basic(t *testing.T) {
+	db := setupTestDB(t)
+
+	testConfig := models.ChannelConfig{
+		ID:               "multi-rev-id",
+		SlackChannelID:   "C_MULTI",
+		LabelName:        "needs-review",
+		DefaultMentionID: "UDEFAULT",
+		ReviewerList:     "U1,U2,U3,U4,U5",
+		IsActive:         true,
+	}
+	db.Create(&testConfig)
+
+	// 2人選択
+	result := SelectRandomReviewers(db, "C_MULTI", "needs-review", 2, nil)
+	assert.Equal(t, 2, len(result))
+	// 重複なし
+	assert.NotEqual(t, result[0], result[1])
+}
+
+func TestSelectRandomReviewers_ExcludeIDs(t *testing.T) {
+	db := setupTestDB(t)
+
+	testConfig := models.ChannelConfig{
+		ID:               "exclude-id",
+		SlackChannelID:   "C_EXCL",
+		LabelName:        "needs-review",
+		DefaultMentionID: "UDEFAULT",
+		ReviewerList:     "U1,U2,U3",
+		IsActive:         true,
+	}
+	db.Create(&testConfig)
+
+	// U1を除外して2人選択
+	result := SelectRandomReviewers(db, "C_EXCL", "needs-review", 2, []string{"U1"})
+	assert.Equal(t, 2, len(result))
+	for _, id := range result {
+		assert.NotEqual(t, "U1", id, "除外対象のU1が含まれている")
+	}
+}
+
+func TestSelectRandomReviewers_InsufficientAfterExclusion(t *testing.T) {
+	db := setupTestDB(t)
+
+	testConfig := models.ChannelConfig{
+		ID:               "insuff-id",
+		SlackChannelID:   "C_INSUF",
+		LabelName:        "needs-review",
+		DefaultMentionID: "UDEFAULT",
+		ReviewerList:     "U1,U2",
+		IsActive:         true,
+	}
+	db.Create(&testConfig)
+
+	// U1を除外して2人要求 → 候補はU2のみ → 1人だけ返す
+	result := SelectRandomReviewers(db, "C_INSUF", "needs-review", 2, []string{"U1"})
+	assert.Equal(t, 1, len(result))
+	assert.Equal(t, "U2", result[0])
+}
+
+func TestSelectRandomReviewers_AllExcluded(t *testing.T) {
+	db := setupTestDB(t)
+
+	testConfig := models.ChannelConfig{
+		ID:               "allexcl-id",
+		SlackChannelID:   "C_ALLX",
+		LabelName:        "needs-review",
+		DefaultMentionID: "UDEFAULT",
+		ReviewerList:     "U1,U2",
+		IsActive:         true,
+	}
+	db.Create(&testConfig)
+
+	// 全員除外 → DefaultMentionIDを返す
+	result := SelectRandomReviewers(db, "C_ALLX", "needs-review", 1, []string{"U1", "U2"})
+	assert.Equal(t, 1, len(result))
+	assert.Equal(t, "UDEFAULT", result[0])
+}
+
+func TestGetPendingReviewers(t *testing.T) {
+	// 正常ケース: Reviewers設定あり、一部approve済み
+	task := models.ReviewTask{
+		Reviewers:  "U1,U2,U3",
+		ApprovedBy: "U1",
+	}
+	pending := GetPendingReviewers(task)
+	assert.Equal(t, []string{"U2", "U3"}, pending)
+
+	// 全員approve済み
+	task2 := models.ReviewTask{
+		Reviewers:  "U1,U2",
+		ApprovedBy: "U1,U2",
+	}
+	pending2 := GetPendingReviewers(task2)
+	assert.Equal(t, 0, len(pending2))
+
+	// Reviewers空（旧データ）→ Reviewerフォールバック
+	task3 := models.ReviewTask{
+		Reviewer: "UOLD",
+	}
+	pending3 := GetPendingReviewers(task3)
+	assert.Equal(t, []string{"UOLD"}, pending3)
+
+	// 全て空
+	task4 := models.ReviewTask{}
+	pending4 := GetPendingReviewers(task4)
+	assert.Nil(t, pending4)
+}
+
+func TestAddApproval(t *testing.T) {
+	// 新規追加
+	task := models.ReviewTask{}
+	added := AddApproval(&task, "U1")
+	assert.True(t, added)
+	assert.Equal(t, "U1", task.ApprovedBy)
+
+	// 2人目追加
+	added2 := AddApproval(&task, "U2")
+	assert.True(t, added2)
+	assert.Equal(t, "U1,U2", task.ApprovedBy)
+
+	// 重複追加
+	added3 := AddApproval(&task, "U1")
+	assert.False(t, added3)
+	assert.Equal(t, "U1,U2", task.ApprovedBy)
+
+	// 空文字列
+	added4 := AddApproval(&task, "")
+	assert.False(t, added4)
+}
+
+func TestIsReviewFullyApproved(t *testing.T) {
+	// 1人必要、1人approve済み → 完了
+	task := models.ReviewTask{ApprovedBy: "U1"}
+	assert.True(t, IsReviewFullyApproved(task, 1))
+
+	// 2人必要、1人approve済み → 未完了
+	assert.False(t, IsReviewFullyApproved(task, 2))
+
+	// 2人必要、2人approve済み → 完了
+	task2 := models.ReviewTask{ApprovedBy: "U1,U2"}
+	assert.True(t, IsReviewFullyApproved(task2, 2))
+
+	// 2人必要、3人approve済み → 完了
+	task3 := models.ReviewTask{ApprovedBy: "U1,U2,U3"}
+	assert.True(t, IsReviewFullyApproved(task3, 2))
+
+	// ApprovedBy空 → 未完了
+	task4 := models.ReviewTask{}
+	assert.False(t, IsReviewFullyApproved(task4, 1))
+
+	// requiredApprovals 0以下 → 1として扱う
+	assert.False(t, IsReviewFullyApproved(task4, 0))
+
+	// 割り当て人数 < requiredApprovals の場合、割り当て人数で判定
+	task5 := models.ReviewTask{Reviewers: "U1", ApprovedBy: "U1"}
+	assert.True(t, IsReviewFullyApproved(task5, 3), "割り当て1人でapprove済みなら完了")
+
+	task6 := models.ReviewTask{Reviewers: "U1,U2", ApprovedBy: "U1"}
+	assert.False(t, IsReviewFullyApproved(task6, 3), "割り当て2人で1人approve済みなら未完了")
+
+	task7 := models.ReviewTask{Reviewers: "U1,U2", ApprovedBy: "U1,U2"}
+	assert.True(t, IsReviewFullyApproved(task7, 3), "割り当て2人で2人approve済みなら完了")
+}
+
+func TestCountApprovals(t *testing.T) {
+	assert.Equal(t, 0, CountApprovals(models.ReviewTask{}))
+	assert.Equal(t, 0, CountApprovals(models.ReviewTask{ApprovedBy: ""}))
+	assert.Equal(t, 1, CountApprovals(models.ReviewTask{ApprovedBy: "U1"}))
+	assert.Equal(t, 2, CountApprovals(models.ReviewTask{ApprovedBy: "U1,U2"}))
+}
+
+func TestRemoveApproval(t *testing.T) {
+	t.Run("removes existing approval", func(t *testing.T) {
+		task := models.ReviewTask{ApprovedBy: "U1,U2,U3"}
+		assert.True(t, RemoveApproval(&task, "U2"))
+		assert.Equal(t, "U1,U3", task.ApprovedBy)
+	})
+
+	t.Run("removes last approval", func(t *testing.T) {
+		task := models.ReviewTask{ApprovedBy: "U1"}
+		assert.True(t, RemoveApproval(&task, "U1"))
+		assert.Equal(t, "", task.ApprovedBy)
+	})
+
+	t.Run("returns false for non-existent user", func(t *testing.T) {
+		task := models.ReviewTask{ApprovedBy: "U1,U2"}
+		assert.False(t, RemoveApproval(&task, "U999"))
+		assert.Equal(t, "U1,U2", task.ApprovedBy)
+	})
+
+	t.Run("returns false for empty ApprovedBy", func(t *testing.T) {
+		task := models.ReviewTask{ApprovedBy: ""}
+		assert.False(t, RemoveApproval(&task, "U1"))
+	})
+
+	t.Run("returns false for empty slackUserID", func(t *testing.T) {
+		task := models.ReviewTask{ApprovedBy: "U1"}
+		assert.False(t, RemoveApproval(&task, ""))
+	})
+}
+
+func TestGetAwayUserIDs(t *testing.T) {
+	db := setupTestDB(t)
+
+	now := time.Now()
+	future := now.Add(24 * time.Hour)
+	past := now.Add(-24 * time.Hour)
+
+	// 無期限休暇
+	db.Create(&models.ReviewerAvailability{
+		ID:          "away-1",
+		SlackUserID: "U_AWAY1",
+		AwayUntil:   nil,
+		Reason:      "育児休業",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// 未来まで休暇
+	db.Create(&models.ReviewerAvailability{
+		ID:          "away-2",
+		SlackUserID: "U_AWAY2",
+		AwayUntil:   &future,
+		Reason:      "休暇",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// 期限切れ（返さない）
+	db.Create(&models.ReviewerAvailability{
+		ID:          "away-3",
+		SlackUserID: "U_EXPIRED",
+		AwayUntil:   &past,
+		Reason:      "過去の休暇",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	ids := GetAwayUserIDs(db)
+	assert.Contains(t, ids, "U_AWAY1")
+	assert.Contains(t, ids, "U_AWAY2")
+	assert.NotContains(t, ids, "U_EXPIRED")
+}
+
+func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
+	db := setupTestDB(t)
+
+	now := time.Now()
+	future := now.Add(24 * time.Hour)
+
+	// チャンネル設定
+	testConfig := models.ChannelConfig{
+		ID:               "away-test-id",
+		SlackChannelID:   "C_AWAY",
+		LabelName:        "needs-review",
+		DefaultMentionID: "UDEFAULT",
+		ReviewerList:     "U1,U2,U3",
+		IsActive:         true,
+	}
+	db.Create(&testConfig)
+
+	// U2 を休暇に設定
+	db.Create(&models.ReviewerAvailability{
+		ID:          "away-u2",
+		SlackUserID: "U2",
+		AwayUntil:   &future,
+		Reason:      "休暇",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// 100回繰り返して、U2 が選ばれないことを確認
+	for i := 0; i < 100; i++ {
+		result := SelectRandomReviewers(db, "C_AWAY", "needs-review", 2, nil)
+		for _, id := range result {
+			assert.NotEqual(t, "U2", id, "休暇中のU2が選択された")
+		}
 	}
 }

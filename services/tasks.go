@@ -41,8 +41,21 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 			continue // 営業時間外なので処理をスキップ
 		}
 
-		// レビュワーをランダム選択
-		reviewerID := SelectRandomReviewer(db, task.SlackChannel, labelName)
+		// レビュワーをランダム選択（PR作成者を除外）
+		excludeIDs := []string{}
+		if task.PRAuthorSlackID != "" {
+			excludeIDs = append(excludeIDs, task.PRAuthorSlackID)
+		}
+		requiredApprovals := config.RequiredApprovals
+		if requiredApprovals <= 0 {
+			requiredApprovals = 1
+		}
+		reviewerIDs := SelectRandomReviewers(db, task.SlackChannel, labelName, requiredApprovals, excludeIDs)
+		reviewerID := ""
+		if len(reviewerIDs) > 0 {
+			reviewerID = reviewerIDs[0]
+		}
+		reviewersStr := strings.Join(reviewerIDs, ",")
 
 		// スレッドに営業時間通知を送信
 		if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
@@ -53,6 +66,7 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 		// タスクの状態を更新
 		task.Status = "in_review"
 		task.Reviewer = reviewerID
+		task.Reviewers = reviewersStr
 		task.UpdatedAt = time.Now()
 
 		if err := db.Save(&task).Error; err != nil {
@@ -236,5 +250,16 @@ func CleanupOldTasks(db *gorm.DB) {
 	totalDeleted := doneTasksCount + pausedTasksCount + archivedTasksCount
 	if totalDeleted > 0 {
 		log.Printf("total task deleted: %d", totalDeleted)
+	}
+}
+
+// CleanupExpiredAvailability は期限切れの休暇レコードを物理削除する
+func CleanupExpiredAvailability(db *gorm.DB) {
+	now := time.Now()
+	result := db.Unscoped().Where("away_until IS NOT NULL AND away_until < ?", now).Delete(&models.ReviewerAvailability{})
+	if result.Error != nil {
+		log.Printf("expired availability cleanup error: %v", result.Error)
+	} else if result.RowsAffected > 0 {
+		log.Printf("expired availability records deleted: %d", result.RowsAffected)
 	}
 }

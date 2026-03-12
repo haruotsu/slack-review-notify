@@ -15,6 +15,9 @@ type ReviewTask struct {
 	SlackTS             string
 	SlackChannel        string
 	Reviewer            string
+	Reviewers           string // カンマ区切り: 全アサインレビュワーのSlack ID
+	ApprovedBy          string // カンマ区切り: approveしたレビュワーのSlack ID
+	PRAuthorSlackID     string // PR作成者のSlack ID（レビュワー除外用）
 	Status              string // "pending", "in_review", "paused", "archived", "done", "waiting_business_hours"
 	LabelName           string
 	WatchingUntil       *time.Time

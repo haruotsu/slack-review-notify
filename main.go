@@ -31,7 +31,7 @@ func main() {
 		log.Fatal("fail to connect db:", err)
 	}
 
-	if err := db.AutoMigrate(&models.ReviewTask{}, &models.ChannelConfig{}, &models.UserMapping{}); err != nil {
+	if err := db.AutoMigrate(&models.ReviewTask{}, &models.ChannelConfig{}, &models.UserMapping{}, &models.ReviewerAvailability{}); err != nil {
 		log.Fatal("fail to migrate db:", err)
 	}
 
@@ -83,6 +83,9 @@ func runTaskChecker(db *gorm.DB) {
 
 			// 古いタスクの削除処理
 			services.CleanupOldTasks(db)
+
+			// 期限切れの休暇レコードを削除
+			services.CleanupExpiredAvailability(db)
 		}
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -215,8 +214,16 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 
 		case "change_reviewer":
-			// タスクIDを取得
-			taskID := payload.Actions[0].Value
+			// 値を解析: "taskID" または "taskID:replacingReviewerID" 形式
+			actionValue := payload.Actions[0].Value
+			var taskID string
+			var replacingReviewerID string
+			if idx := strings.Index(actionValue, ":"); idx >= 0 {
+				taskID = actionValue[:idx]
+				replacingReviewerID = actionValue[idx+1:]
+			} else {
+				taskID = actionValue
+			}
 
 			// タスクIDを使ってデータベースからタスクを検索
 			var taskToUpdate models.ReviewTask
@@ -226,49 +233,87 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 
-			// 古いレビュワーIDを保存
-			oldReviewerID := taskToUpdate.Reviewer
-
 			// もしLabelNameが設定されていない既存のタスクの場合はデフォルト値を使用
 			if taskToUpdate.LabelName == "" {
-				// 既存のタスクのためデフォルト値を設定
 				taskToUpdate.LabelName = "needs-review"
-				// DBに保存（次回のために）
 				db.Save(&taskToUpdate)
 			}
 
-			// 新しいレビュワーをランダムに選択
-			newReviewerID := services.SelectRandomReviewer(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName)
-
-			// 新しいレビュワーが前と同じであれば、再度選択
-			// (レビュワーリストが1人しかない場合は同じになる)
-			var config models.ChannelConfig
-			if newReviewerID == oldReviewerID && db.Where("slack_channel_id = ? AND label_name = ?", taskToUpdate.SlackChannel, taskToUpdate.LabelName).First(&config).Error == nil {
-				reviewers := strings.Split(config.ReviewerList, ",")
-				if len(reviewers) > 1 {
-					// リストから古いレビュワー以外を選ぶ
-					validReviewers := []string{}
-					for _, r := range reviewers {
-						if trimmed := strings.TrimSpace(r); trimmed != "" && trimmed != oldReviewerID {
-							validReviewers = append(validReviewers, trimmed)
-						}
+			// 除外対象: PR作成者 + 他の現行レビュワー
+			excludeIDs := []string{}
+			if taskToUpdate.PRAuthorSlackID != "" {
+				excludeIDs = append(excludeIDs, taskToUpdate.PRAuthorSlackID)
+			}
+			if taskToUpdate.Reviewers != "" {
+				for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
+					if trimmed := strings.TrimSpace(id); trimmed != "" {
+						excludeIDs = append(excludeIDs, trimmed)
 					}
+				}
+			} else if taskToUpdate.Reviewer != "" {
+				excludeIDs = append(excludeIDs, taskToUpdate.Reviewer)
+			}
 
-					if len(validReviewers) > 0 {
-						r := rand.New(rand.NewSource(time.Now().UnixNano()))
-						randomIndex := r.Intn(len(validReviewers))
-						newReviewerID = validReviewers[randomIndex]
-					}
-				} else {
-					// レビュワーが1人しかいない場合は通知メッセージを送信
-					message := "レビュワーが1人しか登録されていないため、変更できません。他のレビュワーを登録してください。"
-					if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
-						log.Printf("notification error: %v", err)
+			// 新しいレビュワーを1人選択
+			newReviewerIDs := services.SelectRandomReviewers(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName, 1, excludeIDs)
+
+			// SelectRandomReviewersがDefaultMentionIDのみを返した場合は候補なし
+			noRealCandidate := false
+			if len(newReviewerIDs) == 0 {
+				noRealCandidate = true
+			} else {
+				var cfg models.ChannelConfig
+				if err := db.Where("slack_channel_id = ? AND label_name = ?", taskToUpdate.SlackChannel, taskToUpdate.LabelName).First(&cfg).Error; err == nil {
+					if cfg.ReviewerList != "" && len(newReviewerIDs) == 1 && newReviewerIDs[0] == cfg.DefaultMentionID {
+						noRealCandidate = true
 					}
 				}
 			}
 
-			// レビュワーを更新
+			if noRealCandidate {
+				message := "レビュワーが1人しか登録されていないため、変更できません。他のレビュワーを登録してください。"
+				if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
+					log.Printf("notification error: %v", err)
+				}
+				c.Status(http.StatusOK)
+				return
+			}
+			newReviewerID := newReviewerIDs[0]
+
+			// 古いレビュワーIDを保存
+			oldReviewerID := taskToUpdate.Reviewer
+
+			// Reviewers フィールドの更新
+			if replacingReviewerID != "" && taskToUpdate.Reviewers != "" {
+				// 特定のレビュワーを置換
+				var updatedReviewers []string
+				for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
+					trimmed := strings.TrimSpace(id)
+					if trimmed == replacingReviewerID {
+						updatedReviewers = append(updatedReviewers, newReviewerID)
+					} else {
+						updatedReviewers = append(updatedReviewers, trimmed)
+					}
+				}
+				taskToUpdate.Reviewers = strings.Join(updatedReviewers, ",")
+				oldReviewerID = replacingReviewerID
+			} else {
+				// 後方互換: 単一レビュワーの変更
+				if taskToUpdate.Reviewers != "" {
+					var updatedReviewers []string
+					for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
+						trimmed := strings.TrimSpace(id)
+						if trimmed == taskToUpdate.Reviewer {
+							updatedReviewers = append(updatedReviewers, newReviewerID)
+						} else {
+							updatedReviewers = append(updatedReviewers, trimmed)
+						}
+					}
+					taskToUpdate.Reviewers = strings.Join(updatedReviewers, ",")
+				}
+			}
+
+			// Reviewer フィールドの更新（後方互換）
 			taskToUpdate.Reviewer = newReviewerID
 			taskToUpdate.UpdatedAt = time.Now()
 			db.Save(&taskToUpdate)

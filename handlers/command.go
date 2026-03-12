@@ -75,7 +75,9 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
 				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
 				"set-business-hours-start", "set-business-hours-end", "set-timezone",
-				"map-user", "show-user-mappings", "remove-user-mapping"}
+				"map-user", "show-user-mappings", "remove-user-mapping",
+				"set-required-approvals",
+				"set-away", "unset-away", "show-availability"}
 
 			isSubCommand := false
 			for _, cmd := range potentialSubCommands {
@@ -239,6 +241,22 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			case "remove-user-mapping":
 				removeUserMapping(c, db, params)
 
+			case "set-required-approvals":
+				if params == "" {
+					c.String(200, "必要なapprove数を指定してください。例: /slack-review-notify "+labelName+" set-required-approvals 2")
+					return
+				}
+				setRequiredApprovals(c, db, channelID, labelName, strings.TrimSpace(params))
+
+			case "set-away":
+				setAway(c, db, channelID, labelName, params)
+
+			case "unset-away":
+				unsetAway(c, db, params)
+
+			case "show-availability":
+				showAvailability(c, db)
+
 			default:
 				c.String(200, "不明なコマンドです。/slack-review-notify help で使い方を確認してください。")
 			}
@@ -347,6 +365,7 @@ func showHelp(c *gin.Context) {
 • /slack-review-notify [ラベル名] set-business-hours-start 09:00 - 営業開始時間を設定
 • /slack-review-notify [ラベル名] set-business-hours-end 18:00 - 営業終了時間を設定
 • /slack-review-notify [ラベル名] set-timezone Asia/Tokyo - タイムゾーンを設定
+• /slack-review-notify [ラベル名] set-required-approvals N - 必要なapprove数を設定（1〜10）
 • /slack-review-notify [ラベル名] activate - 通知を有効化
 • /slack-review-notify [ラベル名] deactivate - 通知を無効化
 
@@ -354,6 +373,11 @@ func showHelp(c *gin.Context) {
 • /slack-review-notify map-user <github-username> @slack-user - GitHubユーザーとSlackユーザーを紐付け
 • /slack-review-notify show-user-mappings - 登録済みのユーザーマッピング一覧を表示
 • /slack-review-notify remove-user-mapping <github-username> - ユーザーマッピングを削除
+
+*休暇管理:*
+• /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由] - ユーザーを休暇に設定
+• /slack-review-notify unset-away @user - ユーザーの休暇を解除
+• /slack-review-notify show-availability - 休暇中のユーザー一覧を表示
 
 [ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します`
 
@@ -416,15 +440,21 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 		timezone = "Asia/Tokyo" // デフォルトタイムゾーン
 	}
 
+	requiredApprovals := config.RequiredApprovals
+	if requiredApprovals <= 0 {
+		requiredApprovals = 1
+	}
+
 	response := fmt.Sprintf(`*このチャンネルのラベル「%s」のレビュー通知設定*
 - ステータス: %s
 - メンション先: <@%s>
 - レビュワーリスト: %s
 - 通知対象リポジトリ: %s
 - レビュワー割り当て後のリマインド頻度: %d分
-- 営業時間: %s - %s (%s)`,
+- 営業時間: %s - %s (%s)
+- 必要なapprove数: %d`,
 		labelName, status, config.DefaultMentionID, formatReviewerList(config.ReviewerList),
-		config.RepositoryList, reviewerReminderInterval, config.BusinessHoursStart, config.BusinessHoursEnd, timezone)
+		config.RepositoryList, reviewerReminderInterval, config.BusinessHoursStart, config.BusinessHoursEnd, timezone, requiredApprovals)
 
 	c.String(200, response)
 }
@@ -1085,4 +1115,189 @@ func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername string) {
 	}
 
 	c.String(200, fmt.Sprintf("GitHubユーザー `%s` のマッピングを削除しました。", githubUsername))
+}
+
+// ユーザーを休暇に設定
+func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params string) {
+	if params == "" {
+		c.String(200, "休暇に設定するユーザーを指定してください。例: /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由]")
+		return
+	}
+
+	parts := strings.Fields(params)
+	if len(parts) == 0 {
+		c.String(200, "休暇に設定するユーザーを指定してください。")
+		return
+	}
+
+	slackUserID := cleanUserID(parts[0])
+	if slackUserID == "" {
+		c.String(200, "有効なユーザーIDを指定してください。")
+		return
+	}
+
+	var awayUntil *time.Time
+	var reason string
+
+	// パラメータ解析: until と reason キーワード
+	for i := 1; i < len(parts); i++ {
+		switch parts[i] {
+		case "until":
+			if i+1 < len(parts) {
+				i++
+				parsed, err := time.Parse("2006-01-02", parts[i])
+				if err != nil {
+					c.String(200, "日付形式が無効です。YYYY-MM-DD形式で指定してください（例: 2025-06-01）")
+					return
+				}
+				// 指定日の終わり（23:59:59）に設定
+				// チャンネル設定からタイムゾーンを取得
+				timezone := "Asia/Tokyo"
+				var tzConfig models.ChannelConfig
+				if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&tzConfig).Error; err == nil {
+					if tzConfig.Timezone != "" {
+						timezone = tzConfig.Timezone
+					}
+				}
+				loc, err := time.LoadLocation(timezone)
+				if err != nil {
+					loc = time.UTC
+				}
+				endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
+				awayUntil = &endOfDay
+			}
+		case "reason":
+			if i+1 < len(parts) {
+				reason = strings.Join(parts[i+1:], " ")
+				i = len(parts) // ループ終了
+			}
+		}
+	}
+
+	// 既存レコードがあれば更新、なければ新規作成（upsert）
+	var existing models.ReviewerAvailability
+	result := db.Where("slack_user_id = ?", slackUserID).First(&existing)
+	if result.Error == nil {
+		existing.AwayUntil = awayUntil
+		existing.Reason = reason
+		existing.UpdatedAt = time.Now()
+		if err := db.Save(&existing).Error; err != nil {
+			log.Printf("failed to update reviewer availability: %v", err)
+			c.String(200, "休暇設定の更新に失敗しました。")
+			return
+		}
+	} else {
+		record := models.ReviewerAvailability{
+			ID:          uuid.NewString(),
+			SlackUserID: slackUserID,
+			AwayUntil:   awayUntil,
+			Reason:      reason,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		if err := db.Create(&record).Error; err != nil {
+			log.Printf("failed to create reviewer availability: %v", err)
+			c.String(200, "休暇設定の作成に失敗しました。")
+			return
+		}
+	}
+
+	// 応答メッセージ作成
+	response := fmt.Sprintf("<@%s> を休暇に設定しました", slackUserID)
+	if awayUntil != nil {
+		response += fmt.Sprintf("（%s まで", awayUntil.Format("2006-01-02"))
+	} else {
+		response += "（無期限"
+	}
+	if reason != "" {
+		response += fmt.Sprintf("、理由: %s）", reason)
+	} else {
+		response += "）"
+	}
+
+	c.String(200, response)
+}
+
+// ユーザーの休暇を解除
+func unsetAway(c *gin.Context, db *gorm.DB, params string) {
+	if params == "" {
+		c.String(200, "休暇を解除するユーザーを指定してください。例: /slack-review-notify unset-away @user")
+		return
+	}
+
+	slackUserID := cleanUserID(strings.TrimSpace(params))
+	if slackUserID == "" {
+		c.String(200, "有効なユーザーIDを指定してください。")
+		return
+	}
+
+	result := db.Unscoped().Where("slack_user_id = ?", slackUserID).Delete(&models.ReviewerAvailability{})
+	if result.RowsAffected == 0 {
+		c.String(200, fmt.Sprintf("<@%s> は休暇に設定されていません。", slackUserID))
+		return
+	}
+
+	c.String(200, fmt.Sprintf("<@%s> の休暇を解除しました", slackUserID))
+}
+
+// 休暇中のユーザー一覧を表示
+func showAvailability(c *gin.Context, db *gorm.DB) {
+	var records []models.ReviewerAvailability
+	now := time.Now()
+
+	// AwayUntil が nil（無期限）または現在時刻より未来のレコードを取得
+	db.Where("away_until IS NULL OR away_until > ?", now).Find(&records)
+
+	if len(records) == 0 {
+		c.String(200, "現在休暇中のユーザーはいません")
+		return
+	}
+
+	response := "*現在休暇中のユーザー*\n"
+	for _, r := range records {
+		line := fmt.Sprintf("• <@%s> - ", r.SlackUserID)
+		if r.AwayUntil != nil {
+			line += fmt.Sprintf("%s まで", r.AwayUntil.Format("2006-01-02"))
+		} else {
+			line += "無期限"
+		}
+		if r.Reason != "" {
+			line += fmt.Sprintf("（理由: %s）", r.Reason)
+		}
+		response += line + "\n"
+	}
+
+	c.String(200, response)
+}
+
+// 必要なapprove数を設定
+func setRequiredApprovals(c *gin.Context, db *gorm.DB, channelID, labelName, countStr string) {
+	count, err := strconv.Atoi(countStr)
+	if err != nil || count < 1 || count > 10 {
+		c.String(200, "必要なapprove数は1〜10の整数で指定してください。")
+		return
+	}
+
+	var config models.ChannelConfig
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
+	if result.Error != nil {
+		config = models.ChannelConfig{
+			ID:                uuid.NewString(),
+			SlackChannelID:    channelID,
+			LabelName:         labelName,
+			RequiredApprovals: count,
+			IsActive:          true,
+			CreatedAt:         time.Now(),
+			UpdatedAt:         time.Now(),
+		}
+		db.Create(&config)
+		c.String(200, fmt.Sprintf("ラベル「%s」の必要なapprove数を %d に設定しました。", labelName, count))
+		return
+	}
+
+	config.RequiredApprovals = count
+	config.UpdatedAt = time.Now()
+	db.Save(&config)
+
+	c.String(200, fmt.Sprintf("ラベル「%s」の必要なapprove数を %d に更新しました。", labelName, count))
 }
