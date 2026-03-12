@@ -876,100 +876,22 @@ func TestRemoveApproval(t *testing.T) {
 	})
 }
 
-func TestGetPendingReviewersWithReviewedBy(t *testing.T) {
-	// ReviewedByに含まれるレビュワーは除外される
+func TestGetPendingReviewersWithApprovedReviewer(t *testing.T) {
+	// 単一Reviewerの場合もApprovedByをチェック
 	task := models.ReviewTask{
-		Reviewers:  "U1,U2,U3",
-		ReviewedBy: "U1",
+		Reviewer:   "UOLD",
+		ApprovedBy: "UOLD",
 	}
 	pending := GetPendingReviewers(task)
-	assert.Equal(t, []string{"U2", "U3"}, pending)
+	assert.Nil(t, pending)
 
-	// ApprovedByとReviewedByの両方で除外
+	// 単一ReviewerでApprovedByに含まれない場合
 	task2 := models.ReviewTask{
-		Reviewers:  "U1,U2,U3",
-		ApprovedBy: "U1",
-		ReviewedBy: "U2",
+		Reviewer:   "UOLD",
+		ApprovedBy: "UOTHER",
 	}
 	pending2 := GetPendingReviewers(task2)
-	assert.Equal(t, []string{"U3"}, pending2)
-
-	// 全員がApprovedByまたはReviewedByに含まれる場合
-	task3 := models.ReviewTask{
-		Reviewers:  "U1,U2",
-		ApprovedBy: "U1",
-		ReviewedBy: "U2",
-	}
-	pending3 := GetPendingReviewers(task3)
-	assert.Equal(t, 0, len(pending3))
-
-	// 単一Reviewerの場合もReviewedByをチェック
-	task4 := models.ReviewTask{
-		Reviewer:   "UOLD",
-		ReviewedBy: "UOLD",
-	}
-	pending4 := GetPendingReviewers(task4)
-	assert.Nil(t, pending4)
-
-	// 単一ReviewerでReviewedByに含まれない場合
-	task5 := models.ReviewTask{
-		Reviewer:   "UOLD",
-		ReviewedBy: "UOTHER",
-	}
-	pending5 := GetPendingReviewers(task5)
-	assert.Equal(t, []string{"UOLD"}, pending5)
-}
-
-func TestAddReviewed(t *testing.T) {
-	// 新規追加
-	task := models.ReviewTask{}
-	added := AddReviewed(&task, "U1")
-	assert.True(t, added)
-	assert.Equal(t, "U1", task.ReviewedBy)
-
-	// 2人目追加
-	added2 := AddReviewed(&task, "U2")
-	assert.True(t, added2)
-	assert.Equal(t, "U1,U2", task.ReviewedBy)
-
-	// 重複追加
-	added3 := AddReviewed(&task, "U1")
-	assert.False(t, added3)
-	assert.Equal(t, "U1,U2", task.ReviewedBy)
-
-	// 空文字列
-	added4 := AddReviewed(&task, "")
-	assert.False(t, added4)
-}
-
-func TestRemoveReviewed(t *testing.T) {
-	t.Run("removes existing reviewed user", func(t *testing.T) {
-		task := models.ReviewTask{ReviewedBy: "U1,U2,U3"}
-		assert.True(t, RemoveReviewed(&task, "U2"))
-		assert.Equal(t, "U1,U3", task.ReviewedBy)
-	})
-
-	t.Run("removes last reviewed user", func(t *testing.T) {
-		task := models.ReviewTask{ReviewedBy: "U1"}
-		assert.True(t, RemoveReviewed(&task, "U1"))
-		assert.Equal(t, "", task.ReviewedBy)
-	})
-
-	t.Run("returns false for non-existent user", func(t *testing.T) {
-		task := models.ReviewTask{ReviewedBy: "U1,U2"}
-		assert.False(t, RemoveReviewed(&task, "U999"))
-		assert.Equal(t, "U1,U2", task.ReviewedBy)
-	})
-
-	t.Run("returns false for empty ReviewedBy", func(t *testing.T) {
-		task := models.ReviewTask{ReviewedBy: ""}
-		assert.False(t, RemoveReviewed(&task, "U1"))
-	})
-
-	t.Run("returns false for empty slackUserID", func(t *testing.T) {
-		task := models.ReviewTask{ReviewedBy: "U1"}
-		assert.False(t, RemoveReviewed(&task, ""))
-	})
+	assert.Equal(t, []string{"UOLD"}, pending2)
 }
 
 func TestGetAwayUserIDs(t *testing.T) {

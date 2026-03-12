@@ -175,12 +175,11 @@ func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, coun
 	return candidates[:count]
 }
 
-// GetPendingReviewers は未approveかつ未レビュー（コメント/changes_requested）のレビュワーリストを返す
+// GetPendingReviewers は未approveのレビュワーリストを返す
 func GetPendingReviewers(task models.ReviewTask) []string {
 	if task.Reviewers == "" {
 		if task.Reviewer != "" {
-			// 単一レビュワーの場合もReviewedBy/ApprovedByをチェック
-			if isInCSV(task.ApprovedBy, task.Reviewer) || isInCSV(task.ReviewedBy, task.Reviewer) {
+			if isInCSV(task.ApprovedBy, task.Reviewer) {
 				return nil
 			}
 			return []string{task.Reviewer}
@@ -188,20 +187,18 @@ func GetPendingReviewers(task models.ReviewTask) []string {
 		return nil
 	}
 
-	excludeSet := make(map[string]bool)
-	for _, csv := range []string{task.ApprovedBy, task.ReviewedBy} {
-		if csv != "" {
-			for _, id := range strings.Split(csv, ",") {
-				if trimmed := strings.TrimSpace(id); trimmed != "" {
-					excludeSet[trimmed] = true
-				}
+	approvedSet := make(map[string]bool)
+	if task.ApprovedBy != "" {
+		for _, id := range strings.Split(task.ApprovedBy, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				approvedSet[trimmed] = true
 			}
 		}
 	}
 
 	var pending []string
 	for _, id := range strings.Split(task.Reviewers, ",") {
-		if trimmed := strings.TrimSpace(id); trimmed != "" && !excludeSet[trimmed] {
+		if trimmed := strings.TrimSpace(id); trimmed != "" && !approvedSet[trimmed] {
 			pending = append(pending, trimmed)
 		}
 	}
@@ -260,48 +257,6 @@ func RemoveApproval(task *models.ReviewTask, slackUserID string) bool {
 		return false
 	}
 	task.ApprovedBy = strings.Join(remaining, ",")
-	return true
-}
-
-// AddReviewed は task.ReviewedBy にレビュワーを追加する（重複防止）。新規追加なら true を返す
-func AddReviewed(task *models.ReviewTask, slackUserID string) bool {
-	if slackUserID == "" {
-		return false
-	}
-
-	if task.ReviewedBy != "" {
-		for _, id := range strings.Split(task.ReviewedBy, ",") {
-			if strings.TrimSpace(id) == slackUserID {
-				return false
-			}
-		}
-		task.ReviewedBy = task.ReviewedBy + "," + slackUserID
-	} else {
-		task.ReviewedBy = slackUserID
-	}
-	return true
-}
-
-// RemoveReviewed はReviewedByから指定ユーザーを削除する。削除した場合trueを返す。
-func RemoveReviewed(task *models.ReviewTask, slackUserID string) bool {
-	if slackUserID == "" || task.ReviewedBy == "" {
-		return false
-	}
-
-	var remaining []string
-	found := false
-	for _, id := range strings.Split(task.ReviewedBy, ",") {
-		trimmed := strings.TrimSpace(id)
-		if trimmed == slackUserID {
-			found = true
-		} else if trimmed != "" {
-			remaining = append(remaining, trimmed)
-		}
-	}
-	if !found {
-		return false
-	}
-	task.ReviewedBy = strings.Join(remaining, ",")
 	return true
 }
 

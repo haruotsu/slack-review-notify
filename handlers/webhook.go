@@ -630,23 +630,20 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 				}
 			}
 
-			// ReviewedByに追加してリマインダーを停止
-			oldReviewedBy := latestTask.ReviewedBy
-			if services.AddReviewed(&latestTask, approvalID) {
+			// タスクを修正待ち状態にしてリマインダーを全停止
+			if latestTask.Status == "in_review" {
 				result := db.Model(&models.ReviewTask{}).
-					Where("id = ? AND (reviewed_by = ? OR reviewed_by IS NULL OR reviewed_by = '')", latestTask.ID, oldReviewedBy).
+					Where("id = ? AND status = ?", latestTask.ID, "in_review").
 					Updates(map[string]interface{}{
-						"reviewed_by": latestTask.ReviewedBy,
-						"updated_at":  time.Now(),
+						"status":     "changes_requested",
+						"updated_at": time.Now(),
 					})
 				if result.Error != nil {
-					log.Printf("failed to update reviewed_by: %v", result.Error)
-				} else if result.RowsAffected == 0 {
-					log.Printf("CAS conflict on reviewed_by update, skipping: id=%s", latestTask.ID)
-					continue
+					log.Printf("failed to update status to changes_requested: %v", result.Error)
+				} else if result.RowsAffected > 0 {
+					log.Printf("task paused for fixes: id=%s, reviewer=%s, state=%s",
+						latestTask.ID, approvalID, reviewState)
 				}
-				log.Printf("reviewer marked as reviewed: id=%s, reviewer=%s, state=%s",
-					latestTask.ID, approvalID, reviewState)
 			}
 		}
 	}

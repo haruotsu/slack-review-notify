@@ -177,35 +177,35 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 
-			// ReviewedByをクリアしてリマインダーを再開
-			if taskToUpdate.ReviewedBy != "" {
-				// 再レビュー対象者を通知用に保存
-				reviewedReviewers := taskToUpdate.ReviewedBy
-				taskToUpdate.ReviewedBy = ""
+			// ステータスをin_reviewに戻してリマインダーを再開
+			if taskToUpdate.Status == "changes_requested" {
+				taskToUpdate.Status = "in_review"
 				taskToUpdate.UpdatedAt = time.Now()
 				if err := db.Save(&taskToUpdate).Error; err != nil {
-					log.Printf("failed to clear reviewed_by: %v", err)
+					log.Printf("failed to update status to in_review: %v", err)
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update task"})
 					return
 				}
 
-				// 再レビュー依頼メッセージをスレッドに投稿
+				// 未approveのレビュワー全員にメンション
+				pendingReviewers := services.GetPendingReviewers(taskToUpdate)
 				var mentionParts []string
-				for _, id := range strings.Split(reviewedReviewers, ",") {
-					if trimmed := strings.TrimSpace(id); trimmed != "" {
-						mentionParts = append(mentionParts, fmt.Sprintf("<@%s>", trimmed))
-					}
+				for _, id := range pendingReviewers {
+					mentionParts = append(mentionParts, fmt.Sprintf("<@%s>", id))
 				}
-				message := fmt.Sprintf("🔄 <@%s> さんが再レビューを依頼しました。%s 対応をお願いします！",
-					slackUserID, strings.Join(mentionParts, " "))
+				var mentionText string
+				if len(mentionParts) > 0 {
+					mentionText = strings.Join(mentionParts, " ") + " "
+				}
+				message := fmt.Sprintf("🔄 <@%s> さんが修正して再レビューを依頼しました。%s対応をお願いします！",
+					slackUserID, mentionText)
 				if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
 					log.Printf("re-review notification error: %v", err)
 				}
 
-				log.Printf("re-review requested: task=%s, by=%s, targets=%s", taskID, slackUserID, reviewedReviewers)
+				log.Printf("re-review requested: task=%s, by=%s", taskID, slackUserID)
 			} else {
-				// 既にReviewedByが空の場合
-				message := "現在リマインダー停止中のレビュワーはいません。"
+				message := fmt.Sprintf("現在のタスクステータスは「%s」のため、再レビュー依頼できません。", taskToUpdate.Status)
 				if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
 					log.Printf("re-review notification error: %v", err)
 				}
