@@ -80,6 +80,30 @@ func TestCleanupOldTasks(t *testing.T) {
 			CreatedAt:    now,
 			UpdatedAt:    now, // 保留中タスク (保持)
 		},
+		{
+			ID:           "task6",
+			PRURL:        "https://github.com/owner/repo/pull/6",
+			Repo:         "owner/repo",
+			PRNumber:     6,
+			Title:        "Test PR 6",
+			SlackTS:      "1234.5683",
+			SlackChannel: "C12345",
+			Status:       "completed",
+			CreatedAt:    twoDaysAgo,
+			UpdatedAt:    twoDaysAgo, // 古いcompletedタスク (削除対象)
+		},
+		{
+			ID:           "task7",
+			PRURL:        "https://github.com/owner/repo/pull/7",
+			Repo:         "owner/repo",
+			PRNumber:     7,
+			Title:        "Test PR 7",
+			SlackTS:      "1234.5684",
+			SlackChannel: "C12345",
+			Status:       "completed",
+			CreatedAt:    now,
+			UpdatedAt:    now, // 新しいcompletedタスク (保持)
+		},
 	}
 
 	for _, task := range tasks {
@@ -110,6 +134,14 @@ func TestCleanupOldTasks(t *testing.T) {
 
 	// task5 (pendingタスク)は保持されているはず
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task5").Count(&count)
+	assert.Equal(t, int64(1), count)
+
+	// task6 (古いcompletedタスク)は削除されているはず
+	db.Model(&models.ReviewTask{}).Where("id = ?", "task6").Count(&count)
+	assert.Equal(t, int64(0), count)
+
+	// task7 (新しいcompletedタスク)は保持されているはず
+	db.Model(&models.ReviewTask{}).Where("id = ?", "task7").Count(&count)
 	assert.Equal(t, int64(1), count)
 }
 
