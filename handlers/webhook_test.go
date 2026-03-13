@@ -1949,3 +1949,71 @@ func TestHandleReviewRequestedEvent_InReviewTask(t *testing.T) {
 	// 通知が送られたはず（gockのモックが消費されている）
 	assert.True(t, gock.IsDone(), "re-request通知がSlackに送られるべき")
 }
+
+func TestHandleReviewSubmittedEvent_DismissedOnlyUpdatesApprovedBy(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	// チャンネル設定を作成（2approve必要）
+	config := models.ChannelConfig{
+		SlackChannelID:    "C12345",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "@here",
+		IsActive:          true,
+		RequiredApprovals: 2,
+	}
+	db.Create(&config)
+
+	// UserMapping作成
+	db.Create(&models.UserMapping{
+		SlackUserID:    "UREVIEWER",
+		GithubUsername: "reviewer1",
+	})
+
+	// approveされたin_reviewタスクを作成
+	task := models.ReviewTask{
+		ID:           "dismiss-task",
+		PRURL:        "https://github.com/owner/repo/pull/400",
+		Repo:         "owner/repo",
+		PRNumber:     400,
+		Title:        "Test PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Reviewer:     "UREVIEWER",
+		ApprovedBy:   "UREVIEWER",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	// dismissイベント
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 400, "html_url": "https://github.com/owner/repo/pull/400"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "dismissed", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// ステータスは変わらない、approved_byだけ更新される
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "dismiss-task").First(&updatedTask)
+	assert.Equal(t, "in_review", updatedTask.Status, "ステータスは変更されない")
+	assert.Equal(t, "", updatedTask.ApprovedBy, "approved_byからdismissされたレビュワーが削除される")
+	assert.Nil(t, updatedTask.ReminderPausedUntil, "リマインドの一時停止は設定されない")
+}
+
+

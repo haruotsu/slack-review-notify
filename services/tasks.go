@@ -202,23 +202,37 @@ func CleanupOldTasks(db *gorm.DB) {
 	// 現在の時刻
 	now := time.Now()
 
-	// 1. 完了（done, completed）状態のタスクで、1日以上経過しているものを削除
+	// 1. 完了（done）状態のタスクで、1日以上経過しているものを削除
 	oneDayAgo := now.AddDate(0, 0, -1)
 	var doneTasksCount int64
-	resultDone := db.Where("status IN ? AND updated_at < ?", []string{"done", "completed"}, oneDayAgo).
+	resultDone := db.Where("status = ? AND updated_at < ?", "done", oneDayAgo).
 		Delete(&models.ReviewTask{})
 
 	if resultDone.Error != nil {
-		log.Printf("done/completed task delete error: %v", resultDone.Error)
+		log.Printf("done task delete error: %v", resultDone.Error)
 	} else {
 		doneTasksCount = resultDone.RowsAffected
 		if doneTasksCount > 0 {
-			log.Printf("✅ done/completed task deleted: %d", doneTasksCount)
+			log.Printf("✅ done task deleted: %d", doneTasksCount)
 		}
 	}
 
-	// 2. 一時停止（paused）状態のタスクで、1週間以上経過しているものを削除
+	// 2. completed状態のタスクで、7日以上経過しているものを削除
 	oneWeekAgo := now.AddDate(0, 0, -7)
+	var completedTasksCount int64
+	resultCompleted := db.Where("status = ? AND updated_at < ?", "completed", oneWeekAgo).
+		Delete(&models.ReviewTask{})
+
+	if resultCompleted.Error != nil {
+		log.Printf("completed task delete error: %v", resultCompleted.Error)
+	} else {
+		completedTasksCount = resultCompleted.RowsAffected
+		if completedTasksCount > 0 {
+			log.Printf("✅ completed task deleted: %d", completedTasksCount)
+		}
+	}
+
+	// 3. 一時停止（paused）状態のタスクで、1週間以上経過しているものを削除
 	var pausedTasksCount int64
 	resultPaused := db.Where("status = ? AND updated_at < ?", "paused", oneWeekAgo).
 		Delete(&models.ReviewTask{})
@@ -232,7 +246,7 @@ func CleanupOldTasks(db *gorm.DB) {
 		}
 	}
 
-	// 3. アーカイブ（archived）状態のタスクを全て削除
+	// 4. アーカイブ（archived）状態のタスクを全て削除
 	var archivedTasksCount int64
 	resultArchived := db.Where("status = ?", "archived").
 		Delete(&models.ReviewTask{})
@@ -247,7 +261,7 @@ func CleanupOldTasks(db *gorm.DB) {
 	}
 
 	// 合計削除件数
-	totalDeleted := doneTasksCount + pausedTasksCount + archivedTasksCount
+	totalDeleted := doneTasksCount + completedTasksCount + pausedTasksCount + archivedTasksCount
 	if totalDeleted > 0 {
 		log.Printf("total task deleted: %d", totalDeleted)
 	}

@@ -17,6 +17,7 @@ func TestCleanupOldTasks(t *testing.T) {
 	now := time.Now()
 	twoDaysAgo := now.AddDate(0, 0, -2)
 	yesterdayAgo := now.AddDate(0, 0, -1)
+	tenDaysAgo := now.AddDate(0, 0, -10)
 	twoWeeksAgo := now.AddDate(0, 0, -14)
 
 	tasks := []models.ReviewTask{
@@ -89,8 +90,8 @@ func TestCleanupOldTasks(t *testing.T) {
 			SlackTS:      "1234.5683",
 			SlackChannel: "C12345",
 			Status:       "completed",
-			CreatedAt:    twoDaysAgo,
-			UpdatedAt:    twoDaysAgo, // 古いcompletedタスク (削除対象)
+			CreatedAt:    tenDaysAgo,
+			UpdatedAt:    tenDaysAgo, // 10日前のcompletedタスク (7日超過で削除対象)
 		},
 		{
 			ID:           "task7",
@@ -103,6 +104,18 @@ func TestCleanupOldTasks(t *testing.T) {
 			Status:       "completed",
 			CreatedAt:    now,
 			UpdatedAt:    now, // 新しいcompletedタスク (保持)
+		},
+		{
+			ID:           "task8",
+			PRURL:        "https://github.com/owner/repo/pull/8",
+			Repo:         "owner/repo",
+			PRNumber:     8,
+			Title:        "Test PR 8",
+			SlackTS:      "1234.5685",
+			SlackChannel: "C12345",
+			Status:       "completed",
+			CreatedAt:    twoDaysAgo,
+			UpdatedAt:    twoDaysAgo, // 2日前のcompletedタスク (7日未満なので保持)
 		},
 	}
 
@@ -136,12 +149,16 @@ func TestCleanupOldTasks(t *testing.T) {
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task5").Count(&count)
 	assert.Equal(t, int64(1), count)
 
-	// task6 (古いcompletedタスク)は削除されているはず
+	// task6 (10日前のcompletedタスク)は削除されているはず
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task6").Count(&count)
 	assert.Equal(t, int64(0), count)
 
 	// task7 (新しいcompletedタスク)は保持されているはず
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task7").Count(&count)
+	assert.Equal(t, int64(1), count)
+
+	// task8 (2日前のcompletedタスク)は7日未満なので保持されているはず
+	db.Model(&models.ReviewTask{}).Where("id = ?", "task8").Count(&count)
 	assert.Equal(t, int64(1), count)
 }
 
