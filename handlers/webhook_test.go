@@ -1843,6 +1843,13 @@ func TestHandleReviewRequestedEvent_CompletedTask(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
+	// gockでSlack APIをモック
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
 	// completedタスクを作成
 	task := models.ReviewTask{
 		ID:           "completed-task",
@@ -1882,6 +1889,9 @@ func TestHandleReviewRequestedEvent_CompletedTask(t *testing.T) {
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "completed-task").First(&updatedTask)
 	assert.Equal(t, "in_review", updatedTask.Status)
+
+	// 通知が送られたはず（gockのモックが消費されている）
+	assert.True(t, gock.IsDone(), "re-request通知がSlackに送られるべき")
 }
 
 func TestHandleReviewRequestedEvent_InReviewTask(t *testing.T) {
