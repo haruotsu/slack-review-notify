@@ -1949,3 +1949,125 @@ func TestHandleReviewRequestedEvent_InReviewTask(t *testing.T) {
 	// 通知が送られたはず（gockのモックが消費されている）
 	assert.True(t, gock.IsDone(), "re-request通知がSlackに送られるべき")
 }
+
+func TestHandleReviewSubmittedEvent_DismissedPausesReminder(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	// チャンネル設定を作成（2approve必要）
+	config := models.ChannelConfig{
+		SlackChannelID:    "C12345",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "@here",
+		IsActive:          true,
+		RequiredApprovals: 2,
+	}
+	db.Create(&config)
+
+	// UserMapping作成
+	db.Create(&models.UserMapping{
+		SlackUserID:    "UREVIEWER",
+		GithubUsername: "reviewer1",
+	})
+
+	// approveされたin_reviewタスクを作成
+	task := models.ReviewTask{
+		ID:           "dismiss-task",
+		PRURL:        "https://github.com/owner/repo/pull/400",
+		Repo:         "owner/repo",
+		PRNumber:     400,
+		Title:        "Test PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Reviewer:     "UREVIEWER",
+		ApprovedBy:   "UREVIEWER",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	// dismissイベント
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 400, "html_url": "https://github.com/owner/repo/pull/400"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "dismissed", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// タスクがin_reviewに戻り、リマインドが一時停止されているはず
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "dismiss-task").First(&updatedTask)
+	assert.Equal(t, "in_review", updatedTask.Status)
+	assert.NotNil(t, updatedTask.ReminderPausedUntil, "dismiss後はリマインドが一時停止されるべき")
+}
+
+func TestHandleReviewRequestedEvent_ResumesReminderAfterDismiss(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	// gockでSlack APIをモック
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// dismiss後のタスク（リマインド一時停止中）
+	farFuture := time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
+	task := models.ReviewTask{
+		ID:                  "dismissed-task",
+		PRURL:               "https://github.com/owner/repo/pull/401",
+		Repo:                "owner/repo",
+		PRNumber:            401,
+		Title:               "Test PR",
+		SlackTS:             "1234.5678",
+		SlackChannel:        "C12345",
+		Status:              "in_review",
+		LabelName:           "needs-review",
+		ReminderPausedUntil: &farFuture,
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
+	}
+	db.Create(&task)
+
+	// re-requestイベント
+	payload := `{
+		"action": "review_requested",
+		"pull_request": {"number": 401, "html_url": "https://github.com/owner/repo/pull/401"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"},
+		"requested_reviewer": {"login": "reviewer1"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// リマインドの一時停止が解除されているはず
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "dismissed-task").First(&updatedTask)
+	assert.Equal(t, "in_review", updatedTask.Status)
+	assert.Nil(t, updatedTask.ReminderPausedUntil, "re-request後はリマインドが再開されるべき")
+}
