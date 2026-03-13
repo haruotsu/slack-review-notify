@@ -1,4 +1,4 @@
-.PHONY: build run test clean all help lint lint-install deps dev
+.PHONY: build run test clean all help lint lint-install deps dev slackhog up down
 
 APP_NAME := slack-review-notify
 GO := go
@@ -12,6 +12,9 @@ help:
 	@echo "  make all      - cleanとビルドを実行します"
 	@echo "  make lint     - lintを実行します"
 	@echo "  make lint-install - golangci-lintをインストールします"
+	@echo "  make slackhog - SlackHogを起動します（開発用Slackモック）"
+	@echo "  make up       - docker composeで開発環境を起動します"
+	@echo "  make down     - docker composeで開発環境を停止します"
 	@echo "  make help     - このヘルプメッセージを表示します"
 
 run: build
@@ -40,3 +43,12 @@ deps:
 
 dev:
 	$(GO) run main.go
+
+slackhog:
+	docker run --rm -p 4112:4112 ghcr.io/harakeishi/slackhog
+
+up:
+	docker compose up --build -d
+
+down:
+	docker compose down
