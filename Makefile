@@ -45,7 +45,7 @@ dev:
 	$(GO) run main.go
 
 slackhog:
-	docker run --rm -p 4112:4112 ghcr.io/harakeishi/slackhog
+	docker run --rm -p 4112:4112 -v $(CURDIR)/slackhog.yaml:/etc/slackhog/slackhog.yaml:ro ghcr.io/harakeishi/slackhog -config /etc/slackhog/slackhog.yaml
 
 up:
 	docker compose up --build -d
