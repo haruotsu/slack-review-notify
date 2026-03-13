@@ -467,40 +467,49 @@ func handleIssueCommentEvent(c *gin.Context, db *gorm.DB, e *github.IssueComment
 
 	// 該当PRのアクティブなタスクを検索
 	var tasks []models.ReviewTask
-	db.Where("repo = ? AND pr_number = ? AND status IN ?",
+	result := db.Where("repo = ? AND pr_number = ? AND status IN ?",
 		repoFullName, prNumber, []string{"in_review", "pending", "snoozed", "waiting_business_hours"}).
+		Order("created_at DESC").
 		Find(&tasks)
+
+	if result.Error != nil {
+		log.Printf("issue comment task search error: %v", result.Error)
+		return
+	}
 
 	if len(tasks) == 0 {
 		log.Printf("no active tasks found for issue comment: repo=%s, pr=%d", repoFullName, prNumber)
 		return
 	}
 
-	// コメント者のSlack IDを取得
-	senderSlackID := services.GetSlackUserIDFromGitHub(db, sender.GetLogin())
-	var senderMention string
-	if senderSlackID != "" {
-		senderMention = fmt.Sprintf("<@%s>", senderSlackID)
+	// PR作成者をSlackメンションに変換
+	authorSlackID := services.GetSlackUserIDFromGitHub(db, sender.GetLogin())
+	var authorMention string
+	if authorSlackID != "" {
+		authorMention = fmt.Sprintf("<@%s>", authorSlackID)
 	} else {
-		senderMention = sender.GetLogin()
+		authorMention = sender.GetLogin()
 	}
 
-	// コメントURLを取得
 	commentURL := comment.GetHTMLURL()
+	message := fmt.Sprintf("💬 %s さんがPRに返答しました: <%s|コメントを見る>", authorMention, commentURL)
 
-	message := fmt.Sprintf("💬 %s さんがPRにコメントしました: <%s|コメントを見る>", senderMention, commentURL)
-
-	// チャンネルごとに最新のタスクのみ通知（重複防止）
-	notified := make(map[string]bool)
+	// チャンネルごとに1回のみ通知（重複防止）
+	notifiedChannels := make(map[string]bool)
 	for _, task := range tasks {
-		if notified[task.SlackChannel] {
+		if notifiedChannels[task.SlackChannel] {
+			continue
+		}
+		// SlackTS未設定のタスクはスキップ（非同期でSlackメッセージ送信中の可能性）
+		if task.SlackTS == "" {
+			log.Printf("task %s has empty SlackTS, skipping issue comment notification", task.ID)
 			continue
 		}
 		if err := services.PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
 			log.Printf("issue comment notification error (channel: %s): %v", task.SlackChannel, err)
 			continue
 		}
-		notified[task.SlackChannel] = true
+		notifiedChannels[task.SlackChannel] = true
 		log.Printf("issue comment notification sent: repo=%s, pr=%d, channel=%s", repoFullName, prNumber, task.SlackChannel)
 	}
 }

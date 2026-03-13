@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-github/v71/github"
 	"github.com/h2non/gock"
 	"github.com/stretchr/testify/assert"
+	"gorm.io/gorm"
 )
 
 func TestUnlabeledEventWithExistingTask(t *testing.T) {
@@ -1838,6 +1839,46 @@ func TestHandleReviewSubmittedEvent_BackwardCompat(t *testing.T) {
 	assert.Equal(t, "completed", updatedTask.Status, "RequiredApprovals=1で1回approveなのでcompleted")
 }
 
+// IssueCommentEventのテスト用ペイロードを構築するヘルパー
+func buildIssueCommentPayload(action string, prNumber int, repoOwner, repoName, prAuthorLogin, senderLogin, commentURL string) github.IssueCommentEvent {
+	commentBody := "test comment"
+	prURL := "https://github.com/" + repoOwner + "/" + repoName + "/pull/1"
+	return github.IssueCommentEvent{
+		Action: &action,
+		Issue: &github.Issue{
+			Number: &prNumber,
+			User:   &github.User{Login: &prAuthorLogin},
+			PullRequestLinks: &github.PullRequestLinks{
+				URL: &prURL,
+			},
+		},
+		Comment: &github.IssueComment{
+			Body:    &commentBody,
+			HTMLURL: &commentURL,
+			User:    &github.User{Login: &senderLogin},
+		},
+		Repo: &github.Repository{
+			Name:  &repoName,
+			Owner: &github.User{Login: &repoOwner},
+		},
+		Sender: &github.User{Login: &senderLogin},
+	}
+}
+
+func sendIssueCommentWebhook(t *testing.T, db *gorm.DB, payload github.IssueCommentEvent) *httptest.ResponseRecorder {
+	router := gin.New()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+
+	jsonPayload, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "issue_comment")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	return w
+}
+
 func TestIssueCommentEvent_PRAuthorReply(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
@@ -1849,63 +1890,18 @@ func TestIssueCommentEvent_PRAuthorReply(t *testing.T) {
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true, "ts": "111.222", "channel": "C1234567890"})
 
-	// アクティブなタスクを作成
-	task := models.ReviewTask{
-		ID:           "issue-comment-task",
-		PRURL:        "https://github.com/test/repo/pull/10",
-		Repo:         "test/repo",
-		PRNumber:     10,
-		Title:        "Test PR",
-		SlackTS:      "1234567890.123456",
-		SlackChannel: "C1234567890",
-		Status:       "in_review",
-		LabelName:    "needs-review",
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-	db.Create(&task)
+	db.Create(&models.ReviewTask{
+		ID: "issue-comment-task", PRURL: "https://github.com/test/repo/pull/10",
+		Repo: "test/repo", PRNumber: 10, Title: "Test PR",
+		SlackTS: "1234567890.123456", SlackChannel: "C1234567890",
+		Status: "in_review", LabelName: "needs-review",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
 
-	// IssueCommentEventを作成（PR作成者からのコメント）
-	action := "created"
-	prNumber := 10
-	repoName := "repo"
-	ownerLogin := "test"
-	prAuthorLogin := "pr-author"
-	commentBody := "回答しました"
-	commentURL := "https://github.com/test/repo/pull/10#issuecomment-123"
-	prURL := "https://github.com/test/repo/pull/10"
+	payload := buildIssueCommentPayload("created", 10, "test", "repo", "pr-author", "pr-author",
+		"https://github.com/test/repo/pull/10#issuecomment-123")
 
-	payload := github.IssueCommentEvent{
-		Action: &action,
-		Issue: &github.Issue{
-			Number: &prNumber,
-			User:   &github.User{Login: &prAuthorLogin},
-			PullRequestLinks: &github.PullRequestLinks{
-				URL: &prURL,
-			},
-		},
-		Comment: &github.IssueComment{
-			Body:    &commentBody,
-			HTMLURL: &commentURL,
-			User:    &github.User{Login: &prAuthorLogin},
-		},
-		Repo: &github.Repository{
-			Name:  &repoName,
-			Owner: &github.User{Login: &ownerLogin},
-		},
-		Sender: &github.User{Login: &prAuthorLogin},
-	}
-
-	router := gin.New()
-	router.POST("/webhook", HandleGitHubWebhook(db))
-
-	jsonPayload, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonPayload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Event", "issue_comment")
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	w := sendIssueCommentWebhook(t, db, payload)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, gock.IsDone(), "Slack APIが呼ばれるべき")
@@ -1916,67 +1912,29 @@ func TestIssueCommentEvent_NonAuthorSkipped(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// アクティブなタスクを作成
-	task := models.ReviewTask{
-		ID:           "issue-comment-task-2",
-		PRURL:        "https://github.com/test/repo/pull/11",
-		Repo:         "test/repo",
-		PRNumber:     11,
-		Title:        "Test PR 2",
-		SlackTS:      "1234567890.654321",
-		SlackChannel: "C1234567890",
-		Status:       "in_review",
-		LabelName:    "needs-review",
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-	db.Create(&task)
+	defer gock.Off()
+	// Slack APIが呼ばれた場合にテストが失敗するよう明示的にモックを設定
+	mock := gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
 
-	// PR作成者以外からのコメント
-	action := "created"
-	prNumber := 11
-	repoName := "repo"
-	ownerLogin := "test"
-	prAuthorLogin := "pr-author"
-	reviewerLogin := "reviewer"
-	commentBody := "質問です"
-	commentURL := "https://github.com/test/repo/pull/11#issuecomment-456"
-	prURL := "https://github.com/test/repo/pull/11"
+	db.Create(&models.ReviewTask{
+		ID: "issue-comment-task-2", PRURL: "https://github.com/test/repo/pull/11",
+		Repo: "test/repo", PRNumber: 11, Title: "Test PR 2",
+		SlackTS: "1234567890.654321", SlackChannel: "C1234567890",
+		Status: "in_review", LabelName: "needs-review",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
 
-	payload := github.IssueCommentEvent{
-		Action: &action,
-		Issue: &github.Issue{
-			Number: &prNumber,
-			User:   &github.User{Login: &prAuthorLogin},
-			PullRequestLinks: &github.PullRequestLinks{
-				URL: &prURL,
-			},
-		},
-		Comment: &github.IssueComment{
-			Body:    &commentBody,
-			HTMLURL: &commentURL,
-			User:    &github.User{Login: &reviewerLogin},
-		},
-		Repo: &github.Repository{
-			Name:  &repoName,
-			Owner: &github.User{Login: &ownerLogin},
-		},
-		Sender: &github.User{Login: &reviewerLogin},
-	}
+	payload := buildIssueCommentPayload("created", 11, "test", "repo", "pr-author", "reviewer",
+		"https://github.com/test/repo/pull/11#issuecomment-456")
 
-	router := gin.New()
-	router.POST("/webhook", HandleGitHubWebhook(db))
-
-	jsonPayload, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonPayload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Event", "issue_comment")
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	w := sendIssueCommentWebhook(t, db, payload)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	// Slack APIは呼ばれないはず（gockをセットアップしていないので、呼ばれたらエラーになる）
+	assert.True(t, gock.IsPending(), "Slack APIは呼ばれないべき")
+	_ = mock // gockモックが未使用であることを明示
 }
 
 func TestIssueCommentEvent_NoActiveTask(t *testing.T) {
@@ -1984,47 +1942,119 @@ func TestIssueCommentEvent_NoActiveTask(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// タスクなしでPR作成者がコメント
-	action := "created"
-	prNumber := 99
-	repoName := "repo"
-	ownerLogin := "test"
-	prAuthorLogin := "pr-author"
-	commentBody := "返事です"
-	commentURL := "https://github.com/test/repo/pull/99#issuecomment-789"
-	prURL := "https://github.com/test/repo/pull/99"
+	payload := buildIssueCommentPayload("created", 99, "test", "repo", "pr-author", "pr-author",
+		"https://github.com/test/repo/pull/99#issuecomment-789")
 
-	payload := github.IssueCommentEvent{
-		Action: &action,
-		Issue: &github.Issue{
-			Number: &prNumber,
-			User:   &github.User{Login: &prAuthorLogin},
-			PullRequestLinks: &github.PullRequestLinks{
-				URL: &prURL,
-			},
-		},
-		Comment: &github.IssueComment{
-			Body:    &commentBody,
-			HTMLURL: &commentURL,
-			User:    &github.User{Login: &prAuthorLogin},
-		},
-		Repo: &github.Repository{
-			Name:  &repoName,
-			Owner: &github.User{Login: &ownerLogin},
-		},
-		Sender: &github.User{Login: &prAuthorLogin},
-	}
-
-	router := gin.New()
-	router.POST("/webhook", HandleGitHubWebhook(db))
-
-	jsonPayload, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonPayload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Event", "issue_comment")
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	w := sendIssueCommentWebhook(t, db, payload)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestIssueCommentEvent_MultiChannelDeduplication(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	defer gock.Off()
+	// 2つのチャンネルに1回ずつ通知されることを期待
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true, "ts": "111.222", "channel": "C_CHAN1"})
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true, "ts": "333.444", "channel": "C_CHAN2"})
+
+	// 異なるチャンネルに2つのタスク
+	db.Create(&models.ReviewTask{
+		ID: "multi-ch-task-1", PRURL: "https://github.com/test/repo/pull/20",
+		Repo: "test/repo", PRNumber: 20, Title: "Multi Channel PR",
+		SlackTS: "1111.1111", SlackChannel: "C_CHAN1",
+		Status: "in_review", LabelName: "needs-review",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
+	db.Create(&models.ReviewTask{
+		ID: "multi-ch-task-2", PRURL: "https://github.com/test/repo/pull/20",
+		Repo: "test/repo", PRNumber: 20, Title: "Multi Channel PR",
+		SlackTS: "2222.2222", SlackChannel: "C_CHAN2",
+		Status: "in_review", LabelName: "review-needed",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
+
+	payload := buildIssueCommentPayload("created", 20, "test", "repo", "pr-author", "pr-author",
+		"https://github.com/test/repo/pull/20#issuecomment-200")
+
+	w := sendIssueCommentWebhook(t, db, payload)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, gock.IsDone(), "両チャンネルにSlack APIが呼ばれるべき")
+}
+
+func TestIssueCommentEvent_SameChannelDeduplication(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	defer gock.Off()
+	// 同一チャンネルなので1回だけ通知
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true, "ts": "111.222", "channel": "C_SAME"})
+
+	// 同じチャンネルに2つのタスク（異なるラベル設定）
+	db.Create(&models.ReviewTask{
+		ID: "same-ch-task-1", PRURL: "https://github.com/test/repo/pull/30",
+		Repo: "test/repo", PRNumber: 30, Title: "Same Channel PR",
+		SlackTS: "3333.3333", SlackChannel: "C_SAME",
+		Status: "in_review", LabelName: "needs-review",
+		CreatedAt: time.Now().Add(-1 * time.Hour), UpdatedAt: time.Now(),
+	})
+	db.Create(&models.ReviewTask{
+		ID: "same-ch-task-2", PRURL: "https://github.com/test/repo/pull/30",
+		Repo: "test/repo", PRNumber: 30, Title: "Same Channel PR",
+		SlackTS: "4444.4444", SlackChannel: "C_SAME",
+		Status: "in_review", LabelName: "review-needed",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
+
+	payload := buildIssueCommentPayload("created", 30, "test", "repo", "pr-author", "pr-author",
+		"https://github.com/test/repo/pull/30#issuecomment-300")
+
+	w := sendIssueCommentWebhook(t, db, payload)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, gock.IsDone(), "Slack APIは1回だけ呼ばれるべき")
+}
+
+func TestIssueCommentEvent_EmptySlackTSSkipped(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	defer gock.Off()
+	// SlackTSが空のタスクはスキップされるので、Slack APIは呼ばれない
+	mock := gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// SlackTS空のタスク（まだSlackメッセージ送信前）
+	db.Create(&models.ReviewTask{
+		ID: "empty-ts-task", PRURL: "https://github.com/test/repo/pull/40",
+		Repo: "test/repo", PRNumber: 40, Title: "Empty TS PR",
+		SlackTS: "", SlackChannel: "C_EMPTY",
+		Status: "pending", LabelName: "needs-review",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
+
+	payload := buildIssueCommentPayload("created", 40, "test", "repo", "pr-author", "pr-author",
+		"https://github.com/test/repo/pull/40#issuecomment-400")
+
+	w := sendIssueCommentWebhook(t, db, payload)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, gock.IsPending(), "SlackTS空のタスクではSlack APIは呼ばれないべき")
+	_ = mock
 }
