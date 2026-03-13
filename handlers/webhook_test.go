@@ -1837,3 +1837,115 @@ func TestHandleReviewSubmittedEvent_BackwardCompat(t *testing.T) {
 	db.Where("id = ?", "compat-task").First(&updatedTask)
 	assert.Equal(t, "completed", updatedTask.Status, "RequiredApprovals=1で1回approveなのでcompleted")
 }
+
+func TestHandleReviewRequestedEvent_CompletedTask(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	// gockでSlack APIをモック
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// completedタスクを作成
+	task := models.ReviewTask{
+		ID:           "completed-task",
+		PRURL:        "https://github.com/owner/repo/pull/300",
+		Repo:         "owner/repo",
+		PRNumber:     300,
+		Title:        "Test PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Status:       "completed",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "review_requested",
+		"pull_request": {"number": 300, "html_url": "https://github.com/owner/repo/pull/300"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"},
+		"requested_reviewer": {"login": "reviewer1"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// completedタスクがin_reviewに戻っているはず
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "completed-task").First(&updatedTask)
+	assert.Equal(t, "in_review", updatedTask.Status)
+
+	// 通知が送られたはず（gockのモックが消費されている）
+	assert.True(t, gock.IsDone(), "re-request通知がSlackに送られるべき")
+}
+
+func TestHandleReviewRequestedEvent_InReviewTask(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	// gockでSlack APIをモック
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// in_reviewタスクを作成
+	task := models.ReviewTask{
+		ID:           "inreview-task",
+		PRURL:        "https://github.com/owner/repo/pull/301",
+		Repo:         "owner/repo",
+		PRNumber:     301,
+		Title:        "Test PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "review_requested",
+		"pull_request": {"number": 301, "html_url": "https://github.com/owner/repo/pull/301"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"},
+		"requested_reviewer": {"login": "reviewer1"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// in_reviewのままであるはず
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "inreview-task").First(&updatedTask)
+	assert.Equal(t, "in_review", updatedTask.Status)
+
+	// 通知が送られたはず（gockのモックが消費されている）
+	assert.True(t, gock.IsDone(), "re-request通知がSlackに送られるべき")
+}

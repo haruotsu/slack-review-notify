@@ -202,18 +202,18 @@ func CleanupOldTasks(db *gorm.DB) {
 	// 現在の時刻
 	now := time.Now()
 
-	// 1. 完了（done）状態のタスクで、1日以上経過しているものを削除
+	// 1. 完了（done, completed）状態のタスクで、1日以上経過しているものを削除
 	oneDayAgo := now.AddDate(0, 0, -1)
 	var doneTasksCount int64
-	resultDone := db.Where("status = ? AND updated_at < ?", "done", oneDayAgo).
+	resultDone := db.Where("status IN ? AND updated_at < ?", []string{"done", "completed"}, oneDayAgo).
 		Delete(&models.ReviewTask{})
 
 	if resultDone.Error != nil {
-		log.Printf("done task delete error: %v", resultDone.Error)
+		log.Printf("done/completed task delete error: %v", resultDone.Error)
 	} else {
 		doneTasksCount = resultDone.RowsAffected
 		if doneTasksCount > 0 {
-			log.Printf("✅ done task deleted: %d", doneTasksCount)
+			log.Printf("✅ done/completed task deleted: %d", doneTasksCount)
 		}
 	}
 

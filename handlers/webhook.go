@@ -463,10 +463,10 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	log.Printf("handling review_requested event: repo=%s, pr=%d, sender=%s, requested_reviewer=%s",
 		repoFullName, pr.GetNumber(), senderLogin, reviewerLogin)
 
-	// completedタスクを検索
+	// completed または in_review のタスクを検索
 	var tasks []models.ReviewTask
-	if err := db.Where("repo = ? AND pr_number = ? AND status = ?",
-		repoFullName, pr.GetNumber(), "completed").
+	if err := db.Where("repo = ? AND pr_number = ? AND status IN ?",
+		repoFullName, pr.GetNumber(), []string{"completed", "in_review", "pending", "snoozed", "waiting_business_hours"}).
 		Order("created_at DESC").
 		Find(&tasks).Error; err != nil {
 		log.Printf("review_requested task search error: %v", err)
@@ -474,7 +474,7 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	}
 
 	if len(tasks) == 0 {
-		log.Printf("no completed tasks found for review_requested event: repo=%s, pr=%d", repoFullName, pr.GetNumber())
+		log.Printf("no active tasks found for review_requested event: repo=%s, pr=%d", repoFullName, pr.GetNumber())
 		return
 	}
 
@@ -489,40 +489,42 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	senderSlackID := services.GetSlackUserIDFromGitHub(db, senderLogin)
 	reviewerSlackID := services.GetSlackUserIDFromGitHub(db, reviewerLogin)
 
-	for _, latestTask := range channelLatestTasks {
-		// タスクをin_reviewに戻す
-		result := db.Model(&models.ReviewTask{}).
-			Where("id = ? AND status = ?", latestTask.ID, "completed").
-			Updates(map[string]interface{}{
-				"status":     "in_review",
-				"updated_at": time.Now(),
-			})
-		if result.Error != nil {
-			log.Printf("failed to update task to in_review: %v", result.Error)
-			continue
-		}
-		if result.RowsAffected == 0 {
-			log.Printf("task already updated (CAS miss): id=%s", latestTask.ID)
-			continue
-		}
+	// メンション文字列を構築
+	var senderMention string
+	if senderSlackID != "" {
+		senderMention = fmt.Sprintf("<@%s>", senderSlackID)
+	} else {
+		senderMention = senderLogin
+	}
 
-		log.Printf("task reactivated for re-review: id=%s, repo=%s, pr=%d", latestTask.ID, repoFullName, pr.GetNumber())
+	var reviewerMention string
+	if reviewerSlackID != "" {
+		reviewerMention = fmt.Sprintf("<@%s>", reviewerSlackID)
+	} else {
+		reviewerMention = reviewerLogin
+	}
+
+	for _, latestTask := range channelLatestTasks {
+		// completedタスクはin_reviewに戻す
+		if latestTask.Status == "completed" {
+			result := db.Model(&models.ReviewTask{}).
+				Where("id = ? AND status = ?", latestTask.ID, "completed").
+				Updates(map[string]interface{}{
+					"status":     "in_review",
+					"updated_at": time.Now(),
+				})
+			if result.Error != nil {
+				log.Printf("failed to update task to in_review: %v", result.Error)
+				continue
+			}
+			if result.RowsAffected == 0 {
+				log.Printf("task already updated (CAS miss): id=%s", latestTask.ID)
+				continue
+			}
+			log.Printf("task reactivated for re-review: id=%s, repo=%s, pr=%d", latestTask.ID, repoFullName, pr.GetNumber())
+		}
 
 		// スレッドに再レビュー依頼通知を投稿
-		var senderMention string
-		if senderSlackID != "" {
-			senderMention = fmt.Sprintf("<@%s>", senderSlackID)
-		} else {
-			senderMention = senderLogin
-		}
-
-		var reviewerMention string
-		if reviewerSlackID != "" {
-			reviewerMention = fmt.Sprintf("<@%s>", reviewerSlackID)
-		} else {
-			reviewerMention = reviewerLogin
-		}
-
 		message := fmt.Sprintf("🔄 %s さんが %s に再レビューを依頼しました。対応をお願いします！",
 			senderMention, reviewerMention)
 		if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, message); err != nil {
