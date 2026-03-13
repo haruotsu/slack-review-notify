@@ -510,9 +510,8 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			result := db.Model(&models.ReviewTask{}).
 				Where("id = ? AND status = ?", latestTask.ID, "completed").
 				Updates(map[string]interface{}{
-					"status":               "in_review",
-					"updated_at":           time.Now(),
-					"reminder_paused_until": nil,
+					"status":     "in_review",
+					"updated_at": time.Now(),
 				})
 			if result.Error != nil {
 				log.Printf("failed to update task to in_review: %v", result.Error)
@@ -523,16 +522,6 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 				continue
 			}
 			log.Printf("task reactivated for re-review: id=%s, repo=%s, pr=%d", latestTask.ID, repoFullName, pr.GetNumber())
-		} else {
-			// in_review等のタスクはリマインド一時停止を解除するのみ
-			if latestTask.ReminderPausedUntil != nil {
-				db.Model(&models.ReviewTask{}).
-					Where("id = ?", latestTask.ID).
-					Updates(map[string]interface{}{
-						"reminder_paused_until": nil,
-						"updated_at":           time.Now(),
-					})
-			}
 		}
 
 		// スレッドに再レビュー依頼通知を投稿
@@ -617,31 +606,21 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 		switch reviewState {
 		case "dismissed":
-			// approveを取り消し、再レビュー依頼通知を送信
+			// approved_byからdismissされたレビュワーを削除するのみ
+			// ステータス変更や通知は行わない（re-requestで対応する）
 			oldApprovedBy := latestTask.ApprovedBy
 			if services.RemoveApproval(&latestTask, approvalID) {
-				// CAS: approved_byが変更されていない場合のみ更新（同時approve対策）
-				// リマインドを無期限に一時停止（re-requestで解除される）
-				farFuture := time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 				result := db.Model(&models.ReviewTask{}).
 					Where("id = ? AND approved_by = ?", latestTask.ID, oldApprovedBy).
 					Updates(map[string]interface{}{
-						"approved_by":           latestTask.ApprovedBy,
-						"status":               "in_review",
-						"updated_at":           time.Now(),
-						"reminder_paused_until": farFuture,
+						"approved_by": latestTask.ApprovedBy,
+						"updated_at":  time.Now(),
 					})
 				if result.Error != nil {
 					log.Printf("failed to update approved_by on dismiss: %v", result.Error)
 				} else if result.RowsAffected == 0 {
 					log.Printf("CAS conflict on dismiss update, skipping: id=%s", latestTask.ID)
 					continue
-				}
-				approvedCount := services.CountApprovals(latestTask)
-				dismissMsg := fmt.Sprintf("⚠️ %s のapproveが取り消されました（%d/%d approved）。再レビューをお願いします。",
-					review.GetUser().GetLogin(), approvedCount, requiredApprovals)
-				if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, dismissMsg); err != nil {
-					log.Printf("failed to post dismiss notification: %v", err)
 				}
 				log.Printf("approval dismissed: id=%s, repo=%s, pr=%d, reviewer=%s",
 					latestTask.ID, repoFullName, pr.GetNumber(), review.GetUser().GetLogin())

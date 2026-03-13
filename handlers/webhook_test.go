@@ -1950,7 +1950,7 @@ func TestHandleReviewRequestedEvent_InReviewTask(t *testing.T) {
 	assert.True(t, gock.IsDone(), "re-request通知がSlackに送られるべき")
 }
 
-func TestHandleReviewSubmittedEvent_DismissedPausesReminder(t *testing.T) {
+func TestHandleReviewSubmittedEvent_DismissedOnlyUpdatesApprovedBy(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
@@ -2008,66 +2008,12 @@ func TestHandleReviewSubmittedEvent_DismissedPausesReminder(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// タスクがin_reviewに戻り、リマインドが一時停止されているはず
+	// ステータスは変わらない、approved_byだけ更新される
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "dismiss-task").First(&updatedTask)
-	assert.Equal(t, "in_review", updatedTask.Status)
-	assert.NotNil(t, updatedTask.ReminderPausedUntil, "dismiss後はリマインドが一時停止されるべき")
+	assert.Equal(t, "in_review", updatedTask.Status, "ステータスは変更されない")
+	assert.Equal(t, "", updatedTask.ApprovedBy, "approved_byからdismissされたレビュワーが削除される")
+	assert.Nil(t, updatedTask.ReminderPausedUntil, "リマインドの一時停止は設定されない")
 }
 
-func TestHandleReviewRequestedEvent_ResumesReminderAfterDismiss(t *testing.T) {
-	db := setupTestDB(t)
-	gin.SetMode(gin.TestMode)
-	services.IsTestMode = true
 
-	// gockでSlack APIをモック
-	defer gock.Off()
-	gock.New("https://slack.com").
-		Post("/api/chat.postMessage").
-		Reply(200).
-		JSON(map[string]interface{}{"ok": true})
-
-	// dismiss後のタスク（リマインド一時停止中）
-	farFuture := time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
-	task := models.ReviewTask{
-		ID:                  "dismissed-task",
-		PRURL:               "https://github.com/owner/repo/pull/401",
-		Repo:                "owner/repo",
-		PRNumber:            401,
-		Title:               "Test PR",
-		SlackTS:             "1234.5678",
-		SlackChannel:        "C12345",
-		Status:              "in_review",
-		LabelName:           "needs-review",
-		ReminderPausedUntil: &farFuture,
-		CreatedAt:           time.Now(),
-		UpdatedAt:           time.Now(),
-	}
-	db.Create(&task)
-
-	// re-requestイベント
-	payload := `{
-		"action": "review_requested",
-		"pull_request": {"number": 401, "html_url": "https://github.com/owner/repo/pull/401"},
-		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
-		"sender": {"login": "author"},
-		"requested_reviewer": {"login": "reviewer1"}
-	}`
-
-	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Event", "pull_request")
-
-	w := httptest.NewRecorder()
-	router := gin.Default()
-	router.POST("/webhook", HandleGitHubWebhook(db))
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	// リマインドの一時停止が解除されているはず
-	var updatedTask models.ReviewTask
-	db.Where("id = ?", "dismissed-task").First(&updatedTask)
-	assert.Equal(t, "in_review", updatedTask.Status)
-	assert.Nil(t, updatedTask.ReminderPausedUntil, "re-request後はリマインドが再開されるべき")
-}
