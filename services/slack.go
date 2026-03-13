@@ -17,6 +17,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// SlackAPIBaseURL は Slack API のベースURLを返す。
+// 環境変数 SLACK_API_BASE_URL が設定されていればそれを使用し、
+// 未設定の場合は https://slack.com/api を返す。
+// 開発環境で SlackHog (localhost:4112) を使う場合に設定する。
+func SlackAPIBaseURL() string {
+	if base := os.Getenv("SLACK_API_BASE_URL"); base != "" {
+		return strings.TrimRight(base, "/")
+	}
+	return "https://slack.com/api"
+}
+
 // テストモードかどうかを示すフラグ
 var IsTestMode bool
 
@@ -325,7 +336,7 @@ func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID string) (str
 	}
 
 	jsonData, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.postMessage", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", "", err
 	}
@@ -381,7 +392,7 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 	}
 
 	jsonData, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.postMessage", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
@@ -432,7 +443,7 @@ func SendSlackMessage(prURL, title, channel, mentionID, creatorSlackID string) (
 	}
 
 	jsonData, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.postMessage", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", "", err
 	}
@@ -471,7 +482,7 @@ func PostToThread(channel, ts, message string) error {
 	}
 
 	jsonData, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.postMessage", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
@@ -518,7 +529,7 @@ func PostToThreadWithButtons(channel, ts, message string, taskID string) error {
 	}
 
 	jsonData, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.postMessage", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
@@ -628,7 +639,7 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	}
 
 	jsonData, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.postMessage", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
@@ -671,7 +682,7 @@ func SendReminderPausedMessage(task models.ReviewTask, duration string) error {
 
 // ボットが参加しているチャンネルのリストを取得
 func GetBotChannels() ([]string, error) {
-	url := "https://slack.com/api/conversations.list?types=public_channel,private_channel"
+	url := SlackAPIBaseURL() + "/conversations.list?types=public_channel,private_channel"
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -728,7 +739,7 @@ func IsChannelRelatedError(err error) bool {
 
 // チャンネルがアーカイブされているかどうかを確認する関数
 func IsChannelArchived(channelID string) (bool, error) {
-	url := fmt.Sprintf("https://slack.com/api/conversations.info?channel=%s", channelID)
+	url := fmt.Sprintf("%s/conversations.info?channel=%s", SlackAPIBaseURL(), channelID)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -796,7 +807,7 @@ func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
 	}
 
 	jsonData, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.postMessage", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
@@ -930,7 +941,7 @@ func SendOutOfHoursReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	}
 
 	jsonData, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.postMessage", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
@@ -967,7 +978,7 @@ func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
 	}
 
 	jsonData, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", "https://slack.com/api/chat.update", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.update", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}

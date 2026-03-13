@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - SLACK_API_BASE_URL=http://slackhog:4112/api
+      - DB_PATH=/app/data/review_tasks.db
+    env_file:
+      - .env
+    volumes:
+      - app-data:/app/data
+    depends_on:
+      - slackhog
+
+  slackhog:
+    image: ghcr.io/harakeishi/slackhog
+    ports:
+      - "4112:4112"
+    volumes:
+      - ./slackhog.yaml:/etc/slackhog/slackhog.yaml
+    command: ["-config", "/etc/slackhog/slackhog.yaml"]
+
+volumes:
+  app-data:

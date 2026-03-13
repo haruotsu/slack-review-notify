@@ -1,0 +1,9 @@
+port: 4112
+max_messages: 1000
+# 開発環境で使用するSlackチャンネルIDを事前登録
+# アプリからメッセージが届く前でもUIに表示される
+# ここに登録しておくとconversations.infoでchannel_not_foundにならない
+channels:
+  - C12345
+  - C67890
+  - C1234567890
