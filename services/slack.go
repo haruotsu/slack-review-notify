@@ -179,6 +179,9 @@ func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, coun
 func GetPendingReviewers(task models.ReviewTask) []string {
 	if task.Reviewers == "" {
 		if task.Reviewer != "" {
+			if isInCSV(task.ApprovedBy, task.Reviewer) {
+				return nil
+			}
 			return []string{task.Reviewer}
 		}
 		return nil
@@ -200,6 +203,19 @@ func GetPendingReviewers(task models.ReviewTask) []string {
 		}
 	}
 	return pending
+}
+
+// isInCSV はカンマ区切り文字列に指定値が含まれるかチェックする
+func isInCSV(csv, value string) bool {
+	if csv == "" || value == "" {
+		return false
+	}
+	for _, id := range strings.Split(csv, ",") {
+		if strings.TrimSpace(id) == value {
+			return true
+		}
+	}
+	return false
 }
 
 // AddApproval は task.ApprovedBy にレビュワーを追加する（重複防止）。新規追加なら true を返す

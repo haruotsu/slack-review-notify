@@ -876,6 +876,24 @@ func TestRemoveApproval(t *testing.T) {
 	})
 }
 
+func TestGetPendingReviewersWithApprovedReviewer(t *testing.T) {
+	// 単一Reviewerの場合もApprovedByをチェック
+	task := models.ReviewTask{
+		Reviewer:   "UOLD",
+		ApprovedBy: "UOLD",
+	}
+	pending := GetPendingReviewers(task)
+	assert.Nil(t, pending)
+
+	// 単一ReviewerでApprovedByに含まれない場合
+	task2 := models.ReviewTask{
+		Reviewer:   "UOLD",
+		ApprovedBy: "UOTHER",
+	}
+	pending2 := GetPendingReviewers(task2)
+	assert.Equal(t, []string{"UOLD"}, pending2)
+}
+
 func TestGetAwayUserIDs(t *testing.T) {
 	db := setupTestDB(t)
 

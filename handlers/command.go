@@ -1164,6 +1164,10 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params string) {
 					loc = time.UTC
 				}
 				endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
+				if endOfDay.Before(time.Now().In(loc)) {
+					c.String(200, "過去の日付は指定できません。今日以降の日付を指定してください。")
+					return
+				}
 				awayUntil = &endOfDay
 			}
 		case "reason":
