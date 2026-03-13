@@ -58,6 +58,11 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 			if e.Action != nil && (*e.Action == "submitted" || *e.Action == "dismissed") {
 				handleReviewSubmittedEvent(c, db, e)
 			}
+		case *github.IssueCommentEvent:
+			log.Printf("IssueCommentEvent received: action=%s", e.GetAction())
+			if e.GetAction() == "created" && e.GetIssue().IsPullRequest() {
+				handleIssueCommentEvent(c, db, e)
+			}
 		default:
 			log.Printf("Unknown event type received: %T", e)
 		}
@@ -439,6 +444,64 @@ func handleClosedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) 
 
 		log.Printf("task completed due to PR closed: id=%s, repo=%s, pr=%d, merged=%v",
 			task.ID, repoFullName, pr.GetNumber(), pr.GetMerged())
+	}
+}
+
+// PR作成者がissue commentで返答した際の処理
+func handleIssueCommentEvent(c *gin.Context, db *gorm.DB, e *github.IssueCommentEvent) {
+	issue := e.GetIssue()
+	repo := e.GetRepo()
+	comment := e.GetComment()
+	sender := e.GetSender()
+	repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
+	prNumber := issue.GetNumber()
+
+	log.Printf("handling issue comment event: repo=%s, pr=%d, sender=%s", repoFullName, prNumber, sender.GetLogin())
+
+	// PR作成者のコメントのみ通知する
+	prAuthorLogin := issue.GetUser().GetLogin()
+	if sender.GetLogin() != prAuthorLogin {
+		log.Printf("comment is not from PR author (author=%s, sender=%s), skipping", prAuthorLogin, sender.GetLogin())
+		return
+	}
+
+	// 該当PRのアクティブなタスクを検索
+	var tasks []models.ReviewTask
+	db.Where("repo = ? AND pr_number = ? AND status IN ?",
+		repoFullName, prNumber, []string{"in_review", "pending", "snoozed", "waiting_business_hours"}).
+		Find(&tasks)
+
+	if len(tasks) == 0 {
+		log.Printf("no active tasks found for issue comment: repo=%s, pr=%d", repoFullName, prNumber)
+		return
+	}
+
+	// コメント者のSlack IDを取得
+	senderSlackID := services.GetSlackUserIDFromGitHub(db, sender.GetLogin())
+	var senderMention string
+	if senderSlackID != "" {
+		senderMention = fmt.Sprintf("<@%s>", senderSlackID)
+	} else {
+		senderMention = sender.GetLogin()
+	}
+
+	// コメントURLを取得
+	commentURL := comment.GetHTMLURL()
+
+	message := fmt.Sprintf("💬 %s さんがPRにコメントしました: <%s|コメントを見る>", senderMention, commentURL)
+
+	// チャンネルごとに最新のタスクのみ通知（重複防止）
+	notified := make(map[string]bool)
+	for _, task := range tasks {
+		if notified[task.SlackChannel] {
+			continue
+		}
+		if err := services.PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
+			log.Printf("issue comment notification error (channel: %s): %v", task.SlackChannel, err)
+			continue
+		}
+		notified[task.SlackChannel] = true
+		log.Printf("issue comment notification sent: repo=%s, pr=%d, channel=%s", repoFullName, prNumber, task.SlackChannel)
 	}
 }
 
