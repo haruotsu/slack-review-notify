@@ -22,7 +22,7 @@ func TestSlackBlockBuilder_AddSection(t *testing.T) {
 	builder := NewSlackBlockBuilder()
 	result := builder.AddSection("test message")
 
-	// チェーン可能性の確認
+	// Verify chainability
 	if result != builder {
 		t.Error("AddSection should return builder for chaining")
 	}
@@ -52,7 +52,7 @@ func TestSlackBlockBuilder_AddActions(t *testing.T) {
 
 	result := builder.AddActions(button)
 
-	// チェーン可能性の確認
+	// Verify chainability
 	if result != builder {
 		t.Error("AddActions should return builder for chaining")
 	}
@@ -77,7 +77,7 @@ func TestSlackBlockBuilder_AddActions_NoElements(t *testing.T) {
 	builder := NewSlackBlockBuilder()
 	result := builder.AddActions()
 
-	// 要素がない場合はbuilderが変更されないことを確認
+	// Verify that builder is not modified when no elements are provided
 	if result != builder {
 		t.Error("AddActions should return builder for chaining")
 	}
@@ -100,7 +100,7 @@ func TestSlackBlockBuilder_Chaining(t *testing.T) {
 		t.Fatalf("expected 3 blocks, got %d", len(blocks))
 	}
 
-	// 最初のセクション
+	// First section
 	expectedSection1 := map[string]interface{}{
 		"type": "section",
 		"text": map[string]interface{}{
@@ -112,7 +112,7 @@ func TestSlackBlockBuilder_Chaining(t *testing.T) {
 		t.Errorf("first block mismatch: expected %+v, got %+v", expectedSection1, blocks[0])
 	}
 
-	// 2番目のセクション
+	// Second section
 	expectedSection2 := map[string]interface{}{
 		"type": "section",
 		"text": map[string]interface{}{
@@ -124,7 +124,7 @@ func TestSlackBlockBuilder_Chaining(t *testing.T) {
 		t.Errorf("second block mismatch: expected %+v, got %+v", expectedSection2, blocks[1])
 	}
 
-	// アクションブロック
+	// Actions block
 	expectedActions := map[string]interface{}{
 		"type":     "actions",
 		"elements": []map[string]interface{}{button},
@@ -230,7 +230,7 @@ func TestCreatePauseReminderSelect(t *testing.T) {
 func TestCreateAllOptionsPauseReminderSelect(t *testing.T) {
 	selectElement := CreateAllOptionsPauseReminderSelect("task123", "pause_action", "選択...")
 
-	// AllPauseOptionsが正しく使われているかチェック
+	// Check that AllPauseOptions is used correctly
 	options, ok := selectElement["options"].([]map[string]interface{})
 	if !ok {
 		t.Fatal("options should be a slice of maps")
@@ -240,7 +240,7 @@ func TestCreateAllOptionsPauseReminderSelect(t *testing.T) {
 		t.Errorf("expected %d options, got %d", len(AllPauseOptions), len(options))
 	}
 
-	// 最初のオプションをチェック
+	// Check the first option
 	firstOption := options[0]
 	expectedValue := "task123:" + AllPauseOptions[0].Value
 	if firstOption["value"] != expectedValue {
@@ -369,7 +369,7 @@ func TestCreatePauseReminderSelect_EmptyValues(t *testing.T) {
 
 	selectElement := CreatePauseReminderSelect("", "", "", options)
 
-	// taskIDとplaceholderにデフォルト値が設定されることを確認
+	// Verify that default values are set for taskID and placeholder
 	placeholderObj := selectElement["placeholder"].(map[string]interface{})
 	if placeholderObj["text"] != "選択してください" {
 		t.Errorf("expected default placeholder, got %v", placeholderObj["text"])

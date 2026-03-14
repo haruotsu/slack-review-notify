@@ -10,9 +10,9 @@ import (
 	"slack-review-notify/models"
 )
 
-// CheckBusinessHoursTasks は営業時間外待機タスクを営業時間内になったときに処理する
+// CheckBusinessHoursTasks processes tasks waiting for business hours when business hours begin
 func CheckBusinessHoursTasks(db *gorm.DB) {
-	// 現在時刻を取得
+	// Get current time
 	now := time.Now()
 
 	var tasks []models.ReviewTask
@@ -24,7 +24,7 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 	}
 
 	for _, task := range tasks {
-		// チャンネル設定を取得してメンションIDを取得
+		// Get channel config to retrieve mention ID
 		var config models.ChannelConfig
 		labelName := task.LabelName
 		if labelName == "" {
@@ -36,12 +36,12 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 			continue
 		}
 
-		// このチャンネルの営業時間設定をチェック
+		// Check business hours settings for this channel
 		if !IsWithinBusinessHours(&config, now) {
-			continue // 営業時間外なので処理をスキップ
+			continue // Outside business hours, skip processing
 		}
 
-		// レビュワーをランダム選択（PR作成者を除外）
+		// Randomly select reviewers (excluding PR author)
 		excludeIDs := []string{}
 		if task.PRAuthorSlackID != "" {
 			excludeIDs = append(excludeIDs, task.PRAuthorSlackID)
@@ -57,13 +57,13 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 		}
 		reviewersStr := strings.Join(reviewerIDs, ",")
 
-		// スレッドに営業時間通知を送信
+		// Send business hours notification to thread
 		if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
 			log.Printf("business hours notification error (task: %s): %v", task.ID, err)
 			continue
 		}
 
-		// タスクの状態を更新
+		// Update task status
 		task.Status = "in_review"
 		task.Reviewer = reviewerID
 		task.Reviewers = reviewersStr
@@ -76,7 +76,7 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 
 		log.Printf("waiting_business_hours task activated: %s", task.ID)
 
-		// レビュワーが設定された場合は変更ボタン付きの通知も送信
+		// If a reviewer was assigned, also send notification with change button
 		if reviewerID != "" {
 			if err := PostReviewerAssignedMessageWithChangeButton(task); err != nil {
 				log.Printf("reviewer assigned notification error: %v", err)
@@ -85,11 +85,11 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 	}
 }
 
-// CheckInReviewTasks 関数も同様に修正
+// CheckInReviewTasks checks tasks that are in review and sends reminders as needed
 func CheckInReviewTasks(db *gorm.DB) {
 	var tasks []models.ReviewTask
 
-	// "in_review" 状態で、"archived" 状態ではないタスクを検索
+	// Search for tasks in "in_review" status that are not in "archived" status
 	result := db.Where("status = ? AND reviewer != ?", "in_review", "").
 		Where("status != ?", "archived").Find(&tasks)
 
@@ -101,24 +101,24 @@ func CheckInReviewTasks(db *gorm.DB) {
 	now := time.Now()
 
 	for _, task := range tasks {
-		// リマインダー一時停止中かチェック
+		// Check if reminder is temporarily paused
 		if task.ReminderPausedUntil != nil && now.Before(*task.ReminderPausedUntil) {
-			continue // 一時停止中なのでスキップ
+			continue // Paused, so skip
 		}
 
-		// 一時停止ステータスならスキップ
+		// Skip if status is paused
 		if task.Status == "paused" {
 			continue
 		}
 
-		// チャンネル設定からリマインド頻度を取得
+		// Get reminder frequency from channel config
 		var config models.ChannelConfig
-		reminderInterval := 30 // デフォルト値（30分）
+		reminderInterval := 30 // Default value (30 minutes)
 
-		// LabelNameも考慮して設定を取得
+		// Get config considering LabelName
 		labelName := task.LabelName
 		if labelName == "" {
-			labelName = "needs-review" // デフォルトのラベル名
+			labelName = "needs-review" // Default label name
 		}
 
 		if err := db.Where("slack_channel_id = ? AND label_name = ?", task.SlackChannel, labelName).First(&config).Error; err == nil {
@@ -127,26 +127,26 @@ func CheckInReviewTasks(db *gorm.DB) {
 			}
 		}
 
-		// 営業時間外かチェック
+		// Check if outside business hours
 		isOutsideBusinessHours := !IsWithinBusinessHours(&config, now)
 		if isOutsideBusinessHours {
-			// 営業時間外で、まだ営業時間外リマインドを送っていない場合
+			// Outside business hours and haven't sent off-hours reminder yet
 			if !task.OutOfHoursReminded {
-				// 設定された頻度でリマインダーを送信（初回のみ）
+				// Send reminder at configured frequency (first time only)
 				reminderTime := now.Add(-time.Duration(reminderInterval) * time.Minute)
 				if task.UpdatedAt.Before(reminderTime) {
-					// 営業時間外用のリマインドメッセージを送信
+					// Send off-hours reminder message
 					err := SendOutOfHoursReminderMessage(db, task)
 					if err != nil {
 						log.Printf("out of hours reminder send error (task id: %s): %v", task.ID, err)
 
-						// チャンネル関連のエラーの場合はループ継続せずスキップ
+						// Skip without continuing the loop for channel-related errors
 						if strings.Contains(err.Error(), "channel is archived") ||
 							strings.Contains(err.Error(), "not accessible") {
 							continue
 						}
 					} else {
-						// 翌営業日の営業開始時刻まで一時停止
+						// Pause until the next business day's opening time
 						nextBusinessDay := GetNextBusinessDayMorningWithConfig(now, &config)
 						task.ReminderPausedUntil = &nextBusinessDay
 						task.OutOfHoursReminded = true
@@ -160,11 +160,11 @@ func CheckInReviewTasks(db *gorm.DB) {
 					}
 				}
 			}
-			// 既に営業時間外リマインドを送信済みの場合はスキップ（ReminderPausedUntilで制御される）
+			// Skip if off-hours reminder has already been sent (controlled by ReminderPausedUntil)
 		} else {
-			// 営業時間内の場合
+			// During business hours
 
-			// 営業時間外リマインドフラグをリセット
+			// Reset off-hours reminder flag
 			if task.OutOfHoursReminded {
 				task.OutOfHoursReminded = false
 				if err := db.Model(&task).Update("out_of_hours_reminded", false).Error; err != nil {
@@ -172,14 +172,14 @@ func CheckInReviewTasks(db *gorm.DB) {
 				}
 			}
 
-			// 通常のリマインド処理
+			// Normal reminder processing
 			reminderTime := now.Add(-time.Duration(reminderInterval) * time.Minute)
 			if task.UpdatedAt.Before(reminderTime) {
 				err := SendReviewerReminderMessage(db, task)
 				if err != nil {
 					log.Printf("reviewer reminder send error (task id: %s): %v", task.ID, err)
 
-					// チャンネル関連のエラーの場合はループ継続せずスキップ
+					// Skip without continuing the loop for channel-related errors
 					if strings.Contains(err.Error(), "channel is archived") ||
 						strings.Contains(err.Error(), "not accessible") {
 						continue
@@ -197,12 +197,12 @@ func CheckInReviewTasks(db *gorm.DB) {
 	}
 }
 
-// CleanupOldTasks は完了したタスクや不要になったタスクを削除する関数
+// CleanupOldTasks deletes completed tasks and tasks that are no longer needed
 func CleanupOldTasks(db *gorm.DB) {
-	// 現在の時刻
+	// Current time
 	now := time.Now()
 
-	// 1. 完了（done）状態のタスクで、1日以上経過しているものを削除
+	// 1. Delete tasks in "done" status that are more than 1 day old
 	oneDayAgo := now.AddDate(0, 0, -1)
 	var doneTasksCount int64
 	resultDone := db.Where("status = ? AND updated_at < ?", "done", oneDayAgo).
@@ -217,7 +217,7 @@ func CleanupOldTasks(db *gorm.DB) {
 		}
 	}
 
-	// 2. completed状態のタスクで、7日以上経過しているものを削除
+	// 2. Delete tasks in "completed" status that are more than 7 days old
 	oneWeekAgo := now.AddDate(0, 0, -7)
 	var completedTasksCount int64
 	resultCompleted := db.Where("status = ? AND updated_at < ?", "completed", oneWeekAgo).
@@ -232,7 +232,7 @@ func CleanupOldTasks(db *gorm.DB) {
 		}
 	}
 
-	// 3. 一時停止（paused）状態のタスクで、1週間以上経過しているものを削除
+	// 3. Delete tasks in "paused" status that are more than 1 week old
 	var pausedTasksCount int64
 	resultPaused := db.Where("status = ? AND updated_at < ?", "paused", oneWeekAgo).
 		Delete(&models.ReviewTask{})
@@ -246,7 +246,7 @@ func CleanupOldTasks(db *gorm.DB) {
 		}
 	}
 
-	// 4. アーカイブ（archived）状態のタスクを全て削除
+	// 4. Delete all tasks in "archived" status
 	var archivedTasksCount int64
 	resultArchived := db.Where("status = ?", "archived").
 		Delete(&models.ReviewTask{})
@@ -260,14 +260,14 @@ func CleanupOldTasks(db *gorm.DB) {
 		}
 	}
 
-	// 合計削除件数
+	// Total deleted count
 	totalDeleted := doneTasksCount + completedTasksCount + pausedTasksCount + archivedTasksCount
 	if totalDeleted > 0 {
 		log.Printf("total task deleted: %d", totalDeleted)
 	}
 }
 
-// CleanupExpiredAvailability は期限切れの休暇レコードを物理削除する
+// CleanupExpiredAvailability permanently deletes expired leave records
 func CleanupExpiredAvailability(db *gorm.DB) {
 	now := time.Now()
 	result := db.Unscoped().Where("away_until IS NOT NULL AND away_until < ?", now).Delete(&models.ReviewerAvailability{})

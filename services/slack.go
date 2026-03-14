@@ -17,10 +17,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// SlackAPIBaseURL は Slack API のベースURLを返す。
-// 環境変数 SLACK_API_BASE_URL が設定されていればそれを使用し、
-// 未設定の場合は https://slack.com/api を返す。
-// 開発環境で SlackHog (localhost:4112) を使う場合に設定する。
+// SlackAPIBaseURL returns the base URL for the Slack API.
+// If the environment variable SLACK_API_BASE_URL is set, it uses that value;
+// otherwise, it returns https://slack.com/api.
+// Set this when using SlackHog (localhost:4112) in development environments.
 func SlackAPIBaseURL() string {
 	if base := os.Getenv("SLACK_API_BASE_URL"); base != "" {
 		return strings.TrimRight(base, "/")
@@ -28,7 +28,7 @@ func SlackAPIBaseURL() string {
 	return "https://slack.com/api"
 }
 
-// テストモードかどうかを示すフラグ
+// Flag indicating whether test mode is enabled
 var IsTestMode bool
 
 type SlackMessage struct {
@@ -62,7 +62,7 @@ type SlackPostResponse struct {
 }
 
 func ValidateSlackRequest(r *http.Request, body []byte) bool {
-	// テストモードの場合は常に検証成功とする
+	// Always return validation success in test mode
 	if IsTestMode {
 		return true
 	}
@@ -79,13 +79,13 @@ func ValidateSlackRequest(r *http.Request, body []byte) bool {
 		return false
 	}
 
-	// bodyをVerifierに書き込む
+	// Write body to the verifier
 	if _, err := sv.Write(body); err != nil {
 		log.Printf("Failed to write body to verifier: %v", err)
 		return false
 	}
 
-	// 署名を検証
+	// Verify the signature
 	if err := sv.Ensure(); err != nil {
 		log.Printf("Invalid signature: %v", err)
 		return false
@@ -115,12 +115,12 @@ func buildMentionText(mentionID string) string {
 	return fmt.Sprintf("<@%s>", mentionID)
 }
 
-// GetAwayUserIDs は現在休暇中のユーザーIDを返す
+// GetAwayUserIDs returns the user IDs of users currently on leave
 func GetAwayUserIDs(db *gorm.DB) []string {
 	var records []models.ReviewerAvailability
 	now := time.Now()
 
-	// AwayUntil が nil（無期限）または現在時刻より未来のレコードを取得
+	// Retrieve records where AwayUntil is nil (indefinite) or in the future
 	db.Where("away_until IS NULL OR away_until > ?", now).Find(&records)
 
 	ids := make([]string, 0, len(records))
@@ -130,7 +130,7 @@ func GetAwayUserIDs(db *gorm.DB) []string {
 	return ids
 }
 
-// SelectRandomReviewers は指定人数のレビュワーをランダム選択する（excludeIDs を除外）
+// SelectRandomReviewers randomly selects the specified number of reviewers (excluding excludeIDs)
 func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, count int, excludeIDs []string) []string {
 	var config models.ChannelConfig
 
@@ -145,7 +145,7 @@ func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, coun
 
 	reviewers := strings.Split(config.ReviewerList, ",")
 
-	// 休暇中ユーザーも除外対象に追加
+	// Also add users on leave to the exclusion list
 	awayIDs := GetAwayUserIDs(db)
 
 	excludeSet := make(map[string]bool)
@@ -186,7 +186,7 @@ func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, coun
 	return candidates[:count]
 }
 
-// GetPendingReviewers は未approveのレビュワーリストを返す
+// GetPendingReviewers returns the list of reviewers who have not yet approved
 func GetPendingReviewers(task models.ReviewTask) []string {
 	if task.Reviewers == "" {
 		if task.Reviewer != "" {
@@ -216,7 +216,7 @@ func GetPendingReviewers(task models.ReviewTask) []string {
 	return pending
 }
 
-// isInCSV はカンマ区切り文字列に指定値が含まれるかチェックする
+// isInCSV checks whether the specified value is contained in a comma-separated string
 func isInCSV(csv, value string) bool {
 	if csv == "" || value == "" {
 		return false
@@ -229,7 +229,7 @@ func isInCSV(csv, value string) bool {
 	return false
 }
 
-// AddApproval は task.ApprovedBy にレビュワーを追加する（重複防止）。新規追加なら true を返す
+// AddApproval adds a reviewer to task.ApprovedBy (preventing duplicates). Returns true if newly added
 func AddApproval(task *models.ReviewTask, slackUserID string) bool {
 	if slackUserID == "" {
 		return false
@@ -248,7 +248,7 @@ func AddApproval(task *models.ReviewTask, slackUserID string) bool {
 	return true
 }
 
-// RemoveApproval はApprovedByから指定ユーザーを削除する。削除した場合trueを返す。
+// RemoveApproval removes the specified user from ApprovedBy. Returns true if removed.
 func RemoveApproval(task *models.ReviewTask, slackUserID string) bool {
 	if slackUserID == "" || task.ApprovedBy == "" {
 		return false
@@ -271,7 +271,7 @@ func RemoveApproval(task *models.ReviewTask, slackUserID string) bool {
 	return true
 }
 
-// CountApprovals は task.ApprovedBy のapprove数を返す
+// CountApprovals returns the number of approvals in task.ApprovedBy
 func CountApprovals(task models.ReviewTask) int {
 	if task.ApprovedBy == "" {
 		return 0
@@ -285,14 +285,14 @@ func CountApprovals(task models.ReviewTask) int {
 	return count
 }
 
-// IsReviewFullyApproved は必要なapprove数を満たしているか判定する
-// 実際に割り当てられたレビュワー数が requiredApprovals 未満の場合、割り当て人数で判定する
+// IsReviewFullyApproved determines whether the required number of approvals has been met.
+// If the number of actually assigned reviewers is less than requiredApprovals, it uses the assigned count instead.
 func IsReviewFullyApproved(task models.ReviewTask, requiredApprovals int) bool {
 	if requiredApprovals <= 0 {
 		requiredApprovals = 1
 	}
 
-	// 実際に割り当てられたレビュワー数を取得
+	// Get the number of actually assigned reviewers
 	if task.Reviewers != "" {
 		assignedCount := 0
 		for _, id := range strings.Split(task.Reviewers, ",") {
@@ -319,7 +319,7 @@ func IsReviewFullyApproved(task models.ReviewTask, requiredApprovals int) bool {
 	return count >= requiredApprovals
 }
 
-// SendSlackMessageOffHours は営業時間外用のメンション抜きメッセージを送信する
+// SendSlackMessageOffHours sends a message without mentions for off-hours
 func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID string) (string, string, error) {
 	var message string
 	if creatorSlackID != "" {
@@ -371,11 +371,11 @@ func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID string) (str
 	return result.TS, result.Channel, nil
 }
 
-// PostBusinessHoursNotificationToThread は営業時間になったときにスレッドにメンション付き通知を送信する
+// PostBusinessHoursNotificationToThread sends a notification with mentions to a thread when business hours begin
 func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID string) error {
 	mentionText := buildMentionText(mentionID)
 
-	// レビュワーが設定されている場合は追加
+	// Append reviewer info if a reviewer is assigned
 	var reviewerText string
 	if task.Reviewer != "" {
 		reviewerText = fmt.Sprintf("\n\n🎯 *レビュワー*: @%s さん、よろしくお願いします！", task.Reviewer)
@@ -473,7 +473,7 @@ func SendSlackMessage(prURL, title, channel, mentionID, creatorSlackID string) (
 	return slackResp.Ts, slackResp.Channel, nil
 }
 
-// スレッドにメッセージを投稿する関数
+// PostToThread posts a message to a thread
 func PostToThread(channel, ts, message string) error {
 	body := map[string]interface{}{
 		"channel":   channel,
@@ -517,7 +517,7 @@ func PostToThread(channel, ts, message string) error {
 	return nil
 }
 
-// スレッドにボタン付きメッセージを投稿する関数
+// PostToThreadWithButtons posts a message with buttons to a thread
 func PostToThreadWithButtons(channel, ts, message string, taskID string) error {
 	pauseButton := CreateButton("リマインドを一時停止", "pause_reminder_thread", taskID, "danger")
 	blocks := CreateMessageWithActionBlocks(message, pauseButton)
@@ -564,24 +564,24 @@ func PostToThreadWithButtons(channel, ts, message string, taskID string) error {
 	return nil
 }
 
-// レビュアー向けのリマインダーメッセージ
+// SendReviewerReminderMessage sends a reminder message to reviewers
 func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
-	// チャンネルがアーカイブされているか確認
+	// Check if the channel is archived
 	isArchived, err := IsChannelArchived(task.SlackChannel)
 	if err != nil {
 		log.Printf("channel status check error (channel: %s): %v", task.SlackChannel, err)
 
-		// Slack APIエラーの場合、エラーの種類を確認
+		// For Slack API errors, check the error type
 		if strings.Contains(err.Error(), "not_in_channel") ||
 			strings.Contains(err.Error(), "channel_not_found") {
 			log.Printf("bot is not in channel or channel not found: %s", task.SlackChannel)
 
-			// タスクを無効化
+			// Deactivate the task
 			task.Status = "archived"
 			task.UpdatedAt = time.Now()
 			db.Save(&task)
 
-			// チャンネル設定も無効化
+			// Also deactivate the channel config
 			var config models.ChannelConfig
 			if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
 				config.IsActive = false
@@ -597,12 +597,12 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	if isArchived {
 		log.Printf("channel %s is archived", task.SlackChannel)
 
-		// タスクを無効化
+		// Deactivate the task
 		task.Status = "archived"
 		task.UpdatedAt = time.Now()
 		db.Save(&task)
 
-		// チャンネル設定も無効化
+		// Also deactivate the channel config
 		var config models.ChannelConfig
 		if result := db.Where("slack_channel_id = ?", task.SlackChannel).First(&config); result.Error == nil {
 			config.IsActive = false
@@ -614,7 +614,7 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 		return fmt.Errorf("channel is archived: %s", task.SlackChannel)
 	}
 
-	// 未approveのレビュワーのみメンション
+	// Mention only reviewers who have not yet approved
 	pendingReviewers := GetPendingReviewers(task)
 	var mentionParts []string
 	for _, id := range pendingReviewers {
@@ -631,7 +631,7 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder", "リマインダーを停止")
 	blocks := CreateMessageWithActionBlocks(message, pauseSelect)
 
-	// スレッドにボタン付きメッセージを投稿
+	// Post message with buttons to the thread
 	body := map[string]interface{}{
 		"channel":   task.SlackChannel,
 		"thread_ts": task.SlackTS,
@@ -658,7 +658,7 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	return nil
 }
 
-// リマインダーを一時停止したことを通知する関数
+// SendReminderPausedMessage notifies that the reminder has been paused
 func SendReminderPausedMessage(task models.ReviewTask, duration string) error {
 	var message string
 
@@ -680,7 +680,7 @@ func SendReminderPausedMessage(task models.ReviewTask, duration string) error {
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
-// ボットが参加しているチャンネルのリストを取得
+// GetBotChannels retrieves the list of channels the bot has joined
 func GetBotChannels() ([]string, error) {
 	url := SlackAPIBaseURL() + "/conversations.list?types=public_channel,private_channel"
 
@@ -723,7 +723,7 @@ func GetBotChannels() ([]string, error) {
 	return channelIDs, nil
 }
 
-// SlackのAPIエラーが「チャンネル関連のエラー」かどうかを判定
+// IsChannelRelatedError determines whether a Slack API error is a channel-related error
 func IsChannelRelatedError(err error) bool {
 	if err == nil {
 		return false
@@ -737,7 +737,7 @@ func IsChannelRelatedError(err error) bool {
 		strings.Contains(errorStr, "channel_not_found")
 }
 
-// チャンネルがアーカイブされているかどうかを確認する関数
+// IsChannelArchived checks whether a channel is archived
 func IsChannelArchived(channelID string) (bool, error) {
 	url := fmt.Sprintf("%s/conversations.info?channel=%s", SlackAPIBaseURL(), channelID)
 
@@ -771,7 +771,7 @@ func IsChannelArchived(channelID string) (bool, error) {
 
 	if !result.OK {
 		if result.Error == "channel_not_found" {
-			// チャンネルが存在しない場合はアーカイブされていると見なす
+			// Treat non-existent channels as archived
 			return true, nil
 		}
 		return false, fmt.Errorf("failed to get channel info: %s", result.Error)
@@ -780,7 +780,7 @@ func IsChannelArchived(channelID string) (bool, error) {
 	return result.Channel.IsArchived, nil
 }
 
-// 自動割り当てされたレビュワーを表示し、変更ボタンを表示する関数
+// PostReviewerAssignedMessageWithChangeButton displays the auto-assigned reviewers and shows a change button
 func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
 	var message string
 	if task.Reviewers != "" {
@@ -799,7 +799,7 @@ func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
 	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder_initial", "リマインダーを停止")
 	blocks := CreateMessageWithActionsBlocks(message, changeButton, pauseSelect)
 
-	// スレッドにボタン付きメッセージを投稿
+	// Post message with buttons to the thread
 	body := map[string]interface{}{
 		"channel":   task.SlackChannel,
 		"thread_ts": task.SlackTS,
@@ -826,18 +826,18 @@ func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
 	return nil
 }
 
-// formatReviewerMentions は複数のレビュワーIDをSlackメンション形式に変換する
+// formatReviewerMentions converts multiple reviewer IDs into Slack mention format
 func formatReviewerMentions(reviewerIDs string) string {
 	if reviewerIDs == "" {
 		return ""
 	}
 
-	// スペースで分割してIDを抽出
+	// Split by spaces to extract IDs
 	ids := strings.Fields(reviewerIDs)
 
 	var mentions []string
 	for _, id := range ids {
-		// @記号を取り除く
+		// Remove the @ symbol
 		cleanID := strings.TrimPrefix(id, "@")
 		if cleanID != "" {
 			mentions = append(mentions, fmt.Sprintf("<@%s>", cleanID))
@@ -847,7 +847,7 @@ func formatReviewerMentions(reviewerIDs string) string {
 	return strings.Join(mentions, " ")
 }
 
-// レビュワーが変更されたことを通知する関数
+// SendReviewerChangedMessage notifies that the reviewer has been changed
 func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) error {
 	oldMentions := formatReviewerMentions(oldReviewerID)
 	newMentions := formatReviewerMentions(task.Reviewer)
@@ -856,84 +856,84 @@ func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) er
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
-// 指定された時刻から翌営業日の営業開始時刻を取得する関数（営業時間設定対応）
+// GetNextBusinessDayMorningWithConfig gets the next business day's opening time from the specified time (supports business hours config)
 func GetNextBusinessDayMorningWithConfig(now time.Time, config *models.ChannelConfig) time.Time {
-	// タイムゾーンの設定を取得
+	// Get timezone setting
 	timezone := "Asia/Tokyo"
 	if config != nil && config.Timezone != "" {
 		timezone = config.Timezone
 	}
 
-	// タイムゾーンをロード
+	// Load timezone
 	tz, err := time.LoadLocation(timezone)
 	if err != nil {
-		// フォールバック：現在のタイムゾーンを使用
+		// Fallback: use the current timezone
 		tz = now.Location()
 	}
 
-	// 現在時刻を指定タイムゾーンに変換
+	// Convert current time to the specified timezone
 	nowInTZ := now.In(tz)
 
-	// 営業開始時刻を取得（デフォルト: 10:00）
+	// Get business hours start time (default: 10:00)
 	businessHourStart := "10:00"
 	if config != nil && config.BusinessHoursStart != "" {
 		businessHourStart = config.BusinessHoursStart
 	}
 
-	// 営業開始時刻をパース
+	// Parse business hours start time
 	startHour, startMin, err := parseBusinessHoursTime(businessHourStart)
 	if err != nil {
-		// パースに失敗した場合は10:00をデフォルトとする
+		// Default to 10:00 if parsing fails
 		startHour, startMin = 10, 0
 	}
 
-	// 今日の営業開始時刻を作成
+	// Create today's business hours start time
 	todayMorning := time.Date(nowInTZ.Year(), nowInTZ.Month(), nowInTZ.Day(), startHour, startMin, 0, 0, tz)
 
-	// 現在の曜日と時刻を確認
+	// Check current day of week and time
 	weekday := nowInTZ.Weekday()
 
-	// 結果を格納する変数
+	// Variable to store the result
 	var nextBusinessDayMorning time.Time
 
 	switch weekday {
 	case time.Monday, time.Tuesday, time.Wednesday, time.Thursday:
-		// 月〜木の場合
+		// Monday through Thursday
 		if nowInTZ.Before(todayMorning) {
-			// 営業開始時刻前なら今日の営業開始時刻
+			// Before business hours start: use today's start time
 			nextBusinessDayMorning = todayMorning
 		} else {
-			// 営業開始時刻以降なら翌日の営業開始時刻
+			// After business hours start: use tomorrow's start time
 			nextBusinessDayMorning = todayMorning.AddDate(0, 0, 1)
 		}
 	case time.Friday:
-		// 金曜日の場合
+		// Friday
 		if nowInTZ.Before(todayMorning) {
-			// 営業開始時刻前なら今日の営業開始時刻
+			// Before business hours start: use today's start time
 			nextBusinessDayMorning = todayMorning
 		} else {
-			// 営業開始時刻以降なら月曜日の営業開始時刻（3日後）
+			// After business hours start: use Monday's start time (3 days later)
 			nextBusinessDayMorning = todayMorning.AddDate(0, 0, 3)
 		}
 	case time.Saturday:
-		// 土曜日の場合、月曜日の営業開始時刻（2日後）
+		// Saturday: use Monday's start time (2 days later)
 		nextBusinessDayMorning = todayMorning.AddDate(0, 0, 2)
 	case time.Sunday:
-		// 日曜日の場合、月曜日の営業開始時刻（1日後）
+		// Sunday: use Monday's start time (1 day later)
 		nextBusinessDayMorning = todayMorning.AddDate(0, 0, 1)
 	}
 
 	return nextBusinessDayMorning
 }
 
-// SendOutOfHoursReminderMessage は営業時間外のリマインドメッセージを送信する
+// SendOutOfHoursReminderMessage sends a reminder message for off-hours
 func SendOutOfHoursReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	message := fmt.Sprintf("@%s レビューしてくれたら嬉しいです...👀\n\n営業時間外のため、次回のリマインドは翌営業日に送信します。", task.Reviewer)
 
 	pauseSelect := CreateStopOnlyPauseReminderSelect(task.ID, "pause_reminder", "リマインダーを停止")
 	blocks := CreateMessageWithActionBlocks(message, pauseSelect)
 
-	// スレッドにボタン付きメッセージを投稿
+	// Post message with buttons to the thread
 	body := map[string]interface{}{
 		"channel":   task.SlackChannel,
 		"thread_ts": task.SlackTS,
@@ -960,7 +960,7 @@ func SendOutOfHoursReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	return nil
 }
 
-// UpdateSlackMessageForCompletedTask はタスクが完了したことを示すようにSlackメッセージを更新する
+// UpdateSlackMessageForCompletedTask updates the Slack message to indicate that the task is completed
 func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
 	if IsTestMode {
 		log.Printf("test mode: would update slack message for completed task: %s", task.ID)
@@ -970,7 +970,7 @@ func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
 	message := fmt.Sprintf("✅ *%s*\n🔗 %s\n\n*レビュー完了*: このPRのラベルが外れたため、レビュータスクを終了しました。", task.Title, task.PRURL)
 	blocks := CreateMessageBlocks(message)
 
-	// メッセージ更新API呼び出し
+	// Call the message update API
 	body := map[string]interface{}{
 		"channel": task.SlackChannel,
 		"ts":      task.SlackTS,
@@ -1003,7 +1003,7 @@ func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
 	return nil
 }
 
-// レビュー完了の自動通知を送信する関数
+// SendReviewCompletedAutoNotification sends an automatic notification when a review is completed
 func SendReviewCompletedAutoNotification(task models.ReviewTask, reviewerLogin string, reviewState string) error {
 	var message string
 	var emoji string
@@ -1026,7 +1026,7 @@ func SendReviewCompletedAutoNotification(task models.ReviewTask, reviewerLogin s
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
-// PostLabelRemovedNotification はラベル削除によるタスク完了をスレッドに通知する
+// PostLabelRemovedNotification notifies the thread about task completion due to label removal
 func PostLabelRemovedNotification(task models.ReviewTask, removedLabels []string) error {
 	if IsTestMode {
 		log.Printf("test mode: would post label removed notification for task: %s", task.ID)
@@ -1045,7 +1045,7 @@ func PostLabelRemovedNotification(task models.ReviewTask, removedLabels []string
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
-// PostPRClosedNotification は、PRがcloseされたことをスレッドに通知する
+// PostPRClosedNotification notifies the thread that the PR has been closed
 func PostPRClosedNotification(task models.ReviewTask, merged bool) error {
 	if IsTestMode {
 		log.Printf("test mode: would post PR closed notification for task: %s (merged: %v)", task.ID, merged)

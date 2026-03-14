@@ -10,23 +10,23 @@ import (
 	"gorm.io/gorm"
 )
 
-// テスト用のデータベースを作成
+// Create a database for testing
 func setupOutOfHoursTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	assert.NoError(t, err)
 
-	// マイグレーション
+	// Run migrations
 	err = db.AutoMigrate(&models.ReviewTask{}, &models.ChannelConfig{})
 	assert.NoError(t, err)
 
 	return db
 }
 
-// 営業時間外リマインドのテスト（シンプル版）
+// Test for out-of-hours reminders (simple version)
 func TestCheckInReviewTasks_OutOfHoursReminder(t *testing.T) {
 	db := setupOutOfHoursTestDB(t)
 
-	// チャンネル設定を作成
+	// Create channel configuration
 	config := models.ChannelConfig{
 		SlackChannelID:           "C123456",
 		LabelName:                "needs-review",
@@ -36,7 +36,7 @@ func TestCheckInReviewTasks_OutOfHoursReminder(t *testing.T) {
 	}
 	db.Create(&config)
 
-	// 古いUpdatedAtでテストタスクを作成（確実にリマインドが送信される）
+	// Create a test task with an old UpdatedAt (to ensure a reminder is sent)
 	oldTime := time.Now().Add(-2 * time.Hour)
 	task := models.ReviewTask{
 		ID:           "task-1",
@@ -50,46 +50,46 @@ func TestCheckInReviewTasks_OutOfHoursReminder(t *testing.T) {
 	}
 	db.Create(&task)
 
-	// CheckInReviewTasksを実行
+	// Execute CheckInReviewTasks
 	CheckInReviewTasks(db)
 
-	// タスクの状態を確認
+	// Verify task state
 	var updatedTask models.ReviewTask
 	db.First(&updatedTask, "id = ?", "task-1")
 
-	// UpdatedAtが更新されていることを確認（何らかのリマインドが送信された）
+	// Verify that UpdatedAt has been updated (some kind of reminder was sent)
 	assert.True(t, updatedTask.UpdatedAt.After(oldTime),
-		"UpdatedAtが更新されていない（リマインドが送信されていない）")
+		"UpdatedAt was not updated (no reminder was sent)")
 
-	// 現在の時刻で営業時間外判定を確認してログ出力
+	// Check out-of-hours determination at the current time and log the output
 	now := time.Now()
-	// デフォルト設定（10:00-19:00 JST）での判定
+	// Determination using default settings (10:00-19:00 JST)
 	defaultConfig := &models.ChannelConfig{
 		BusinessHoursStart: "10:00",
 		BusinessHoursEnd:   "19:00",
 		Timezone:           "Asia/Tokyo",
 	}
 	isWithinBusiness := IsWithinBusinessHours(defaultConfig, now)
-	t.Logf("現在時刻: %v", now)
-	t.Logf("営業時間内: %v", isWithinBusiness)
+	t.Logf("Current time: %v", now)
+	t.Logf("Within business hours: %v", isWithinBusiness)
 	t.Logf("OutOfHoursReminded: %v", updatedTask.OutOfHoursReminded)
 
 	if updatedTask.ReminderPausedUntil != nil {
 		t.Logf("ReminderPausedUntil: %v", *updatedTask.ReminderPausedUntil)
 	}
 
-	// 営業時間外の場合、OutOfHoursRemindedがtrueになり、ReminderPausedUntilが設定されることを確認
+	// If outside business hours, verify that OutOfHoursReminded is true and ReminderPausedUntil is set
 	if !isWithinBusiness {
 		assert.True(t, updatedTask.OutOfHoursReminded,
-			"営業時間外でOutOfHoursRemindedフラグがtrueになっていない")
+			"OutOfHoursReminded flag should be true outside business hours")
 		assert.NotNil(t, updatedTask.ReminderPausedUntil,
-			"営業時間外でReminderPausedUntilが設定されていない")
+			"ReminderPausedUntil should be set outside business hours")
 	}
 }
 
-// 翌営業日10時の計算テスト
+// Test calculation of next business day at 10:00
 func TestGetNextBusinessDayMorningWithTime_OutOfHours(t *testing.T) {
-	// JSTタイムゾーンを取得
+	// Get JST timezone
 	jst, _ := time.LoadLocation("Asia/Tokyo")
 
 	tests := []struct {
@@ -99,47 +99,47 @@ func TestGetNextBusinessDayMorningWithTime_OutOfHours(t *testing.T) {
 	}{
 		{
 			name:     "月曜9時_同日10時",
-			input:    time.Date(2024, 1, 15, 0, 0, 0, 0, jst), // 月曜9時（JST）
+			input:    time.Date(2024, 1, 15, 0, 0, 0, 0, jst), // Monday 9:00 (JST)
 			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst),
 		},
 		{
 			name:     "月曜20時_翌日10時",
-			input:    time.Date(2024, 1, 15, 11, 0, 0, 0, jst), // 月曜20時（JST）
+			input:    time.Date(2024, 1, 15, 11, 0, 0, 0, jst), // Monday 20:00 (JST)
 			expected: time.Date(2024, 1, 16, 10, 0, 0, 0, jst),
 		},
 		{
 			name:     "金曜20時_月曜10時",
-			input:    time.Date(2024, 1, 19, 11, 0, 0, 0, jst), // 金曜20時（JST）
+			input:    time.Date(2024, 1, 19, 11, 0, 0, 0, jst), // Friday 20:00 (JST)
 			expected: time.Date(2024, 1, 22, 10, 0, 0, 0, jst),
 		},
 		{
 			name:     "土曜14時_月曜10時",
-			input:    time.Date(2024, 1, 20, 14, 0, 0, 0, jst), // 土曜14時（JST）
+			input:    time.Date(2024, 1, 20, 14, 0, 0, 0, jst), // Saturday 14:00 (JST)
 			expected: time.Date(2024, 1, 22, 10, 0, 0, 0, jst),
 		},
 		{
 			name:     "日曜14時_月曜10時",
-			input:    time.Date(2024, 1, 21, 14, 0, 0, 0, jst), // 日曜14時（JST）
+			input:    time.Date(2024, 1, 21, 14, 0, 0, 0, jst), // Sunday 14:00 (JST)
 			expected: time.Date(2024, 1, 22, 10, 0, 0, 0, jst),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// デフォルト設定（10:00開始）を使用
+			// Use default settings (starts at 10:00)
 			result := GetNextBusinessDayMorningWithConfig(tt.input, nil)
 			assert.Equal(t, tt.expected, result,
-				"翌営業日10時の計算が正しくない: got %v, want %v", result, tt.expected)
+				"Next business day 10:00 calculation is incorrect: got %v, want %v", result, tt.expected)
 		})
 	}
 }
 
-// 営業時間判定のテスト
+// Test for business hours determination
 func TestIsWithinBusinessHours_DefaultConfig(t *testing.T) {
-	// JSTタイムゾーンを取得
+	// Get JST timezone
 	jst, _ := time.LoadLocation("Asia/Tokyo")
 
-	// デフォルト設定（10:00-19:00 JST）
+	// Default settings (10:00-19:00 JST)
 	defaultConfig := &models.ChannelConfig{
 		BusinessHoursStart: "10:00",
 		BusinessHoursEnd:   "19:00",
@@ -187,7 +187,7 @@ func TestIsWithinBusinessHours_DefaultConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := IsWithinBusinessHours(defaultConfig, tt.input)
 			assert.Equal(t, tt.expectedWithinBusiness, result,
-				"営業時間判定が正しくない: got %v, want %v", result, tt.expectedWithinBusiness)
+				"Business hours determination is incorrect: got %v, want %v", result, tt.expectedWithinBusiness)
 		})
 	}
 }

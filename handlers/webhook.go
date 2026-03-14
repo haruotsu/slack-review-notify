@@ -82,7 +82,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 	addedLabelName := *addedLabel.Name
 	log.Printf("handling labeled event: repo=%s, pr=%d, added_label=%s", repoFullName, pr.GetNumber(), addedLabelName)
 
-	// チャンネル設定を全て取得
+	// Get all channel configs
 	var configs []models.ChannelConfig
 	db.Where("is_active = ?", true).Find(&configs)
 
@@ -95,7 +95,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 	notified := false
 
 	for _, config := range configs {
-		// チャンネルがアーカイブされているか確認
+		// Check if channel is archived
 		isArchived, checkErr := services.IsChannelArchived(config.SlackChannelID)
 		if checkErr != nil {
 			log.Printf("channel status check error (channel: %s): %v", config.SlackChannelID, checkErr)
@@ -104,7 +104,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 		if isArchived {
 			log.Printf("channel %s is archived. skip", config.SlackChannelID)
 
-			// アーカイブされたチャンネルの設定を非アクティブに更新
+			// Deactivate the archived channel's config
 			config.IsActive = false
 			config.UpdatedAt = time.Now()
 			if err := db.Save(&config).Error; err != nil {
@@ -115,28 +115,28 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 			continue
 		}
 
-		// リポジトリフィルタがある場合はチェック
+		// Check repository filter if configured
 		if !services.IsRepositoryWatched(&config, repoFullName) {
 			log.Printf("repository %s is not watched (channel: %s, config: %s)",
 				repoFullName, config.SlackChannelID, config.RepositoryList)
 			continue
 		}
 
-		// 追加されたラベルが設定に関連するかチェック
+		// Check if the added label is relevant to the config
 		if !services.IsAddedLabelRelevant(&config, addedLabelName) {
 			log.Printf("added label '%s' is not relevant to config (channel: %s, config: %s)",
 				addedLabelName, config.SlackChannelID, config.LabelName)
 			continue
 		}
 
-		// ラベルをチェック（複数ラベル対応）
+		// Check labels (supports multiple labels)
 		if !services.IsLabelMatched(&config, pr.Labels) {
 			log.Printf("label requirements not met (channel: %s, config: %s)",
 				config.SlackChannelID, config.LabelName)
 			continue
 		}
 
-		// リトライトランザクション処理
+		// Transaction with retry handling
 		const maxRetries = 3
 		const baseDelay = 100 * time.Millisecond
 
@@ -146,7 +146,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 
 		for retry := 0; retry < maxRetries; retry++ {
 			txErr = db.Transaction(func(tx *gorm.DB) error {
-				// 既存のアクティブなタスクをチェック（同一チャンネル・同一PRでは1つのみ作成）
+				// Check for existing active tasks (only create one per channel and PR)
 				var existingTask models.ReviewTask
 				existingErr := tx.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN (?)",
 					repoFullName, pr.GetNumber(), config.SlackChannelID,
@@ -154,24 +154,24 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					First(&existingTask).Error
 
 				if existingErr == nil {
-					// 既存のタスクが存在する場合はスキップ（ラベル名に関係なく）
+					// Skip if an active task already exists (regardless of label name)
 					log.Printf("active task already exists for PR %d in channel %s (existing label: %s, current config: %s), skipping",
 						pr.GetNumber(), config.SlackChannelID, existingTask.LabelName, config.LabelName)
 					taskCreated = false
-					return nil // トランザクションを正常終了させてスキップ
+					return nil // End transaction normally and skip
 				}
 
-				// まず仮のタスクレコードを作成（Slackメッセージ送信前）
+				// First create a temporary task record (before sending Slack message)
 				tempTask := models.ReviewTask{
 					ID:           uuid.NewString(),
 					PRURL:        pr.GetHTMLURL(),
 					Repo:         repoFullName,
 					PRNumber:     pr.GetNumber(),
 					Title:        pr.GetTitle(),
-					SlackTS:      "", // 後で更新
+					SlackTS:      "", // Updated later
 					SlackChannel: config.SlackChannelID,
-					Reviewer:     "",        // 後で更新
-					Status:       "pending", // 仮の状態
+					Reviewer:     "",        // Updated later
+					Status:       "pending", // Temporary state
 					LabelName:    config.LabelName,
 					CreatedAt:    time.Now(),
 					UpdatedAt:    time.Now(),
@@ -184,14 +184,14 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 
 				taskCreated = true
 
-				// トランザクション外でSlackメッセージ送信とタスク更新を行う
+				// Send Slack message and update task outside the transaction
 				processTask = func() {
 					var slackTs, slackChannelID string
 					var taskStatus string
 					var reviewerID string
 					var reviewersStr string
 
-					// 営業時間外判定
+					// Check if outside business hours
 					creatorGithubUsername := pr.GetUser().GetLogin()
 					creatorSlackID := services.GetSlackUserIDFromGitHub(db, creatorGithubUsername)
 					if creatorSlackID != "" {
@@ -199,7 +199,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					}
 
 					if !services.IsWithinBusinessHours(&config, time.Now()) {
-						// 営業時間外の場合：メンション抜きメッセージを送信
+						// Outside business hours: send message without mention
 						var err error
 						slackTs, slackChannelID, err = services.SendSlackMessageOffHours(
 							pr.GetHTMLURL(),
@@ -208,17 +208,17 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 							creatorSlackID,
 						)
 						taskStatus = "waiting_business_hours"
-						// レビュワーは翌営業日朝に設定する
+						// Reviewer will be set on the next business day morning
 						reviewerID = ""
 						if err != nil {
 							log.Printf("off-hours slack message failed (channel: %s): %v", config.SlackChannelID, err)
-							// エラー時はタスクを削除
+							// Delete task on error
 							db.Delete(&tempTask)
 							return
 						}
 						log.Printf("off-hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
 					} else {
-						// 営業時間内の場合：通常のメンション付きメッセージを送信
+						// During business hours: send message with mention
 						var err error
 						slackTs, slackChannelID, err = services.SendSlackMessage(
 							pr.GetHTMLURL(),
@@ -235,19 +235,19 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 						}
 						log.Printf("business hours message sent: ts=%s, channel=%s", slackTs, slackChannelID)
 
-						// PR作成者を除外IDリストに追加
+						// Add PR author to exclusion ID list
 						excludeIDs := []string{}
 						if creatorSlackID != "" {
 							excludeIDs = append(excludeIDs, creatorSlackID)
 						}
 
-						// 必要なapprove数を取得
+						// Get required number of approvals
 						requiredApprovals := config.RequiredApprovals
 						if requiredApprovals <= 0 {
 							requiredApprovals = 1
 						}
 
-						// レビュワー選択
+						// Select reviewers
 						reviewerIDs := services.SelectRandomReviewers(db, config.SlackChannelID, config.LabelName, requiredApprovals, excludeIDs)
 						if len(reviewerIDs) > 0 {
 							reviewerID = reviewerIDs[0]
@@ -255,7 +255,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 						reviewersStr = strings.Join(reviewerIDs, ",")
 					}
 
-					// タスクを正式な状態に更新
+					// Update task to its final state
 					updates := map[string]interface{}{
 						"slack_ts":          slackTs,
 						"reviewer":          reviewerID,
@@ -270,7 +270,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 						return
 					}
 
-					// ローカルオブジェクトも更新
+					// Also update local object
 					tempTask.SlackTS = slackTs
 					tempTask.Reviewer = reviewerID
 					tempTask.Reviewers = reviewersStr
@@ -280,7 +280,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 
 					log.Printf("pr registered (channel: %s): %s", config.SlackChannelID, tempTask.PRURL)
 
-					// 営業時間内で、レビュワーが割り当てられた場合のみスレッドに通知
+					// Only notify in thread during business hours when a reviewer is assigned
 					if taskStatus == "in_review" && reviewerID != "" {
 						if err := services.PostReviewerAssignedMessageWithChangeButton(tempTask); err != nil {
 							log.Printf("reviewer assigned notification error: %v", err)
@@ -291,11 +291,11 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 				return nil
 			})
 
-			// 成功した場合はループから抜ける
+			// Break out of loop on success
 			if txErr == nil {
-				// トランザクション成功後にタスク更新処理を実行
+				// Execute task update after successful transaction
 				if taskCreated {
-					// テストモードでは同期実行、本番ではgoroutineで非同期実行
+					// Run synchronously in test mode, asynchronously via goroutine in production
 					if services.IsTestMode {
 						processTask()
 					} else {
@@ -305,16 +305,16 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 				break
 			}
 
-			// データベースロックエラーの場合はリトライ
+			// Retry on database lock error
 			if strings.Contains(txErr.Error(), "database is locked") && retry < maxRetries-1 {
-				delay := baseDelay * time.Duration(1<<retry) // 指数バックオフ
+				delay := baseDelay * time.Duration(1<<retry) // Exponential backoff
 				log.Printf("database lock detected for channel %s, retrying in %v (attempt %d/%d)",
 					config.SlackChannelID, delay, retry+1, maxRetries)
 				time.Sleep(delay)
 				continue
 			}
 
-			// その他のエラーまたは最大リトライ回数に達した場合
+			// Other errors or max retries reached
 			break
 		}
 
@@ -342,7 +342,7 @@ func handleUnlabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEven
 
 	log.Printf("handling unlabeled event: repo=%s, pr=%d", repoFullName, pr.GetNumber())
 
-	// 該当するPRの全てのアクティブタスクを検索
+	// Search for all active tasks for the PR
 	var tasks []models.ReviewTask
 	db.Where("repo = ? AND pr_number = ? AND status IN (?)",
 		repoFullName, pr.GetNumber(), []string{"pending", "in_review", "snoozed", "waiting_business_hours"}).Find(&tasks)
@@ -352,12 +352,12 @@ func handleUnlabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEven
 		return
 	}
 
-	// チャンネル設定を取得して、ラベル条件をチェック
+	// Get channel configs and check label conditions
 	var configs []models.ChannelConfig
 	db.Where("is_active = ?", true).Find(&configs)
 
 	for _, task := range tasks {
-		// このタスクに対応する設定を探す
+		// Find the config corresponding to this task
 		var matchingConfig *models.ChannelConfig
 		for _, config := range configs {
 			if config.SlackChannelID == task.SlackChannel && config.LabelName == task.LabelName {
@@ -371,26 +371,26 @@ func handleUnlabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEven
 			continue
 		}
 
-		// PRの現在のラベル状態で、このタスクの条件を満たすかチェック
+		// Check if the task's conditions are still met with the PR's current label state
 		if !services.IsLabelMatched(matchingConfig, pr.Labels) {
 			log.Printf("label conditions no longer met for task: %s", task.ID)
 
-			// 削除されたラベルを特定
+			// Identify the removed labels
 			missingLabels := services.GetMissingLabels(matchingConfig, pr.Labels)
 
-			// Slackメッセージを更新してタスク完了を通知
+			// Update Slack message to notify task completion
 			if err := services.UpdateSlackMessageForCompletedTask(task); err != nil {
 				log.Printf("failed to update slack message for completed task: %v", err)
 				continue
 			}
 
-			// ラベル削除による完了をスレッドに通知
+			// Notify in thread about completion due to label removal
 			if err := services.PostLabelRemovedNotification(task, missingLabels); err != nil {
 				log.Printf("failed to post label removed notification: %v", err)
-				// 通知失敗してもタスクは完了状態にする
+				// Still complete the task even if notification fails
 			}
 
-			// タスクのステータスを完了に更新
+			// Update task status to completed
 			task.Status = "completed"
 			task.UpdatedAt = time.Now()
 			if err := db.Save(&task).Error; err != nil {
@@ -405,7 +405,7 @@ func handleUnlabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEven
 	}
 }
 
-// PRがcloseされた際の処理
+// handleClosedEvent handles the event when a PR is closed
 func handleClosedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) {
 	pr := e.PullRequest
 	repo := e.Repo
@@ -413,7 +413,7 @@ func handleClosedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) 
 
 	log.Printf("handling closed event: repo=%s, pr=%d, merged=%v", repoFullName, pr.GetNumber(), pr.GetMerged())
 
-	// 該当するPRの全てのアクティブタスクを検索
+	// Search for all active tasks for the PR
 	var tasks []models.ReviewTask
 	db.Where("repo = ? AND pr_number = ? AND status IN (?)",
 		repoFullName, pr.GetNumber(), []string{"pending", "in_review", "snoozed", "waiting_business_hours"}).Find(&tasks)
@@ -423,15 +423,15 @@ func handleClosedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) 
 		return
 	}
 
-	// 各タスクについて完了処理を実行
+	// Execute completion processing for each task
 	for _, task := range tasks {
-		// Slackにクローズ通知を送信
+		// Send close notification to Slack
 		if err := services.PostPRClosedNotification(task, pr.GetMerged()); err != nil {
 			log.Printf("failed to post PR closed notification: %v", err)
-			// 通知失敗してもタスクは完了状態にする
+			// Still complete the task even if notification fails
 		}
 
-		// タスクのステータスを完了に更新
+		// Update task status to completed
 		task.Status = "completed"
 		task.UpdatedAt = time.Now()
 		if err := db.Save(&task).Error; err != nil {
@@ -444,7 +444,7 @@ func handleClosedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) 
 	}
 }
 
-// GitHubのre-request reviewボタンが押された際の処理
+// handleReviewRequestedEvent handles the event when GitHub's re-request review button is pressed
 func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) {
 	pr := e.PullRequest
 	repo := e.Repo
@@ -463,7 +463,7 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	log.Printf("handling review_requested event: repo=%s, pr=%d, sender=%s, requested_reviewer=%s",
 		repoFullName, pr.GetNumber(), senderLogin, reviewerLogin)
 
-	// completed または in_review のタスクを検索
+	// Search for completed or in_review tasks
 	var tasks []models.ReviewTask
 	if err := db.Where("repo = ? AND pr_number = ? AND status IN ?",
 		repoFullName, pr.GetNumber(), []string{"completed", "in_review", "pending", "snoozed", "waiting_business_hours"}).
@@ -478,7 +478,7 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 		return
 	}
 
-	// チャンネルごとに最新のタスクのみを抽出
+	// Extract only the latest task per channel
 	channelLatestTasks := make(map[string]models.ReviewTask)
 	for _, task := range tasks {
 		if _, exists := channelLatestTasks[task.SlackChannel]; !exists {
@@ -489,7 +489,7 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	senderSlackID := services.GetSlackUserIDFromGitHub(db, senderLogin)
 	reviewerSlackID := services.GetSlackUserIDFromGitHub(db, reviewerLogin)
 
-	// メンション文字列を構築
+	// Build mention strings
 	var senderMention string
 	if senderSlackID != "" {
 		senderMention = fmt.Sprintf("<@%s>", senderSlackID)
@@ -505,7 +505,7 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	}
 
 	for _, latestTask := range channelLatestTasks {
-		// completedタスクはin_reviewに戻す
+		// Revert completed tasks to in_review
 		if latestTask.Status == "completed" {
 			result := db.Model(&models.ReviewTask{}).
 				Where("id = ? AND status = ?", latestTask.ID, "completed").
@@ -524,7 +524,7 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			log.Printf("task reactivated for re-review: id=%s, repo=%s, pr=%d", latestTask.ID, repoFullName, pr.GetNumber())
 		}
 
-		// スレッドに再レビュー依頼通知を投稿
+		// Post re-review request notification to thread
 		message := fmt.Sprintf("🔄 %s さんが %s に再レビューを依頼しました。対応をお願いします！",
 			senderMention, reviewerMention)
 		if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, message); err != nil {
@@ -533,7 +533,7 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	}
 }
 
-// レビューが提出された際の処理
+// handleReviewSubmittedEvent handles the event when a review is submitted
 func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestReviewEvent) {
 	pr := e.PullRequest
 	repo := e.Repo
@@ -543,20 +543,20 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	log.Printf("handling review submitted event: repo=%s, pr=%d, reviewer=%s, state=%s",
 		repoFullName, pr.GetNumber(), review.GetUser().GetLogin(), review.GetState())
 
-	// PRが閉じている場合は通知をスキップ
+	// Skip notification if PR is closed
 	if pr.GetState() == "closed" {
 		log.Printf("PR is closed, skipping notification: repo=%s, pr=%d", repoFullName, pr.GetNumber())
 		return
 	}
 
-	// レビューが「承認」「変更要求」「コメント」のいずれかの場合のみ処理
+	// Only process if the review is "approved", "changes_requested", or "commented"
 	reviewState := review.GetState()
 	if reviewState != "approved" && reviewState != "changes_requested" && reviewState != "commented" && reviewState != "dismissed" {
 		log.Printf("review state %s is not handled", reviewState)
 		return
 	}
 
-	// 該当するタスクを検索（completed状態も含める）
+	// Search for matching tasks (including completed status)
 	var tasks []models.ReviewTask
 	result := db.Where("repo = ? AND pr_number = ? AND status IN ?",
 		repoFullName, pr.GetNumber(), []string{"in_review", "pending", "snoozed", "waiting_business_hours", "completed"}).
@@ -573,22 +573,22 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 		return
 	}
 
-	// チャンネルごとに最新のタスクのみを抽出
+	// Extract only the latest task per channel
 	channelLatestTasks := make(map[string]models.ReviewTask)
 	for _, task := range tasks {
-		// すでに同じチャンネルのタスクが存在するかチェック
+		// Check if a task for this channel already exists
 		if _, exists := channelLatestTasks[task.SlackChannel]; !exists {
-			// created_at DESCでソート済みなので、最初に見つかったものが最新
+			// Since sorted by created_at DESC, the first found is the latest
 			channelLatestTasks[task.SlackChannel] = task
 		}
 	}
 
-	// レビュワーのGitHubユーザー名からSlack IDを取得
+	// Get Slack ID from reviewer's GitHub username
 	reviewerSlackID := services.GetSlackUserIDFromGitHub(db, review.GetUser().GetLogin())
 
-	// 各チャンネルの最新タスクについて通知を送信
+	// Send notifications for the latest task in each channel
 	for channel, latestTask := range channelLatestTasks {
-		// RequiredApprovalsを取得
+		// Get RequiredApprovals
 		requiredApprovals := 1
 		if latestTask.LabelName != "" {
 			var config models.ChannelConfig
@@ -606,8 +606,8 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 		switch reviewState {
 		case "dismissed":
-			// approved_byからdismissされたレビュワーを削除するのみ
-			// ステータス変更や通知は行わない（re-requestで対応する）
+			// Only remove the dismissed reviewer from approved_by
+			// No status change or notification (handled via re-request)
 			oldApprovedBy := latestTask.ApprovedBy
 			if services.RemoveApproval(&latestTask, approvalID) {
 				result := db.Model(&models.ReviewTask{}).
@@ -627,7 +627,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			}
 
 		case "approved":
-			// レビュー完了通知をスレッドに投稿
+			// Post review completion notification to thread
 			if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
 				log.Printf("failed to send review completed notification: %v", err)
 				if !services.IsChannelRelatedError(err) {
@@ -635,22 +635,22 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 				}
 			}
 
-			// approve追跡: CAS的なwhere句で同時approve時の競合を防止
+			// Approval tracking: use CAS-like WHERE clause to prevent concurrent approval conflicts
 			oldApprovedBy := latestTask.ApprovedBy
 			services.AddApproval(&latestTask, approvalID)
 
-			// 全員approve済みか判定
+			// Determine if all required approvals are met
 			fullyApproved := services.IsReviewFullyApproved(latestTask, requiredApprovals)
 
 			if fullyApproved {
-				// レビュー完了メッセージをスレッドに投稿
+				// Post review complete message to thread
 				approvedCount := services.CountApprovals(latestTask)
 				completeMsg := fmt.Sprintf("🎉 %d/%d approved - レビュー完了！", approvedCount, requiredApprovals)
 				if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, completeMsg); err != nil {
 					log.Printf("failed to post review complete message: %v", err)
 				}
 
-				// 全員approve済み → 全タスクをcompletedに
+				// All approvals met -> mark all tasks as completed
 				var channelTasks []models.ReviewTask
 				db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
 					repoFullName, pr.GetNumber(), channel,
@@ -680,7 +680,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					}
 				}
 			} else {
-				// 部分approve: CAS的なwhere句でapproved_byを更新（同時approve対策）
+				// Partial approval: update approved_by with CAS-like WHERE clause (concurrent approval protection)
 				result := db.Model(&models.ReviewTask{}).
 					Where("id = ? AND (approved_by = ? OR approved_by IS NULL OR approved_by = '')", latestTask.ID, oldApprovedBy).
 					Updates(map[string]interface{}{
@@ -694,7 +694,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					continue
 				}
 
-				// 進捗メッセージをスレッドに投稿
+				// Post progress message to thread
 				approvedCount := services.CountApprovals(latestTask)
 				progressMsg := fmt.Sprintf("✅ %d/%d approved", approvedCount, requiredApprovals)
 				if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, progressMsg); err != nil {
@@ -706,7 +706,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			}
 
 		default:
-			// changes_requested, commented など
+			// changes_requested, commented, etc.
 			if err := services.SendReviewCompletedAutoNotification(latestTask, review.GetUser().GetLogin(), reviewState); err != nil {
 				log.Printf("failed to send review completed notification: %v", err)
 				if !services.IsChannelRelatedError(err) {
@@ -714,7 +714,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 				}
 			}
 
-			// 同一チャンネル・同一PRの全タスクをcompletedに更新（リマインド防止）
+			// Update all tasks for the same channel and PR to completed (to prevent reminders)
 			var channelTasks []models.ReviewTask
 			db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
 				repoFullName, pr.GetNumber(), channel,

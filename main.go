@@ -35,24 +35,24 @@ func main() {
 		log.Fatal("fail to migrate db:", err)
 	}
 
-	// バックグラウンドでウォッチングタスクをチェックする定期実行タスク
+	// Background periodic task to check watching tasks
 	go runTaskChecker(db)
 
-	// バックグラウンドでチャンネル状態をチェック
+	// Background check for channel status
 	go runChannelChecker(db)
 
 	r := gin.Default()
 
-	// Slackボタン押下イベント
+	// Slack button click events
 	r.POST("/slack/actions", handlers.HandleSlackAction(db))
 
-	// GitHub Webhook受信
+	// Receive GitHub Webhooks
 	r.POST("/webhook", handlers.HandleGitHubWebhook(db))
 
-	// Slackコマンド受信
+	// Receive Slack commands
 	r.POST("/slack/command", handlers.HandleSlackCommand(db))
 
-	// Slackイベント受信エンドポイント
+	// Slack event receiving endpoint
 	r.POST("/slack/events", handlers.HandleSlackEvents(db))
 
 	if err := r.Run(":8080"); err != nil {
@@ -60,10 +60,10 @@ func main() {
 	}
 }
 
-// 定期的にタスクをチェックするバックグラウンド処理
+// Background process that periodically checks tasks
 func runTaskChecker(db *gorm.DB) {
-	taskTicker := time.NewTicker(60 * time.Second) // 1分ごとにチェック
-	cleanupTicker := time.NewTicker(1 * time.Hour) // 1時間ごとにクリーンアップ
+	taskTicker := time.NewTicker(60 * time.Second) // Check every 1 minute
+	cleanupTicker := time.NewTicker(1 * time.Hour) // Cleanup every 1 hour
 	defer taskTicker.Stop()
 	defer cleanupTicker.Stop()
 
@@ -72,31 +72,31 @@ func runTaskChecker(db *gorm.DB) {
 		case <-taskTicker.C:
 			log.Println("start task check")
 
-			// 営業時間外待機タスクのチェック
+			// Check tasks waiting for business hours
 			services.CheckBusinessHoursTasks(db)
 
-			// レビュー中タスク（レビュアー割り当て済み）のチェック
+			// Check in-review tasks (reviewer already assigned)
 			services.CheckInReviewTasks(db)
 
 		case <-cleanupTicker.C:
 			log.Println("start old task cleanup")
 
-			// 古いタスクの削除処理
+			// Delete old tasks
 			services.CleanupOldTasks(db)
 
-			// 期限切れの休暇レコードを削除
+			// Delete expired availability records
 			services.CleanupExpiredAvailability(db)
 		}
 	}
 }
 
-// 定期的にチャンネル状態を確認するバックグラウンド処理
+// Background process that periodically checks channel status
 func runChannelChecker(db *gorm.DB) {
-	ticker := time.NewTicker(1 * time.Hour) // 1時間ごとにチェック
+	ticker := time.NewTicker(1 * time.Hour) // Check every 1 hour
 	defer ticker.Stop()
 
 	for range ticker.C {
 		log.Println("start channel status check")
-		services.CleanupArchivedChannels(db) // アーカイブされたチャンネルの設定を非アクティブに更新
+		services.CleanupArchivedChannels(db) // Deactivate configs for archived channels
 	}
 }

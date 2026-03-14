@@ -4,18 +4,18 @@ APP_NAME := slack-review-notify
 GO := go
 
 help:
-	@echo "使用可能なコマンド:"
-	@echo "  make build    - アプリケーションをビルドします"
-	@echo "  make run      - アプリケーションを実行します"
-	@echo "  make test     - テストを実行します"
-	@echo "  make clean    - ビルド成果物を削除します"
-	@echo "  make all      - cleanとビルドを実行します"
-	@echo "  make lint     - lintを実行します"
-	@echo "  make lint-install - golangci-lintをインストールします"
-	@echo "  make slackhog - SlackHogを起動します（開発用Slackモック）"
-	@echo "  make up       - docker composeで開発環境を起動します"
-	@echo "  make down     - docker composeで開発環境を停止します"
-	@echo "  make help     - このヘルプメッセージを表示します"
+	@echo "Available commands:"
+	@echo "  make build    - Build the application"
+	@echo "  make run      - Run the application"
+	@echo "  make test     - Run tests"
+	@echo "  make clean    - Remove build artifacts"
+	@echo "  make all      - Run clean and build"
+	@echo "  make lint     - Run lint"
+	@echo "  make lint-install - Install golangci-lint"
+	@echo "  make slackhog - Start SlackHog (Slack mock for development)"
+	@echo "  make up       - Start development environment with docker compose"
+	@echo "  make down     - Stop development environment with docker compose"
+	@echo "  make help     - Show this help message"
 
 run: build
 	./$(APP_NAME)

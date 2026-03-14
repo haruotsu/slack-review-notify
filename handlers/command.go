@@ -20,7 +20,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Slackのスラッシュコマンドを処理するハンドラ
+// HandleSlackCommand is a handler that processes Slack slash commands
 func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bodyBytes, err := io.ReadAll(c.Request.Body)
@@ -30,10 +30,10 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// ボディを復元
+		// Restore the body
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-		// 署名を検証
+		// Verify the signature
 		if !services.ValidateSlackRequest(c.Request, bodyBytes) {
 			log.Println("invalid slack signature")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid slack signature"})
@@ -48,7 +48,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 		log.Printf("slack command received: command=%s, text=%s, channel=%s, user=%s",
 			command, text, channelID, userID)
 
-		// すべてのチャンネル設定を出力してデバッグ
+		// Output all channel configs for debugging
 		var allConfigs []models.ChannelConfig
 		db.Find(&allConfigs)
 		log.Printf("all channel configs in database (%d):", len(allConfigs))
@@ -56,21 +56,21 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			log.Printf("[%d] ID=%s, Channel=%s, Label=%s", i, cfg.ID, cfg.SlackChannelID, cfg.LabelName)
 		}
 
-		// /slack-review-notify コマンドの処理
+		// Process the /slack-review-notify command
 		if command == "/slack-review-notify" {
-			// コマンド部分とパラメータを分離
+			// Separate the command part from parameters
 			var labelName, subCommand, params string
 
-			// テキストをクォート対応で分割
+			// Split text with quote support
 			parts := parseCommand(text)
 
 			if len(parts) == 0 {
-				// 引数がない場合はヘルプを表示
+				// Show help when no arguments are provided
 				showHelp(c)
 				return
 			}
 
-			// 最初の引数がサブコマンドかラベル名か判断
+			// Determine whether the first argument is a subcommand or a label name
 			potentialSubCommands := []string{"show", "help", "set-mention", "add-reviewer",
 				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
 				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
@@ -88,15 +88,15 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			if isSubCommand {
-				// 最初の引数がサブコマンドの場合、デフォルトのラベル名を使用
+				// If the first argument is a subcommand, use the default label name
 				subCommand = parts[0]
-				labelName = "needs-review" // デフォルトのラベル名
+				labelName = "needs-review" // Default label name
 
 				if len(parts) > 1 {
 					params = strings.Join(parts[1:], " ")
 				}
 			} else {
-				// 最初の引数がラベル名の場合
+				// If the first argument is a label name
 				labelName = parts[0]
 
 				if len(parts) > 1 {
@@ -106,41 +106,41 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 						params = strings.Join(parts[2:], " ")
 					}
 				} else {
-					// ラベル名のみが指定された場合はその設定を表示
+					// If only the label name is specified, show its settings
 					subCommand = "show"
 				}
 			}
 
-			// ラベル名に関するロギング
+			// Log information about the label name
 			log.Printf("command parsed: label=%s, subCommand=%s, params=%s",
 				labelName, subCommand, params)
 
 			if subCommand == "" || subCommand == "help" {
-				// ヘルプを表示
+				// Show help
 				showHelp(c)
 				return
 			}
 
-			// ラベル名を指定して既存設定を取得
+			// Get existing config by label name
 			var config models.ChannelConfig
 			result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 
-			// ラベル名を指定して設定が見つからなかった場合は新しく作成
+			// If no config found for the specified label name, create a new one
 			if result.Error != nil {
 				log.Printf("config for channel(%s) and label(%s) not found: %v",
 					channelID, labelName, result.Error)
 
-				// 新しい設定の作成は各コマンド処理内で行う
+				// New config creation is handled within each command processor
 			}
 
 			switch subCommand {
 			case "show":
-				// 現在の設定を表示
+				// Show current settings
 				if isSubCommand && len(parts) == 1 {
-					// ラベル名が指定されていない場合はすべてのラベルを表示
+					// If no label name is specified, show all labels
 					showAllLabels(c, db, channelID)
 				} else {
-					// 特定のラベルの設定を表示
+					// Show settings for a specific label
 					showConfig(c, db, channelID, labelName)
 				}
 
@@ -157,20 +157,20 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 					c.String(200, "レビュワーのユーザーIDをカンマ区切りで指定してください。例: /slack-review-notify "+labelName+" add-reviewer @user1,@user2")
 					return
 				}
-				// 正規表現を使ってすべてのスペースパターンを処理
+				// Use regex to handle all space patterns
 				re := regexp.MustCompile(`\s*,\s*`)
 				reviewerIDs := re.ReplaceAllString(params, ",")
 
-				// 先頭と末尾の空白も削除
+				// Also trim leading and trailing whitespace
 				reviewerIDs = strings.TrimSpace(reviewerIDs)
 				addReviewers(c, db, channelID, labelName, reviewerIDs)
 
 			case "show-reviewers":
-				// レビュワーリストを表示
+				// Show the reviewer list
 				showReviewers(c, db, channelID, labelName)
 
 			case "clear-reviewers":
-				// レビュワーリストをクリア
+				// Clear the reviewer list
 				clearReviewers(c, db, channelID, labelName)
 
 			case "add-repo":
@@ -190,7 +190,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				removeRepository(c, db, channelID, labelName, repoName)
 
 			case "set-label":
-				// set-label は実際にはラベル名を変更する操作に変更
+				// set-label is actually a rename operation for the label name
 				if params == "" {
 					c.String(200, "新しいラベル名を指定してください。例: /slack-review-notify "+labelName+" set-label new-label-name")
 					return
@@ -268,7 +268,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
-// parseCommand はコマンドテキストをクォート対応で解析する
+// parseCommand parses command text with quote support
 func parseCommand(text string) []string {
 	var parts []string
 	var current strings.Builder
@@ -281,19 +281,19 @@ func parseCommand(text string) []string {
 		switch {
 		case char == '"' || char == '\'':
 			if !inQuote {
-				// クォート開始
+				// Start of quote
 				inQuote = true
 				quoteChar = char
 			} else if char == quoteChar {
-				// クォート終了
+				// End of quote
 				inQuote = false
 				quoteChar = 0
 			} else {
-				// 異なるクォート文字は普通の文字として扱う
+				// Treat different quote characters as regular characters
 				current.WriteByte(char)
 			}
 		case char == ' ' && !inQuote:
-			// スペースで分割（クォート内でない場合のみ）
+			// Split on space (only when not inside quotes)
 			if current.Len() > 0 {
 				parts = append(parts, current.String())
 				current.Reset()
@@ -303,7 +303,7 @@ func parseCommand(text string) []string {
 		}
 	}
 
-	// 最後の部分を追加
+	// Add the last part
 	if current.Len() > 0 {
 		parts = append(parts, current.String())
 	}
@@ -311,7 +311,7 @@ func parseCommand(text string) []string {
 	return parts
 }
 
-// ヘルプメッセージを表示
+// showHelp displays the help message
 func showHelp(c *gin.Context) {
 	help := `*Review通知Bot設定コマンド*
 コマンド形式: /slack-review-notify [ラベル名] サブコマンド [引数]
@@ -384,7 +384,7 @@ func showHelp(c *gin.Context) {
 	c.String(200, help)
 }
 
-// すべてのラベル設定を表示
+// showAllLabels displays all label configurations
 func showAllLabels(c *gin.Context, db *gorm.DB, channelID string) {
 	var configs []models.ChannelConfig
 
@@ -415,7 +415,7 @@ func showAllLabels(c *gin.Context, db *gorm.DB, channelID string) {
 	c.String(200, response)
 }
 
-// 設定を表示
+// showConfig displays the configuration
 func showConfig(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 	var config models.ChannelConfig
 
@@ -437,7 +437,7 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 
 	timezone := config.Timezone
 	if timezone == "" {
-		timezone = "Asia/Tokyo" // デフォルトタイムゾーン
+		timezone = "Asia/Tokyo" // Default timezone
 	}
 
 	requiredApprovals := config.RequiredApprovals
@@ -459,7 +459,7 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 	c.String(200, response)
 }
 
-// レビュワーリストをフォーマット
+// formatReviewerList formats the reviewer list for display
 func formatReviewerList(reviewerList string) string {
 	if reviewerList == "" {
 		return "未設定"
@@ -475,36 +475,36 @@ func formatReviewerList(reviewerList string) string {
 	return strings.Join(formattedList, ", ")
 }
 
-// 文字列を清潔なユーザーIDに変換する関数
+// cleanUserID converts a string to a clean user ID
 func cleanUserID(userID string) string {
-	// 空白を削除
+	// Trim whitespace
 	userID = strings.TrimSpace(userID)
 
-	// チームメンション形式 <!subteam^ID|@name> の処理
+	// Handle team mention format <!subteam^ID|@name>
 	if strings.HasPrefix(userID, "<!subteam^") && strings.Contains(userID, "|") && strings.HasSuffix(userID, ">") {
 		parts := strings.Split(userID, "|")
 		if len(parts) > 0 {
 			id := strings.TrimPrefix(parts[0], "<!subteam^")
-			// チームIDをそのまま返す
+			// Return the team ID as-is
 			return id
 		}
 	}
 
-	// 通常のユーザーメンション <@ID> の処理
+	// Handle regular user mention <@ID>
 	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
 		return strings.TrimPrefix(strings.TrimSuffix(userID, ">"), "<@")
 	}
 
-	// @から始まる場合は@を削除
+	// Remove @ prefix if present
 	userID = strings.TrimPrefix(userID, "@")
 
-	// カンマが含まれる場合は削除
+	// Remove commas if present
 	userID = strings.ReplaceAll(userID, ",", "")
 
 	return userID
 }
 
-// 複数のユーザーIDを整形
+// cleanupUserIDs cleans up multiple user IDs
 func cleanupUserIDs(userIDs string) string {
 	ids := strings.Split(userIDs, ",")
 	cleanedIDs := make([]string, 0, len(ids))
@@ -519,18 +519,18 @@ func cleanupUserIDs(userIDs string) string {
 	return strings.Join(cleanedIDs, ",")
 }
 
-// レビュワーを追加
+// addReviewers adds reviewers
 func addReviewers(c *gin.Context, db *gorm.DB, channelID, labelName, reviewerIDs string) {
 	var config models.ChannelConfig
 
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 	if result.Error != nil {
-		// 設定がまだない場合は新規作成
+		// Create new config if none exists yet
 		config = models.ChannelConfig{
 			ID:             uuid.NewString(),
 			SlackChannelID: channelID,
 			LabelName:      labelName,
-			ReviewerList:   cleanupUserIDs(reviewerIDs), // ユーザーID形式を整形
+			ReviewerList:   cleanupUserIDs(reviewerIDs), // Clean up user ID format
 			IsActive:       true,
 			CreatedAt:      time.Now(),
 			UpdatedAt:      time.Now(),
@@ -540,7 +540,7 @@ func addReviewers(c *gin.Context, db *gorm.DB, channelID, labelName, reviewerIDs
 		return
 	}
 
-	// 既存のレビュワーリストをチェック
+	// Check the existing reviewer list
 	currentReviewers := []string{}
 	if config.ReviewerList != "" {
 		currentReviewers = strings.Split(config.ReviewerList, ",")
@@ -549,7 +549,7 @@ func addReviewers(c *gin.Context, db *gorm.DB, channelID, labelName, reviewerIDs
 		}
 	}
 
-	// 新しいレビュワーを追加
+	// Add new reviewers
 	newReviewers := strings.Split(reviewerIDs, ",")
 	for _, newReviewer := range newReviewers {
 		newReviewer = cleanUserID(strings.TrimSpace(newReviewer))
@@ -567,7 +567,7 @@ func addReviewers(c *gin.Context, db *gorm.DB, channelID, labelName, reviewerIDs
 		}
 	}
 
-	// 更新したリストを保存
+	// Save the updated list
 	config.ReviewerList = strings.Join(currentReviewers, ",")
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
@@ -575,7 +575,7 @@ func addReviewers(c *gin.Context, db *gorm.DB, channelID, labelName, reviewerIDs
 	c.String(200, fmt.Sprintf("ラベル「%s」のレビュワーリストを更新しました: %s", labelName, formatReviewerList(config.ReviewerList)))
 }
 
-// レビュワーリストを表示
+// showReviewers displays the reviewer list
 func showReviewers(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 	var config models.ChannelConfig
 
@@ -594,7 +594,7 @@ func showReviewers(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 	c.String(200, response)
 }
 
-// レビュワーリストをクリア
+// clearReviewers clears the reviewer list
 func clearReviewers(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 	var config models.ChannelConfig
 
@@ -611,16 +611,16 @@ func clearReviewers(c *gin.Context, db *gorm.DB, channelID, labelName string) {
 	c.String(200, fmt.Sprintf("ラベル「%s」のレビュワーリストをクリアしました。", labelName))
 }
 
-// メンション先を設定
+// setMention sets the mention target
 func setMention(c *gin.Context, db *gorm.DB, channelID, labelName, mentionID string) {
 	var config models.ChannelConfig
 
-	// メンションIDを整形
+	// Clean up the mention ID
 	cleanedMentionID := cleanUserID(mentionID)
 
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 	if result.Error != nil {
-		// 新規作成
+		// Create new config
 		config = models.ChannelConfig{
 			ID:               uuid.NewString(),
 			SlackChannelID:   channelID,
@@ -632,7 +632,7 @@ func setMention(c *gin.Context, db *gorm.DB, channelID, labelName, mentionID str
 		}
 		db.Create(&config)
 
-		// チームメンションかどうかを判定して表示を変える
+		// Determine display format based on whether it's a team mention
 		var mentionDisplay string
 		if strings.HasPrefix(mentionID, "<!subteam^") {
 			mentionDisplay = fmt.Sprintf("<!subteam^%s>", cleanedMentionID)
@@ -644,12 +644,12 @@ func setMention(c *gin.Context, db *gorm.DB, channelID, labelName, mentionID str
 		return
 	}
 
-	// 既存設定を更新
+	// Update existing config
 	config.DefaultMentionID = cleanedMentionID
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 
-	// チームメンションかどうかを判定して表示を変える
+	// Determine display format based on whether it's a team mention
 	var mentionDisplay string
 	if strings.HasPrefix(mentionID, "<!subteam^") {
 		mentionDisplay = fmt.Sprintf("<!subteam^%s>", cleanedMentionID)
@@ -660,13 +660,13 @@ func setMention(c *gin.Context, db *gorm.DB, channelID, labelName, mentionID str
 	c.String(200, fmt.Sprintf("ラベル「%s」のメンション先を %s に更新しました。", labelName, mentionDisplay))
 }
 
-// リポジトリを追加
+// addRepository adds a repository
 func addRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoNames string) {
 	var config models.ChannelConfig
 
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 	if result.Error != nil {
-		// 設定がまだない場合は新規作成
+		// Create new config if none exists yet
 		config = models.ChannelConfig{
 			ID:             uuid.NewString(),
 			SlackChannelID: channelID,
@@ -681,14 +681,14 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoNames 
 		return
 	}
 
-	// 正規表現を使ってすべてのスペースパターンを処理
+	// Use regex to handle all space patterns
 	re := regexp.MustCompile(`\s*,\s*`)
 	repoNames = re.ReplaceAllString(repoNames, ",")
 
-	// 先頭と末尾の空白も削除
+	// Also trim leading and trailing whitespace
 	repoNames = strings.TrimSpace(repoNames)
 
-	// 既存のリポジトリリストをチェック
+	// Check the existing repository list
 	currentRepos := []string{}
 	if config.RepositoryList != "" {
 		currentRepos = strings.Split(config.RepositoryList, ",")
@@ -697,7 +697,7 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoNames 
 		}
 	}
 
-	// 新しいリポジトリを追加
+	// Add new repositories
 	newRepos := strings.Split(repoNames, ",")
 	addedRepos := []string{}
 	alreadyExistsRepos := []string{}
@@ -723,12 +723,12 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoNames 
 		}
 	}
 
-	// 更新したリストを保存
+	// Save the updated list
 	config.RepositoryList = strings.Join(currentRepos, ",")
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
 
-	// 応答メッセージを作成
+	// Build the response message
 	var response string
 	if len(addedRepos) > 0 {
 		response = fmt.Sprintf("ラベル「%s」の通知対象リポジトリに以下を追加しました:\n`%s`", labelName, strings.Join(addedRepos, "`, `"))
@@ -748,7 +748,7 @@ func addRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoNames 
 	c.String(200, response)
 }
 
-// リポジトリを削除
+// removeRepository removes a repository
 func removeRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoName string) {
 	var config models.ChannelConfig
 
@@ -763,7 +763,7 @@ func removeRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoNam
 		return
 	}
 
-	// リポジトリリストを解析
+	// Parse the repository list
 	repos := strings.Split(config.RepositoryList, ",")
 	newRepos := []string{}
 	found := false
@@ -781,7 +781,7 @@ func removeRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoNam
 		return
 	}
 
-	// 新しいリストを保存
+	// Save the new list
 	config.RepositoryList = strings.Join(newRepos, ",")
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
@@ -789,18 +789,18 @@ func removeRepository(c *gin.Context, db *gorm.DB, channelID, labelName, repoNam
 	c.String(200, fmt.Sprintf("ラベル「%s」の通知対象リポジトリから `%s` を削除しました。", labelName, repoName))
 }
 
-// ラベル名を変更する関数
+// changeLabelName renames a label
 func changeLabelName(c *gin.Context, db *gorm.DB, channelID, oldLabelName, newLabelName string) {
 	var config models.ChannelConfig
 
-	// 現在の設定を取得
+	// Get the current config
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, oldLabelName).First(&config)
 	if result.Error != nil {
 		c.String(200, fmt.Sprintf("ラベル「%s」の設定はこのチャンネルに存在しません。", oldLabelName))
 		return
 	}
 
-	// 新しいラベル名で既に設定が存在するか確認
+	// Check if a config already exists with the new label name
 	var existingConfig models.ChannelConfig
 	existingResult := db.Where("slack_channel_id = ? AND label_name = ?", channelID, newLabelName).First(&existingConfig)
 	if existingResult.Error == nil {
@@ -808,7 +808,7 @@ func changeLabelName(c *gin.Context, db *gorm.DB, channelID, oldLabelName, newLa
 		return
 	}
 
-	// ラベル名を更新
+	// Update the label name
 	config.LabelName = newLabelName
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
@@ -816,7 +816,7 @@ func changeLabelName(c *gin.Context, db *gorm.DB, channelID, oldLabelName, newLa
 	c.String(200, fmt.Sprintf("ラベル名を「%s」から「%s」に変更しました。", oldLabelName, newLabelName))
 }
 
-// チャンネルの有効/無効を切り替え
+// activateChannel toggles channel activation on/off
 func activateChannel(c *gin.Context, db *gorm.DB, channelID, labelName string, active bool) {
 	var config models.ChannelConfig
 
@@ -830,7 +830,7 @@ func activateChannel(c *gin.Context, db *gorm.DB, channelID, labelName string, a
 		return
 	}
 
-	// 既存の設定を更新
+	// Update existing config
 	config.IsActive = active
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
@@ -842,11 +842,11 @@ func activateChannel(c *gin.Context, db *gorm.DB, channelID, labelName string, a
 	}
 }
 
-// リマインド頻度を設定
+// setReminderInterval sets the reminder frequency
 func setReminderInterval(c *gin.Context, db *gorm.DB, channelID, labelName, intervalStr string, isReviewer bool) {
 	var config models.ChannelConfig
 
-	// 数値に変換
+	// Convert to number
 	interval, err := strconv.Atoi(intervalStr)
 	if err != nil || interval <= 0 {
 		c.String(200, "リマインド頻度は1以上の整数で指定してください。")
@@ -855,7 +855,7 @@ func setReminderInterval(c *gin.Context, db *gorm.DB, channelID, labelName, inte
 
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 	if result.Error != nil {
-		// 設定がまだない場合は新規作成
+		// Create new config if none exists yet
 		config = models.ChannelConfig{
 			ID:             uuid.NewString(),
 			SlackChannelID: channelID,
@@ -881,7 +881,7 @@ func setReminderInterval(c *gin.Context, db *gorm.DB, channelID, labelName, inte
 		return
 	}
 
-	// 既存設定を更新
+	// Update existing config
 	if isReviewer {
 		config.ReviewerReminderInterval = interval
 		c.String(200, fmt.Sprintf("レビュワー割り当て後のリマインド頻度を %d分 に設定しました。", interval))
@@ -894,7 +894,7 @@ func setReminderInterval(c *gin.Context, db *gorm.DB, channelID, labelName, inte
 	db.Save(&config)
 }
 
-// 営業開始時間を設定
+// setBusinessHoursStart sets the business hours start time
 func setBusinessHoursStart(c *gin.Context, db *gorm.DB, channelID, labelName, startTime string) {
 	if !isValidTimeFormat(startTime) {
 		c.String(200, "時間形式が無効です。HH:MM形式で指定してください（例: 09:00）")
@@ -905,7 +905,7 @@ func setBusinessHoursStart(c *gin.Context, db *gorm.DB, channelID, labelName, st
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 
 	if result.Error != nil {
-		// 新規作成
+		// Create new config
 		config = models.ChannelConfig{
 			ID:                 uuid.NewString(),
 			SlackChannelID:     channelID,
@@ -929,7 +929,7 @@ func setBusinessHoursStart(c *gin.Context, db *gorm.DB, channelID, labelName, st
 	c.String(200, fmt.Sprintf("ラベル「%s」の営業開始時間を %s に更新しました。", labelName, startTime))
 }
 
-// 営業終了時間を設定
+// setBusinessHoursEnd sets the business hours end time
 func setBusinessHoursEnd(c *gin.Context, db *gorm.DB, channelID, labelName, endTime string) {
 	if !isValidTimeFormat(endTime) {
 		c.String(200, "時間形式が無効です。HH:MM形式で指定してください（例: 18:00）")
@@ -956,7 +956,7 @@ func setBusinessHoursEnd(c *gin.Context, db *gorm.DB, channelID, labelName, endT
 		return
 	}
 
-	// 既存設定を更新
+	// Update existing config
 	config.BusinessHoursEnd = endTime
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
@@ -964,9 +964,9 @@ func setBusinessHoursEnd(c *gin.Context, db *gorm.DB, channelID, labelName, endT
 	c.String(200, fmt.Sprintf("ラベル「%s」の営業終了時間を %s に更新しました。", labelName, endTime))
 }
 
-// タイムゾーンを設定
+// setTimezone sets the timezone
 func setTimezone(c *gin.Context, db *gorm.DB, channelID, labelName, timezone string) {
-	// タイムゾーンをバリデート
+	// Validate the timezone
 	if !isValidTimezone(timezone) {
 		c.String(200, "無効なタイムゾーンです。例: Asia/Tokyo, UTC, America/New_York")
 		return
@@ -976,7 +976,7 @@ func setTimezone(c *gin.Context, db *gorm.DB, channelID, labelName, timezone str
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 
 	if result.Error != nil {
-		// 新規作成
+		// Create new config
 		config = models.ChannelConfig{
 			ID:                 uuid.NewString(),
 			SlackChannelID:     channelID,
@@ -993,7 +993,7 @@ func setTimezone(c *gin.Context, db *gorm.DB, channelID, labelName, timezone str
 		return
 	}
 
-	// 既存設定を更新
+	// Update existing config
 	config.Timezone = timezone
 	config.UpdatedAt = time.Now()
 	db.Save(&config)
@@ -1001,13 +1001,13 @@ func setTimezone(c *gin.Context, db *gorm.DB, channelID, labelName, timezone str
 	c.String(200, fmt.Sprintf("ラベル「%s」のタイムゾーンを %s に更新しました。", labelName, timezone))
 }
 
-// タイムゾーンをバリデート
+// isValidTimezone validates the timezone
 func isValidTimezone(timezone string) bool {
 	_, err := time.LoadLocation(timezone)
 	return err == nil
 }
 
-// 時間形式（HH:MM）をバリデート
+// isValidTimeFormat validates the time format (HH:MM)
 func isValidTimeFormat(timeStr string) bool {
 	parts := strings.Split(timeStr, ":")
 	if len(parts) != 2 {
@@ -1117,7 +1117,7 @@ func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername string) {
 	c.String(200, fmt.Sprintf("GitHubユーザー `%s` のマッピングを削除しました。", githubUsername))
 }
 
-// ユーザーを休暇に設定
+// setAway marks a user as away/on leave
 func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params string) {
 	if params == "" {
 		c.String(200, "休暇に設定するユーザーを指定してください。例: /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由]")
@@ -1139,7 +1139,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params string) {
 	var awayUntil *time.Time
 	var reason string
 
-	// パラメータ解析: until と reason キーワード
+	// Parse parameters: "until" and "reason" keywords
 	for i := 1; i < len(parts); i++ {
 		switch parts[i] {
 		case "until":
@@ -1150,8 +1150,8 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params string) {
 					c.String(200, "日付形式が無効です。YYYY-MM-DD形式で指定してください（例: 2025-06-01）")
 					return
 				}
-				// 指定日の終わり（23:59:59）に設定
-				// チャンネル設定からタイムゾーンを取得
+				// Set to end of the specified day (23:59:59)
+				// Get timezone from channel config
 				timezone := "Asia/Tokyo"
 				var tzConfig models.ChannelConfig
 				if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&tzConfig).Error; err == nil {
@@ -1173,12 +1173,12 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params string) {
 		case "reason":
 			if i+1 < len(parts) {
 				reason = strings.Join(parts[i+1:], " ")
-				i = len(parts) // ループ終了
+				i = len(parts) // End loop
 			}
 		}
 	}
 
-	// 既存レコードがあれば更新、なければ新規作成（upsert）
+	// Update if existing record exists, otherwise create new (upsert)
 	var existing models.ReviewerAvailability
 	result := db.Where("slack_user_id = ?", slackUserID).First(&existing)
 	if result.Error == nil {
@@ -1206,7 +1206,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params string) {
 		}
 	}
 
-	// 応答メッセージ作成
+	// Build response message
 	response := fmt.Sprintf("<@%s> を休暇に設定しました", slackUserID)
 	if awayUntil != nil {
 		response += fmt.Sprintf("（%s まで", awayUntil.Format("2006-01-02"))
@@ -1222,7 +1222,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params string) {
 	c.String(200, response)
 }
 
-// ユーザーの休暇を解除
+// unsetAway removes a user's away/leave status
 func unsetAway(c *gin.Context, db *gorm.DB, params string) {
 	if params == "" {
 		c.String(200, "休暇を解除するユーザーを指定してください。例: /slack-review-notify unset-away @user")
@@ -1244,12 +1244,12 @@ func unsetAway(c *gin.Context, db *gorm.DB, params string) {
 	c.String(200, fmt.Sprintf("<@%s> の休暇を解除しました", slackUserID))
 }
 
-// 休暇中のユーザー一覧を表示
+// showAvailability displays a list of users currently on leave
 func showAvailability(c *gin.Context, db *gorm.DB) {
 	var records []models.ReviewerAvailability
 	now := time.Now()
 
-	// AwayUntil が nil（無期限）または現在時刻より未来のレコードを取得
+	// Get records where AwayUntil is nil (indefinite) or in the future
 	db.Where("away_until IS NULL OR away_until > ?", now).Find(&records)
 
 	if len(records) == 0 {
@@ -1274,7 +1274,7 @@ func showAvailability(c *gin.Context, db *gorm.DB) {
 	c.String(200, response)
 }
 
-// 必要なapprove数を設定
+// setRequiredApprovals sets the number of required approvals
 func setRequiredApprovals(c *gin.Context, db *gorm.DB, channelID, labelName, countStr string) {
 	count, err := strconv.Atoi(countStr)
 	if err != nil || count < 1 || count > 10 {

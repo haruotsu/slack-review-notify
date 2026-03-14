@@ -62,7 +62,7 @@ func TestSetBusinessHoursStartCommand_Integration(t *testing.T) {
 		expectsError   bool
 	}{
 		{
-			name:           "正常な営業開始時間設定",
+			name:           "Valid business hours start setting",
 			text:           "needs-review set-business-hours-start 09:00",
 			channelID:      "C12345",
 			expectedStart:  "09:00",
@@ -70,7 +70,7 @@ func TestSetBusinessHoursStartCommand_Integration(t *testing.T) {
 			expectsError:   false,
 		},
 		{
-			name:           "デフォルトラベルでの営業開始時間設定",
+			name:           "Business hours start setting with default label",
 			text:           "set-business-hours-start 10:00",
 			channelID:      "C67890",
 			expectedStart:  "10:00",
@@ -78,7 +78,7 @@ func TestSetBusinessHoursStartCommand_Integration(t *testing.T) {
 			expectsError:   false,
 		},
 		{
-			name:           "無効な時間形式",
+			name:           "Invalid time format",
 			text:           "needs-review set-business-hours-start 25:00",
 			channelID:      "C12345",
 			expectedStatus: 200,
@@ -127,7 +127,7 @@ func TestSetTimezoneCommand_Integration(t *testing.T) {
 		expectsError     bool
 	}{
 		{
-			name:             "正常なタイムゾーン設定（JST）",
+			name:             "Valid timezone setting (JST)",
 			text:             "needs-review set-timezone Asia/Tokyo",
 			channelID:        "C12345",
 			expectedTimezone: "Asia/Tokyo",
@@ -135,7 +135,7 @@ func TestSetTimezoneCommand_Integration(t *testing.T) {
 			expectsError:     false,
 		},
 		{
-			name:             "正常なタイムゾーン設定（UTC）",
+			name:             "Valid timezone setting (UTC)",
 			text:             "needs-review set-timezone UTC",
 			channelID:        "C67890",
 			expectedTimezone: "UTC",
@@ -143,7 +143,7 @@ func TestSetTimezoneCommand_Integration(t *testing.T) {
 			expectsError:     false,
 		},
 		{
-			name:           "無効なタイムゾーン",
+			name:           "Invalid timezone",
 			text:           "needs-review set-timezone Invalid/Timezone",
 			channelID:      "C12345",
 			expectedStatus: 200,
@@ -192,7 +192,7 @@ func TestSetRequiredApprovals_Integration(t *testing.T) {
 		expectsError      bool
 	}{
 		{
-			name:              "正常なapprove数設定",
+			name:              "Valid required approvals setting",
 			text:              "needs-review set-required-approvals 2",
 			channelID:         "C_APPROVALS",
 			expectedApprovals: 2,
@@ -200,7 +200,7 @@ func TestSetRequiredApprovals_Integration(t *testing.T) {
 			expectsError:      false,
 		},
 		{
-			name:              "デフォルトラベルでのapprove数設定",
+			name:              "Required approvals setting with default label",
 			text:              "set-required-approvals 3",
 			channelID:         "C_APPROVALS2",
 			expectedApprovals: 3,
@@ -208,21 +208,21 @@ func TestSetRequiredApprovals_Integration(t *testing.T) {
 			expectsError:      false,
 		},
 		{
-			name:           "範囲外の値（0）",
+			name:           "Out of range value (0)",
 			text:           "needs-review set-required-approvals 0",
 			channelID:      "C_APPROVALS",
 			expectedStatus: 200,
 			expectsError:   true,
 		},
 		{
-			name:           "範囲外の値（11）",
+			name:           "Out of range value (11)",
 			text:           "needs-review set-required-approvals 11",
 			channelID:      "C_APPROVALS",
 			expectedStatus: 200,
 			expectsError:   true,
 		},
 		{
-			name:           "無効な値（文字列）",
+			name:           "Invalid value (string)",
 			text:           "needs-review set-required-approvals abc",
 			channelID:      "C_APPROVALS",
 			expectedStatus: 200,
@@ -275,35 +275,35 @@ func TestSetAway_Integration(t *testing.T) {
 		expectedBody   string
 	}{
 		{
-			name:           "無期限休暇設定",
+			name:           "Indefinite leave setting",
 			text:           "set-away <@U12345>",
 			channelID:      "C12345",
 			expectedStatus: 200,
 			expectedBody:   "休暇に設定しました",
 		},
 		{
-			name:           "日付付き休暇設定",
+			name:           "Leave setting with date",
 			text:           "set-away <@U67890> until 2099-12-31 reason 休暇",
 			channelID:      "C12345",
 			expectedStatus: 200,
 			expectedBody:   "2099-12-31 まで",
 		},
 		{
-			name:           "理由のみ休暇設定",
+			name:           "Leave setting with reason only",
 			text:           "set-away <@U11111> reason 育児休業",
 			channelID:      "C12345",
 			expectedStatus: 200,
 			expectedBody:   "育児休業",
 		},
 		{
-			name:           "過去の日付は拒否",
+			name:           "Past date is rejected",
 			text:           "set-away <@U99999> until 2020-01-01",
 			channelID:      "C12345",
 			expectedStatus: 200,
 			expectedBody:   "過去の日付は指定できません",
 		},
 		{
-			name:           "ユーザー未指定",
+			name:           "No user specified",
 			text:           "set-away",
 			channelID:      "C12345",
 			expectedStatus: 200,
@@ -326,7 +326,7 @@ func TestSetAway_Integration(t *testing.T) {
 		})
 	}
 
-	// upsert テスト: 同じユーザーを再度設定しても1レコード
+	// Upsert test: setting the same user again should result in 1 record
 	var count int64
 	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "U12345").Count(&count)
 	assert.Equal(t, int64(1), count)
@@ -340,7 +340,7 @@ func TestUnsetAway_Integration(t *testing.T) {
 		services.IsTestMode = false
 	}()
 
-	// まず休暇を設定
+	// First, set the leave status
 	gin.SetMode(gin.TestMode)
 	req := setupHTTPRequest(t, "set-away <@UAWAY>", "C12345")
 	w := httptest.NewRecorder()
@@ -349,19 +349,19 @@ func TestUnsetAway_Integration(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, 200, w.Code)
 
-	// 休暇を解除
+	// Remove leave status
 	req2 := setupHTTPRequest(t, "unset-away <@UAWAY>", "C12345")
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 	assert.Equal(t, 200, w2.Code)
 	assert.Contains(t, w2.Body.String(), "休暇を解除しました")
 
-	// DB にレコードがないことを確認
+	// Verify no record exists in the DB
 	var count int64
 	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UAWAY").Count(&count)
 	assert.Equal(t, int64(0), count)
 
-	// 存在しないユーザーの解除
+	// Removing leave for a non-existent user
 	req3 := setupHTTPRequest(t, "unset-away <@UNOTEXIST>", "C12345")
 	w3 := httptest.NewRecorder()
 	router.ServeHTTP(w3, req3)
@@ -381,14 +381,14 @@ func TestShowAvailability_Integration(t *testing.T) {
 	router := gin.New()
 	router.POST("/slack/command", HandleSlackCommand(db))
 
-	// 休暇者がいない場合
+	// When no one is on leave
 	req := setupHTTPRequest(t, "show-availability", "C12345")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "休暇中のユーザーはいません")
 
-	// 休暇者を追加
+	// Add users on leave
 	req2 := setupHTTPRequest(t, "set-away <@USHOW1> reason 休暇", "C12345")
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
@@ -399,7 +399,7 @@ func TestShowAvailability_Integration(t *testing.T) {
 	router.ServeHTTP(w3, req3)
 	assert.Equal(t, 200, w3.Code)
 
-	// 休暇者一覧を確認
+	// Verify the leave list
 	req4 := setupHTTPRequest(t, "show-availability", "C12345")
 	w4 := httptest.NewRecorder()
 	router.ServeHTTP(w4, req4)

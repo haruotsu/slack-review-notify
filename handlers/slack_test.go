@@ -16,13 +16,13 @@ import (
 )
 
 func TestHandleSlackAction_PauseReminder_Today(t *testing.T) {
-	// テスト用のDBとルーターをセットアップ
+	// Set up test DB and router
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.POST("/slack/action", HandleSlackAction(db))
 
-	// テスト用のタスクを作成
+	// Create a test task
 	task := models.ReviewTask{
 		ID:           "test-task-id",
 		PRURL:        "https://github.com/owner/repo/pull/1",
@@ -38,10 +38,10 @@ func TestHandleSlackAction_PauseReminder_Today(t *testing.T) {
 	}
 	db.Create(&task)
 
-	// テスト前の時刻を記録
+	// Record time before the update
 	beforeUpdate := time.Now()
 
-	// Slackアクションペイロードを作成
+	// Create Slack action payload
 	payload := SlackActionPayload{
 		Type: "block_actions",
 		User: struct {
@@ -86,40 +86,40 @@ func TestHandleSlackAction_PauseReminder_Today(t *testing.T) {
 	form := url.Values{}
 	form.Add("payload", string(payloadJSON))
 
-	// リクエストを作成
+	// Create request
 	req := httptest.NewRequest("POST", "/slack/action", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	// 署名の検証をモック（実際のテストでは適切に設定する必要があります）
+	// Mock signature verification (needs proper setup in actual tests)
 	services.IsTestMode = true
 	defer func() { services.IsTestMode = false }()
 
-	// リクエストを実行
+	// Execute request
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// レスポンスを確認
+	// Verify response
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// DBからタスクを取得して確認
+	// Get task from DB and verify
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-task-id").First(&updatedTask)
 
-	// ReminderPausedUntilが設定されていることを確認
+	// Verify that ReminderPausedUntil is set
 	assert.NotNil(t, updatedTask.ReminderPausedUntil)
 
-	// 翌営業日の朝に設定されていることを確認
+	// Verify it's set to next business day morning
 	pausedUntil := *updatedTask.ReminderPausedUntil
 
-	// 現在時刻より後であることを確認
+	// Verify it's after the current time
 	assert.True(t, pausedUntil.After(beforeUpdate))
 
-	// 10時に設定されていることを確認
+	// Verify it's set to 10:00
 	assert.Equal(t, 10, pausedUntil.Hour())
 	assert.Equal(t, 0, pausedUntil.Minute())
 	assert.Equal(t, 0, pausedUntil.Second())
 
-	// 営業日（月〜金）であることを確認
+	// Verify it's a business day (Monday to Friday)
 	assert.NotEqual(t, time.Saturday, pausedUntil.Weekday())
 	assert.NotEqual(t, time.Sunday, pausedUntil.Weekday())
 }
@@ -130,20 +130,20 @@ func TestHandleSlackAction_PauseReminder_Hours(t *testing.T) {
 		value    string
 		duration time.Duration
 	}{
-		{"1時間", "test-task-id:1h", 1 * time.Hour},
-		{"2時間", "test-task-id:2h", 2 * time.Hour},
-		{"4時間", "test-task-id:4h", 4 * time.Hour},
+		{"1 hour", "test-task-id:1h", 1 * time.Hour},
+		{"2 hours", "test-task-id:2h", 2 * time.Hour},
+		{"4 hours", "test-task-id:4h", 4 * time.Hour},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// テスト用のDBとルーターをセットアップ
+			// Set up test DB and router
 			db := setupTestDB(t)
 			gin.SetMode(gin.TestMode)
 			router := gin.New()
 			router.POST("/slack/action", HandleSlackAction(db))
 
-			// テスト用のタスクを作成
+			// Create a test task
 			task := models.ReviewTask{
 				ID:           "test-task-id",
 				PRURL:        "https://github.com/owner/repo/pull/1",
@@ -159,10 +159,10 @@ func TestHandleSlackAction_PauseReminder_Hours(t *testing.T) {
 			}
 			db.Create(&task)
 
-			// テスト前の時刻を記録
+			// Record time before the update
 			beforeUpdate := time.Now()
 
-			// Slackアクションペイロードを作成
+			// Create Slack action payload
 			payload := SlackActionPayload{
 				Type: "block_actions",
 				User: struct {
@@ -202,33 +202,33 @@ func TestHandleSlackAction_PauseReminder_Hours(t *testing.T) {
 			form := url.Values{}
 			form.Add("payload", string(payloadJSON))
 
-			// リクエストを作成
+			// Create request
 			req := httptest.NewRequest("POST", "/slack/action", strings.NewReader(form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-			// 署名の検証をモック
+			// Mock signature verification
 			services.IsTestMode = true
 			defer func() { services.IsTestMode = false }()
 
-			// リクエストを実行
+			// Execute request
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 
-			// レスポンスを確認
+			// Verify response
 			assert.Equal(t, http.StatusOK, w.Code)
 
-			// DBからタスクを取得して確認
+			// Get task from DB and verify
 			var updatedTask models.ReviewTask
 			db.Where("id = ?", "test-task-id").First(&updatedTask)
 
-			// ReminderPausedUntilが設定されていることを確認
+			// Verify that ReminderPausedUntil is set
 			assert.NotNil(t, updatedTask.ReminderPausedUntil)
 
-			// 指定された時間だけ後に設定されていることを確認
+			// Verify it's set to the specified duration in the future
 			pausedUntil := *updatedTask.ReminderPausedUntil
 			expectedTime := beforeUpdate.Add(tc.duration)
 
-			// 誤差を考慮して確認（1分以内の誤差を許容）
+			// Verify with tolerance (allow up to 1 minute difference)
 			diff := pausedUntil.Sub(expectedTime)
 			assert.True(t, diff < time.Minute && diff > -time.Minute,
 				"Expected pause until around %v, but got %v (diff: %v)",
@@ -238,13 +238,13 @@ func TestHandleSlackAction_PauseReminder_Hours(t *testing.T) {
 }
 
 func TestHandleSlackAction_PauseReminderInitial(t *testing.T) {
-	// テストモードを有効化（署名検証をスキップ）
+	// Enable test mode (skip signature verification)
 	services.IsTestMode = true
 
-	// テスト用のDB作成
+	// Create test DB
 	db := setupTestDB(t)
 
-	// テスト用のタスクを作成
+	// Create a test task
 	task := models.ReviewTask{
 		ID:           "test-task-initial",
 		PRURL:        "https://github.com/test/test/pull/1",
@@ -260,7 +260,7 @@ func TestHandleSlackAction_PauseReminderInitial(t *testing.T) {
 	}
 	db.Create(&task)
 
-	// モックSlackペイロード
+	// Mock Slack payload
 	payload := SlackActionPayload{
 		Type: "block_actions",
 		User: struct {
@@ -298,35 +298,35 @@ func TestHandleSlackAction_PauseReminderInitial(t *testing.T) {
 		}{ChannelID: "C12345"},
 	}
 
-	// JSON化
+	// Convert to JSON
 	payloadJSON, _ := json.Marshal(payload)
 
-	// リクエスト作成
+	// Create request
 	form := url.Values{}
 	form.Add("payload", string(payloadJSON))
 
 	req, _ := http.NewRequest("POST", "/slack/actions", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	// レスポンス記録
+	// Record response
 	w := httptest.NewRecorder()
 
-	// ハンドラー実行
+	// Execute handler
 	handler := HandleSlackAction(db)
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
 	handler(c)
 
-	// ステータスコード確認
+	// Verify status code
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// DBが更新されたことを確認
+	// Verify DB has been updated
 	var updatedTask models.ReviewTask
 	err := db.Where("id = ?", "test-task-initial").First(&updatedTask).Error
 	assert.NoError(t, err)
 	assert.NotNil(t, updatedTask.ReminderPausedUntil)
 
-	// 4時間後に設定されているか確認
+	// Verify it's set to 4 hours later
 	expected := time.Now().Add(4 * time.Hour)
 	actual := *updatedTask.ReminderPausedUntil
 	assert.WithinDuration(t, expected, actual, 10*time.Second)

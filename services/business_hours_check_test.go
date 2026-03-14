@@ -63,7 +63,7 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				Timezone:           "UTC",
 			},
 			currentTime: time.Date(2023, 12, 15, 18, 0, 0, 0, time.UTC), // 18:00
-			expected:    false,                                          // 終了時刻は含まない
+			expected:    false,                                          // End time is exclusive
 		},
 		{
 			name: "営業時間設定がない場合（デフォルト値）",
@@ -72,7 +72,7 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				BusinessHoursEnd:   "",
 			},
 			currentTime: time.Date(2023, 12, 15, 12, 30, 0, 0, time.UTC), // 12:30
-			expected:    true,                                            // 営業時間設定がない場合は常に通知
+			expected:    true,                                            // Always notify when no business hours are configured
 		},
 		{
 			name: "深夜営業（22:00-06:00）の営業時間内",
@@ -151,8 +151,8 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				BusinessHoursEnd:   "18:00",
 				Timezone:           "Asia/Tokyo",
 			},
-			currentTime: time.Date(2024, 1, 1, 3, 30, 0, 0, time.UTC), // 1/1 12:30 JST（元日）
-			expected:    false,                                        // 祝日なので営業時間外
+			currentTime: time.Date(2024, 1, 1, 3, 30, 0, 0, time.UTC), // 1/1 12:30 JST (New Year's Day)
+			expected:    false,                                        // Outside business hours because it is a holiday
 		},
 		{
 			name: "日本の祝日（成人の日）の営業時間内は営業時間外として扱う",
@@ -161,8 +161,8 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				BusinessHoursEnd:   "18:00",
 				Timezone:           "Asia/Tokyo",
 			},
-			currentTime: time.Date(2024, 1, 8, 3, 30, 0, 0, time.UTC), // 1/8 12:30 JST（2024年成人の日）
-			expected:    false,                                        // 祝日なので営業時間外
+			currentTime: time.Date(2024, 1, 8, 3, 30, 0, 0, time.UTC), // 1/8 12:30 JST (Coming of Age Day 2024)
+			expected:    false,                                        // Outside business hours because it is a holiday
 		},
 		{
 			name: "日本の祝日以外（平日）の営業時間内は営業時間内として扱う",
@@ -171,8 +171,8 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				BusinessHoursEnd:   "18:00",
 				Timezone:           "Asia/Tokyo",
 			},
-			currentTime: time.Date(2024, 1, 9, 3, 30, 0, 0, time.UTC), // 1/9 12:30 JST（平日）
-			expected:    true,                                         // 平日かつ営業時間内
+			currentTime: time.Date(2024, 1, 9, 3, 30, 0, 0, time.UTC), // 1/9 12:30 JST (weekday)
+			expected:    true,                                         // Weekday and within business hours
 		},
 		{
 			name: "UTC設定の場合は祝日判定を行わない",
@@ -181,8 +181,8 @@ func TestIsWithinBusinessHours(t *testing.T) {
 				BusinessHoursEnd:   "18:00",
 				Timezone:           "UTC",
 			},
-			currentTime: time.Date(2024, 1, 1, 12, 30, 0, 0, time.UTC), // 1/1 12:30 UTC（元日だが、UTC設定）
-			expected:    true,                                          // UTC設定なので祝日判定しない
+			currentTime: time.Date(2024, 1, 1, 12, 30, 0, 0, time.UTC), // 1/1 12:30 UTC (New Year's Day, but UTC timezone)
+			expected:    true,                                          // No holiday check for UTC timezone
 		},
 	}
 

@@ -10,9 +10,9 @@ import (
 	"github.com/haruotsu/go-jpholiday/holiday"
 )
 
-// IsWithinBusinessHours は指定された時刻が営業時間内かどうかを判定する
+// IsWithinBusinessHours determines whether the given time falls within business hours
 func IsWithinBusinessHours(config *models.ChannelConfig, currentTime time.Time) bool {
-	// 営業時間設定がない場合は常にtrue（通知する）
+	// If no business hours are configured, always return true (send notifications)
 	if config == nil || config.BusinessHoursStart == "" || config.BusinessHoursEnd == "" {
 		return true
 	}
@@ -22,7 +22,7 @@ func IsWithinBusinessHours(config *models.ChannelConfig, currentTime time.Time) 
 		timezone = "Asia/Tokyo"
 	}
 
-	// タイムゾーンに変換
+	// Convert to the configured timezone
 	loc, err := time.LoadLocation(timezone)
 	if err != nil {
 		loc, _ = time.LoadLocation("Asia/Tokyo")
@@ -30,13 +30,13 @@ func IsWithinBusinessHours(config *models.ChannelConfig, currentTime time.Time) 
 
 	localTime := currentTime.In(loc)
 
-	// 土日チェック
+	// Check for weekends
 	weekday := localTime.Weekday()
 	if weekday == time.Saturday || weekday == time.Sunday {
 		return false
 	}
 
-	// 日本のタイムゾーンの場合は祝日チェック
+	// Check for Japanese holidays if the timezone is Asia/Tokyo
 	if timezone == "Asia/Tokyo" && isJapaneseHoliday(localTime) {
 		return false
 	}
@@ -45,7 +45,7 @@ func IsWithinBusinessHours(config *models.ChannelConfig, currentTime time.Time) 
 	currentMin := localTime.Minute()
 	currentMinutes := currentHour*60 + currentMin
 
-	// 営業開始・終了時刻を解析
+	// Parse business hours start and end times
 	startHour, startMin, err := parseBusinessHoursTime(config.BusinessHoursStart)
 	if err != nil {
 		return true
@@ -65,7 +65,7 @@ func IsWithinBusinessHours(config *models.ChannelConfig, currentTime time.Time) 
 	return currentMinutes >= startMinutes || currentMinutes < endMinutes
 }
 
-// parseBusinessHoursTime は時刻文字列（HH:MM）を時間と分に解析する
+// parseBusinessHoursTime parses a time string (HH:MM) into hours and minutes
 func parseBusinessHoursTime(timeStr string) (int, int, error) {
 	if timeStr == "" {
 		return 0, 0, errors.New("empty time string")
@@ -89,7 +89,7 @@ func parseBusinessHoursTime(timeStr string) (int, int, error) {
 	return hour, minute, nil
 }
 
-// isJapaneseHoliday は指定された日付が日本の祝日かどうかを判定する
+// isJapaneseHoliday determines whether the given date is a Japanese public holiday
 func isJapaneseHoliday(t time.Time) bool {
 	return holiday.IsHoliday(t)
 }

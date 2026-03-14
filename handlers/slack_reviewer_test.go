@@ -16,18 +16,18 @@ import (
 )
 
 func TestHandleSlackAction_ChangeReviewer_MultipleLabels(t *testing.T) {
-	// テストモードを有効化
+	// Enable test mode
 	services.IsTestMode = true
 	defer func() { services.IsTestMode = false }()
 
-	// テスト用のDB作成
+	// Create test DB
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.POST("/slack/action", HandleSlackAction(db))
 
-	// 複数のラベルの設定を作成
-	// label-1用（レビュワー2人）
+	// Create configs for multiple labels
+	// For label-1 (2 reviewers)
 	config1 := models.ChannelConfig{
 		ID:               "config-1",
 		SlackChannelID:   "C12345",
@@ -40,7 +40,7 @@ func TestHandleSlackAction_ChangeReviewer_MultipleLabels(t *testing.T) {
 	}
 	db.Create(&config1)
 
-	// label-2用（レビュワー2人）
+	// For label-2 (2 reviewers)
 	config2 := models.ChannelConfig{
 		ID:               "config-2",
 		SlackChannelID:   "C12345",
@@ -53,7 +53,7 @@ func TestHandleSlackAction_ChangeReviewer_MultipleLabels(t *testing.T) {
 	}
 	db.Create(&config2)
 
-	// テスト用のタスクを作成（label-2ラベル）
+	// Create a test task (label-2)
 	task := models.ReviewTask{
 		ID:           "test-task-1",
 		PRURL:        "https://github.com/test/repo/pull/1",
@@ -63,14 +63,14 @@ func TestHandleSlackAction_ChangeReviewer_MultipleLabels(t *testing.T) {
 		SlackTS:      "1234.5678",
 		SlackChannel: "C12345",
 		Status:       "in_review",
-		Reviewer:     "U33333", // label-2のレビュワー
+		Reviewer:     "U33333", // Reviewer from label-2
 		LabelName:    "label-2",
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
 	db.Create(&task)
 
-	// Slackアクションペイロードを作成
+	// Create Slack action payload
 	payload := SlackActionPayload{
 		Type: "block_actions",
 		User: struct {
@@ -103,54 +103,54 @@ func TestHandleSlackAction_ChangeReviewer_MultipleLabels(t *testing.T) {
 	form := url.Values{}
 	form.Add("payload", string(payloadJSON))
 
-	// リクエストを作成
+	// Create request
 	req := httptest.NewRequest("POST", "/slack/action", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	// リクエストを実行
+	// Execute request
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// レスポンスを確認
+	// Verify response
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// DBからタスクを取得して確認
+	// Get task from DB and verify
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-task-1").First(&updatedTask)
 
-	// レビュワーが変更されていることを確認
+	// Verify that the reviewer has been changed
 	assert.NotEqual(t, "U33333", updatedTask.Reviewer)
-	// label-2のレビュワーリストから選ばれていることを確認
+	// Verify selected from label-2's reviewer list
 	assert.Contains(t, []string{"U33333", "U44444"}, updatedTask.Reviewer)
-	// label-1のレビュワーリストからは選ばれていないことを確認
+	// Verify not selected from label-1's reviewer list
 	assert.NotContains(t, []string{"U11111", "U22222"}, updatedTask.Reviewer)
 }
 
 func TestHandleSlackAction_ChangeReviewer_SingleReviewer(t *testing.T) {
-	// テストモードを有効化
+	// Enable test mode
 	services.IsTestMode = true
 	defer func() { services.IsTestMode = false }()
 
-	// テスト用のDB作成
+	// Create test DB
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.POST("/slack/action", HandleSlackAction(db))
 
-	// レビュワーが1人しかいない設定を作成
+	// Create config with only one reviewer
 	config := models.ChannelConfig{
 		ID:               "config-3",
 		SlackChannelID:   "C12345",
 		LabelName:        "needs-review",
 		DefaultMentionID: "U00000",
-		ReviewerList:     "U11111", // 1人だけ
+		ReviewerList:     "U11111", // Only one
 		IsActive:         true,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
 	db.Create(&config)
 
-	// テスト用のタスクを作成
+	// Create a test task
 	task := models.ReviewTask{
 		ID:           "test-task-2",
 		PRURL:        "https://github.com/test/repo/pull/2",
@@ -167,7 +167,7 @@ func TestHandleSlackAction_ChangeReviewer_SingleReviewer(t *testing.T) {
 	}
 	db.Create(&task)
 
-	// Slackアクションペイロードを作成
+	// Create Slack action payload
 	payload := SlackActionPayload{
 		Type: "block_actions",
 		User: struct {
@@ -200,37 +200,37 @@ func TestHandleSlackAction_ChangeReviewer_SingleReviewer(t *testing.T) {
 	form := url.Values{}
 	form.Add("payload", string(payloadJSON))
 
-	// リクエストを作成
+	// Create request
 	req := httptest.NewRequest("POST", "/slack/action", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	// リクエストを実行
+	// Execute request
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// レスポンスを確認
+	// Verify response
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// DBからタスクを取得して確認
+	// Get task from DB and verify
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-task-2").First(&updatedTask)
 
-	// レビュワーが変更されていない（1人しかいないため）
+	// Reviewer not changed (only one registered)
 	assert.Equal(t, "U11111", updatedTask.Reviewer)
 }
 
 func TestHandleSlackAction_ChangeReviewer_NoLabelName(t *testing.T) {
-	// テストモードを有効化
+	// Enable test mode
 	services.IsTestMode = true
 	defer func() { services.IsTestMode = false }()
 
-	// テスト用のDB作成
+	// Create test DB
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.POST("/slack/action", HandleSlackAction(db))
 
-	// デフォルトラベル用の設定を作成
+	// Create config for default label
 	config := models.ChannelConfig{
 		ID:               "config-4",
 		SlackChannelID:   "C12345",
@@ -243,7 +243,7 @@ func TestHandleSlackAction_ChangeReviewer_NoLabelName(t *testing.T) {
 	}
 	db.Create(&config)
 
-	// LabelNameが空のタスクを作成（古いタスク）
+	// Create a task with empty LabelName (old task)
 	task := models.ReviewTask{
 		ID:           "test-task-3",
 		PRURL:        "https://github.com/test/repo/pull/3",
@@ -254,13 +254,13 @@ func TestHandleSlackAction_ChangeReviewer_NoLabelName(t *testing.T) {
 		SlackChannel: "C12345",
 		Status:       "in_review",
 		Reviewer:     "U11111",
-		LabelName:    "", // 空のラベル名
+		LabelName:    "", // Empty label name
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
 	db.Create(&task)
 
-	// Slackアクションペイロードを作成
+	// Create Slack action payload
 	payload := SlackActionPayload{
 		Type: "block_actions",
 		User: struct {
@@ -293,24 +293,24 @@ func TestHandleSlackAction_ChangeReviewer_NoLabelName(t *testing.T) {
 	form := url.Values{}
 	form.Add("payload", string(payloadJSON))
 
-	// リクエストを作成
+	// Create request
 	req := httptest.NewRequest("POST", "/slack/action", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	// リクエストを実行
+	// Execute request
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// レスポンスを確認
+	// Verify response
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// DBからタスクを取得して確認
+	// Get task from DB and verify
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-task-3").First(&updatedTask)
 
-	// レビュワーが変更されていることを確認
+	// Verify that the reviewer has been changed
 	assert.NotEqual(t, "U11111", updatedTask.Reviewer)
 	assert.Contains(t, []string{"U11111", "U22222"}, updatedTask.Reviewer)
-	// LabelNameがデフォルト値に更新されていることを確認
+	// Verify that LabelName has been updated to default value
 	assert.Equal(t, "needs-review", updatedTask.LabelName)
 }

@@ -15,7 +15,7 @@ func setupChannelConfigTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("fail to open test db: %v", err)
 	}
 
-	// マイグレーションを実行
+	// Run migration
 	if err := db.AutoMigrate(&ChannelConfig{}); err != nil {
 		t.Fatalf("fail to migrate test db: %v", err)
 	}
@@ -26,7 +26,7 @@ func setupChannelConfigTestDB(t *testing.T) *gorm.DB {
 func TestChannelConfig_BusinessHoursFields(t *testing.T) {
 	db := setupChannelConfigTestDB(t)
 
-	// 営業時間フィールドを持つChannelConfigを作成
+	// Create a ChannelConfig with business hours fields
 	config := ChannelConfig{
 		ID:                 "test-config",
 		SlackChannelID:     "C12345",
@@ -39,16 +39,16 @@ func TestChannelConfig_BusinessHoursFields(t *testing.T) {
 		UpdatedAt:          time.Now(),
 	}
 
-	// データベースに保存
+	// Save to database
 	err := db.Create(&config).Error
 	assert.NoError(t, err)
 
-	// データベースから読み取り
+	// Read from database
 	var savedConfig ChannelConfig
 	err = db.Where("id = ?", "test-config").First(&savedConfig).Error
 	assert.NoError(t, err)
 
-	// 営業時間フィールドが正しく保存・読み取りされていることを確認
+	// Verify that business hours fields are correctly saved and retrieved
 	assert.Equal(t, "09:00", savedConfig.BusinessHoursStart)
 	assert.Equal(t, "18:00", savedConfig.BusinessHoursEnd)
 }
@@ -56,7 +56,7 @@ func TestChannelConfig_BusinessHoursFields(t *testing.T) {
 func TestChannelConfig_DefaultBusinessHours(t *testing.T) {
 	db := setupChannelConfigTestDB(t)
 
-	// 営業時間を指定しないChannelConfigを作成
+	// Create a ChannelConfig without specifying business hours
 	config := ChannelConfig{
 		ID:               "test-config-default",
 		SlackChannelID:   "C12345",
@@ -67,16 +67,16 @@ func TestChannelConfig_DefaultBusinessHours(t *testing.T) {
 		UpdatedAt:        time.Now(),
 	}
 
-	// データベースに保存
+	// Save to database
 	err := db.Create(&config).Error
 	assert.NoError(t, err)
 
-	// データベースから読み取り
+	// Read from database
 	var savedConfig ChannelConfig
 	err = db.Where("id = ?", "test-config-default").First(&savedConfig).Error
 	assert.NoError(t, err)
 
-	// デフォルト値が設定されていることを確認
+	// Verify that default values are set
 	assert.Equal(t, "09:00", savedConfig.BusinessHoursStart)
 	assert.Equal(t, "18:00", savedConfig.BusinessHoursEnd)
 }

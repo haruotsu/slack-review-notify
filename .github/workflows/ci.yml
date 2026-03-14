@@ -108,7 +108,7 @@ jobs:
           default_bump: patch
           tag_prefix: v
 
-      # リリースワークフローの処理をここで直接実行
+      # Execute release workflow steps directly here
       - name: Set up Go
         if: steps.tag_version.outputs.new_tag != ''
         uses: actions/setup-go@v5

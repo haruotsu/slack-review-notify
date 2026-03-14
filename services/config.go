@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// チャンネル設定を取得する関数
+// GetChannelConfig retrieves the channel configuration
 func GetChannelConfig(db *gorm.DB, channelID string, labelName string) (*models.ChannelConfig, error) {
 	var config models.ChannelConfig
 
@@ -21,14 +21,14 @@ func GetChannelConfig(db *gorm.DB, channelID string, labelName string) (*models.
 	return &config, nil
 }
 
-// チャンネル設定が存在するか確認する関数
+// HasChannelConfig checks whether a channel configuration exists
 func HasChannelConfig(db *gorm.DB, channelID string, labelName string) bool {
 	var count int64
 	db.Model(&models.ChannelConfig{}).Where("slack_channel_id = ? AND label_name = ? AND is_active = ?", channelID, labelName, true).Count(&count)
 	return count > 0
 }
 
-// リポジトリがチャンネルで通知対象かチェックする関数
+// IsRepositoryWatched checks whether a repository is a notification target for the channel
 func IsRepositoryWatched(config *models.ChannelConfig, repoFullName string) bool {
 	if config == nil {
 		log.Printf("channel config is nil")
@@ -56,20 +56,20 @@ func IsRepositoryWatched(config *models.ChannelConfig, repoFullName string) bool
 	return false
 }
 
-// ラベルが設定条件にマッチするかチェックする関数
+// IsLabelMatched checks whether the labels match the configuration conditions
 func IsLabelMatched(config *models.ChannelConfig, prLabels []*github.Label) bool {
 	if config == nil {
 		log.Printf("channel config is nil")
 		return false
 	}
 
-	// 空文字列の場合はマッチしない
+	// Empty string does not match
 	if config.LabelName == "" {
 		log.Printf("no label configured for channel")
 		return false
 	}
 
-	// PRのラベル名をセットに変換
+	// Convert PR label names to a set
 	prLabelNames := make(map[string]bool)
 	for _, label := range prLabels {
 		if label.Name != nil {
@@ -77,10 +77,10 @@ func IsLabelMatched(config *models.ChannelConfig, prLabels []*github.Label) bool
 		}
 	}
 
-	// 設定されたラベル（カンマ区切り）を分割
+	// Split the configured labels (comma-separated)
 	requiredLabels := strings.Split(config.LabelName, ",")
 
-	// 全ての必要なラベルがPRに存在するかチェック（AND条件）
+	// Check that all required labels exist on the PR (AND condition)
 	for _, label := range requiredLabels {
 		trimmedLabel := strings.TrimSpace(label)
 		if trimmedLabel != "" && !prLabelNames[trimmedLabel] {
@@ -93,16 +93,16 @@ func IsLabelMatched(config *models.ChannelConfig, prLabels []*github.Label) bool
 	return true
 }
 
-// IsAddedLabelRelevant は今回追加されたラベルが、設定されたラベル群に関連するかチェック
+// IsAddedLabelRelevant checks whether the newly added label is relevant to the configured label set
 func IsAddedLabelRelevant(config *models.ChannelConfig, addedLabelName string) bool {
 	if config == nil || config.LabelName == "" {
 		return false
 	}
 
-	// 設定されたラベル（カンマ区切り）を分割
+	// Split the configured labels (comma-separated)
 	requiredLabels := strings.Split(config.LabelName, ",")
 
-	// 追加されたラベルが設定されたラベル群に含まれているかチェック
+	// Check whether the added label is included in the configured label set
 	for _, label := range requiredLabels {
 		trimmedLabel := strings.TrimSpace(label)
 		if trimmedLabel != "" && trimmedLabel == addedLabelName {
@@ -115,13 +115,13 @@ func IsAddedLabelRelevant(config *models.ChannelConfig, addedLabelName string) b
 	return false
 }
 
-// GetMissingLabels は設定で必要なラベルのうち、PRに存在しないラベルを返す
+// GetMissingLabels returns the required labels from the configuration that are not present on the PR
 func GetMissingLabels(config *models.ChannelConfig, prLabels []*github.Label) []string {
 	if config == nil || config.LabelName == "" {
 		return []string{}
 	}
 
-	// PRのラベル名をセットに変換
+	// Convert PR label names to a set
 	prLabelNames := make(map[string]bool)
 	for _, label := range prLabels {
 		if label.Name != nil {
@@ -129,11 +129,11 @@ func GetMissingLabels(config *models.ChannelConfig, prLabels []*github.Label) []
 		}
 	}
 
-	// 設定されたラベル（カンマ区切り）を分割
+	// Split the configured labels (comma-separated)
 	requiredLabels := strings.Split(config.LabelName, ",")
 	missingLabels := make([]string, 0)
 
-	// 存在しない必要なラベルを収集
+	// Collect required labels that are missing
 	for _, label := range requiredLabels {
 		trimmedLabel := strings.TrimSpace(label)
 		if trimmedLabel != "" && !prLabelNames[trimmedLabel] {
