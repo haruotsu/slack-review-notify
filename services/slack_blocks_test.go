@@ -279,6 +279,21 @@ func TestCreateChangeReviewerButton(t *testing.T) {
 	}
 }
 
+func TestCreateChangeReviewerButton_English(t *testing.T) {
+	button := CreateChangeReviewerButton("task456", "en")
+
+	text := button["text"].(map[string]interface{})
+	if text["text"] != "Change Reviewer!" {
+		t.Errorf("expected 'Change Reviewer!', got %v", text["text"])
+	}
+	if button["action_id"] != "change_reviewer" {
+		t.Errorf("expected action_id 'change_reviewer', got %v", button["action_id"])
+	}
+	if button["value"] != "task456" {
+		t.Errorf("expected value 'task456', got %v", button["value"])
+	}
+}
+
 func TestCreateMessageBlocks(t *testing.T) {
 	message := "テストメッセージ"
 	blocks := CreateMessageBlocks(message)
