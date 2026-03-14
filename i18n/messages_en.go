@@ -102,7 +102,7 @@ Omitting [label-name] uses the default label "needs-review"`,
 
 	// ==================== Command: add-repo ====================
 	"cmd.add_repo.usage":          "Please specify repository names separated by commas. Example: /slack-review-notify %s add-repo owner/repo1,owner/repo2",
-	"cmd.add_repo.created":        "Added `%s` to notification target repositories for label \"%s\".",
+	"cmd.add_repo.created":        "Added `%[2]s` to notification target repositories for label \"%[1]s\".",
 	"cmd.add_repo.added":          "Added the following to notification target repositories for label \"%s\":\n`%s`",
 	"cmd.add_repo.already_exists": "The following repositories were already notification targets:\n`%s`",
 	"cmd.add_repo.no_valid":       "No valid repository names were specified.",
@@ -112,7 +112,7 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"cmd.remove_repo.no_config": "No configuration found for label \"%s\" in this channel.",
 	"cmd.remove_repo.empty":     "No notification target repositories are set for label \"%s\".",
 	"cmd.remove_repo.not_found": "Repository `%s` is not a notification target for label \"%s\".",
-	"cmd.remove_repo.success":   "Removed `%s` from notification target repositories for label \"%s\".",
+	"cmd.remove_repo.success":   "Removed `%[2]s` from notification target repositories for label \"%[1]s\".",
 
 	// ==================== Command: set-label ====================
 	"cmd.set_label.usage":          "Please specify a new label name. Example: /slack-review-notify %s set-label new-label-name",

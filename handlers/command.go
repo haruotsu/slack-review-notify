@@ -67,7 +67,12 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 
 			if len(parts) == 0 {
 				// Show help when no arguments are provided
-				showHelp(c, "ja")
+				var emptyHelpConfig models.ChannelConfig
+			emptyHelpLang := "ja"
+			if err := db.Where("slack_channel_id = ?", channelID).First(&emptyHelpConfig).Error; err == nil {
+				emptyHelpLang = getLang(&emptyHelpConfig)
+			}
+			showHelp(c, emptyHelpLang)
 				return
 			}
 
@@ -280,7 +285,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		c.String(200, i18n.T("cmd.unknown"))
+		c.String(200, i18n.TWithLang("ja", "cmd.unknown"))
 	}
 }
 
@@ -1180,16 +1185,20 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 	}
 
 	// Build response message
+	openParen, closeParen := "（", "）"
+	if lang == "en" {
+		openParen, closeParen = " (", ")"
+	}
 	response := t("cmd.set_away.success", slackUserID)
 	if awayUntil != nil {
-		response += "（" + t("common.until", awayUntil.Format("2006-01-02"))
+		response += openParen + t("common.until", awayUntil.Format("2006-01-02"))
 	} else {
-		response += "（" + t("common.indefinite")
+		response += openParen + t("common.indefinite")
 	}
 	if reason != "" {
-		response += t("common.reason", reason) + "）"
+		response += t("common.reason", reason) + closeParen
 	} else {
-		response += "）"
+		response += closeParen
 	}
 
 	c.String(200, response)
@@ -1241,7 +1250,11 @@ func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
 			line += t("common.indefinite")
 		}
 		if r.Reason != "" {
-			line += fmt.Sprintf("（%s）", r.Reason)
+			if lang == "en" {
+				line += fmt.Sprintf(" (%s)", r.Reason)
+			} else {
+				line += fmt.Sprintf("（%s）", r.Reason)
+			}
 		}
 		response += line + "\n"
 	}
