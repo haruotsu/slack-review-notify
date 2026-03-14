@@ -12,22 +12,22 @@ import (
 )
 
 func TestCleanupArchivedChannels(t *testing.T) {
-	// テスト用DBのセットアップ
+	// Set up test database
 	db := setupTestDB(t)
 
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables before the test and restore them afterwards
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set environment variables for testing
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Set up mocks
+	defer gock.Off() // Clear mocks when the test ends
 
-	// テスト用のチャンネル設定を作成
+	// Create channel configurations for testing
 	configs := []models.ChannelConfig{
 		{
 			ID:               "config-id-1",
@@ -55,7 +55,7 @@ func TestCleanupArchivedChannels(t *testing.T) {
 		db.Create(&config)
 	}
 
-	// チャンネル情報取得のモック (1つ目のチャンネルはアクティブ)
+	// Mock for channel info retrieval (first channel is active)
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "C12345").
@@ -68,7 +68,7 @@ func TestCleanupArchivedChannels(t *testing.T) {
 			},
 		})
 
-	// チャンネル情報取得のモック (2つ目のチャンネルはアーカイブ済み)
+	// Mock for channel info retrieval (second channel is archived)
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "C67890").
@@ -81,21 +81,21 @@ func TestCleanupArchivedChannels(t *testing.T) {
 			},
 		})
 
-	// 関数を実行
+	// Execute the function
 	CleanupArchivedChannels(db)
 
-	// DBが更新されたことを確認
+	// Verify that the DB has been updated
 	var config1 models.ChannelConfig
 	db.Where("slack_channel_id = ?", "C12345").First(&config1)
-	assert.True(t, config1.IsActive, "アクティブなチャンネルは有効のままであるべき")
+	assert.True(t, config1.IsActive, "Active channel should remain enabled")
 
 	var config2 models.ChannelConfig
 	db.Where("slack_channel_id = ?", "C67890").First(&config2)
-	assert.False(t, config2.IsActive, "アーカイブされたチャンネルは無効になるべき")
+	assert.False(t, config2.IsActive, "Archived channel should be disabled")
 
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	assert.True(t, gock.IsDone(), "Not all mocks have been used")
 
-	// APIエラーのケースもテスト
+	// Also test the API error case
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "C12345").
@@ -105,9 +105,9 @@ func TestCleanupArchivedChannels(t *testing.T) {
 			"error": "channel_not_found",
 		})
 
-	// 関数を再度実行 (エラーが適切に処理されることを確認)
+	// Execute the function again (verify that errors are handled properly)
 	CleanupArchivedChannels(db)
 
-	// APIエラーがあっても処理が継続することを確認
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	// Verify that processing continues even when there are API errors
+	assert.True(t, gock.IsDone(), "Not all mocks have been used")
 }

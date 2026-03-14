@@ -17,7 +17,7 @@ import (
 )
 
 func setupTestRouter(db *gorm.DB) *gin.Engine {
-	// テストモードを有効化
+	// Enable test mode
 	services.IsTestMode = true
 
 	gin.SetMode(gin.TestMode)
@@ -32,7 +32,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("fail to open test db: %v", err)
 	}
 
-	// マイグレーションを実行
+	// Run migrations
 	if err := db.AutoMigrate(&models.ChannelConfig{}, &models.ReviewTask{}, &models.UserMapping{}, &models.ReviewerAvailability{}); err != nil {
 		t.Fatalf("fail to migrate test db: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestHandleSlackCommand_Help(t *testing.T) {
 	db := setupTestDB(t)
 	router := setupTestRouter(db)
 
-	// helpコマンドのテスト
+	// Test the help command
 	form := url.Values{}
 	form.Add("command", "/slack-review-notify")
 	form.Add("text", "help")
@@ -70,7 +70,7 @@ func TestHandleSlackCommand_Show(t *testing.T) {
 	db := setupTestDB(t)
 	router := setupTestRouter(db)
 
-	// テスト用のチャンネル設定を作成
+	// Create a test channel config
 	testConfig := models.ChannelConfig{
 		ID:               "test-id",
 		SlackChannelID:   "C12345",
@@ -83,7 +83,7 @@ func TestHandleSlackCommand_Show(t *testing.T) {
 	}
 	db.Create(&testConfig)
 
-	// showコマンドのテスト
+	// Test the show command
 	form := url.Values{}
 	form.Add("command", "/slack-review-notify")
 	form.Add("text", "show")
@@ -106,7 +106,7 @@ func TestHandleSlackCommand_ShowSpecificLabel(t *testing.T) {
 	db := setupTestDB(t)
 	router := setupTestRouter(db)
 
-	// テスト用のチャンネル設定を作成
+	// Create a test channel config
 	testConfig := models.ChannelConfig{
 		ID:               "test-id",
 		SlackChannelID:   "C12345",
@@ -119,7 +119,7 @@ func TestHandleSlackCommand_ShowSpecificLabel(t *testing.T) {
 	}
 	db.Create(&testConfig)
 
-	// 特定のラベルの詳細設定を表示するテスト
+	// Test displaying detailed settings for a specific label
 	form := url.Values{}
 	form.Add("command", "/slack-review-notify")
 	form.Add("text", "needs-review show")
@@ -142,7 +142,7 @@ func TestHandleSlackCommand_SetMention(t *testing.T) {
 	db := setupTestDB(t)
 	router := setupTestRouter(db)
 
-	// set-mentionコマンドのテスト
+	// Test the set-mention command
 	form := url.Values{}
 	form.Add("command", "/slack-review-notify")
 	form.Add("text", "set-mention U67890")
@@ -158,7 +158,7 @@ func TestHandleSlackCommand_SetMention(t *testing.T) {
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "メンション先を")
 
-	// データベース内の値を確認
+	// Verify the value in the database
 	var config models.ChannelConfig
 	db.Where("slack_channel_id = ? AND label_name = ?", "C12345", "needs-review").First(&config)
 	assert.Equal(t, "U67890", config.DefaultMentionID)
@@ -168,7 +168,7 @@ func TestHandleSlackCommand_AddRepo(t *testing.T) {
 	db := setupTestDB(t)
 	router := setupTestRouter(db)
 
-	// テスト用のチャンネル設定を作成
+	// Create a test channel config
 	testConfig := models.ChannelConfig{
 		ID:               "test-id",
 		SlackChannelID:   "C12345",
@@ -181,7 +181,7 @@ func TestHandleSlackCommand_AddRepo(t *testing.T) {
 	}
 	db.Create(&testConfig)
 
-	// add-repoコマンドのテスト
+	// Test the add-repo command
 	form := url.Values{}
 	form.Add("command", "/slack-review-notify")
 	form.Add("text", "add-repo owner/repo2")
@@ -197,19 +197,19 @@ func TestHandleSlackCommand_AddRepo(t *testing.T) {
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "通知対象リポジトリに")
 
-	// データベース内の値を確認
+	// Verify the value in the database
 	var config models.ChannelConfig
 	db.Where("slack_channel_id = ? AND label_name = ?", "C12345", "needs-review").First(&config)
 	assert.Contains(t, config.RepositoryList, "owner/repo1")
 	assert.Contains(t, config.RepositoryList, "owner/repo2")
 }
 
-// ラベル指定のテスト
+// Test with label specification
 func TestHandleSlackCommand_WithLabel(t *testing.T) {
 	db := setupTestDB(t)
 	router := setupTestRouter(db)
 
-	// テスト用のチャンネル設定を作成
+	// Create a test channel config
 	testConfig := models.ChannelConfig{
 		ID:               "test-id",
 		SlackChannelID:   "C12345",
@@ -222,7 +222,7 @@ func TestHandleSlackCommand_WithLabel(t *testing.T) {
 	}
 	db.Create(&testConfig)
 
-	// ラベル指定のshowコマンドテスト
+	// Test show command with label specification
 	form := url.Values{}
 	form.Add("command", "/slack-review-notify")
 	form.Add("text", "bug show")
@@ -243,7 +243,7 @@ func TestHandleSlackCommand_ShowAllLabels(t *testing.T) {
 	db := setupTestDB(t)
 	router := setupTestRouter(db)
 
-	// テスト用の複数のチャンネル設定を作成
+	// Create multiple test channel configs
 	testConfigs := []models.ChannelConfig{
 		{
 			ID:               "test-id-1",
@@ -274,7 +274,7 @@ func TestHandleSlackCommand_ShowAllLabels(t *testing.T) {
 		},
 		{
 			ID:               "test-id-4",
-			SlackChannelID:   "C67890", // 別のチャンネル
+			SlackChannelID:   "C67890", // Different channel
 			LabelName:        "security",
 			DefaultMentionID: "U22222",
 			IsActive:         true,
@@ -287,7 +287,7 @@ func TestHandleSlackCommand_ShowAllLabels(t *testing.T) {
 		db.Create(&config)
 	}
 
-	// 引数なしのshowコマンドのテスト（すべてのラベルを表示）
+	// Test the show command without arguments (display all labels)
 	form := url.Values{}
 	form.Add("command", "/slack-review-notify")
 	form.Add("text", "show")
@@ -303,7 +303,7 @@ func TestHandleSlackCommand_ShowAllLabels(t *testing.T) {
 	assert.Equal(t, 200, w.Code)
 	responseBody := w.Body.String()
 
-	// 現在のチャンネルのラベルのみが表示されることを確認
+	// Verify that only labels from the current channel are displayed
 	assert.Contains(t, responseBody, "このチャンネルで設定済みのラベル")
 	assert.Contains(t, responseBody, "needs-review")
 	assert.Contains(t, responseBody, "bug")
@@ -311,6 +311,6 @@ func TestHandleSlackCommand_ShowAllLabels(t *testing.T) {
 	assert.Contains(t, responseBody, "有効")
 	assert.Contains(t, responseBody, "無効")
 
-	// 他のチャンネルのラベルは表示されないことを確認
+	// Verify that labels from other channels are not displayed
 	assert.NotContains(t, responseBody, "security")
 }

@@ -15,14 +15,14 @@ type ReviewTask struct {
 	SlackTS             string
 	SlackChannel        string
 	Reviewer            string
-	Reviewers           string // カンマ区切り: 全アサインレビュワーのSlack ID
-	ApprovedBy          string // カンマ区切り: approveしたレビュワーのSlack ID
-	PRAuthorSlackID     string // PR作成者のSlack ID（レビュワー除外用）
+	Reviewers           string // Comma-separated: Slack IDs of all assigned reviewers
+	ApprovedBy          string // Comma-separated: Slack IDs of reviewers who approved
+	PRAuthorSlackID     string // Slack ID of the PR author (used for excluding from reviewers)
 	Status              string // "pending", "in_review", "paused", "archived", "done", "waiting_business_hours"
 	LabelName           string
 	WatchingUntil       *time.Time
 	ReminderPausedUntil *time.Time
-	OutOfHoursReminded  bool // 営業時間外に自動でリマインドを一時停止したかのフラグ
+	OutOfHoursReminded  bool // Flag indicating whether reminders were automatically paused outside business hours
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	DeletedAt           gorm.DeletedAt `gorm:"index"`

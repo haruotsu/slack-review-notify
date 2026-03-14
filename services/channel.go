@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// アーカイブされたチャンネルの設定を非アクティブにする
+// CleanupArchivedChannels deactivates configurations for archived channels
 func CleanupArchivedChannels(db *gorm.DB) {
 	var configs []models.ChannelConfig
 	db.Where("is_active = ?", true).Find(&configs)
@@ -23,7 +23,7 @@ func CleanupArchivedChannels(db *gorm.DB) {
 		if isArchived {
 			log.Printf("channel %s is archived", config.SlackChannelID)
 
-			// 非アクティブに更新
+			// Update to inactive
 			config.IsActive = false
 			config.UpdatedAt = time.Now()
 			if err := db.Save(&config).Error; err != nil {

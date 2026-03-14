@@ -25,7 +25,7 @@ type SlackActionPayload struct {
 	Actions []struct {
 		ActionID string `json:"action_id"`
 		Value    string `json:"value,omitempty"`
-		// 選択メニュー用の項目
+		// Fields for selection menu
 		SelectedOption struct {
 			Value string `json:"value"`
 			Text  struct {
@@ -50,10 +50,10 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// ボディを復元
+		// Restore the body
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-		// 署名を検証
+		// Verify the signature
 		if !services.ValidateSlackRequest(c.Request, bodyBytes) {
 			log.Println("invalid slack signature")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid slack signature"})
@@ -76,18 +76,18 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 
 		log.Printf("slack action received: ts=%s, channel=%s, userID=%s", ts, channel, slackUserID)
 
-		// アクションがない場合はエラー
+		// Error if no actions are present
 		if len(payload.Actions) == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "no action provided"})
 			return
 		}
 
-		// アクションIDを取得
+		// Get the action ID
 		actionID := payload.Actions[0].ActionID
 
-		// 「リマインダー停止」の選択メニュー処理
+		// Handle "Pause Reminder" selection menu
 		if actionID == "pause_reminder" || actionID == "pause_reminder_initial" {
-			// 選択メニューからの値を取得
+			// Get value from selection menu
 			var selectedValue string
 			if payload.Actions[0].SelectedOption.Value != "" {
 				selectedValue = payload.Actions[0].SelectedOption.Value
@@ -101,7 +101,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 
-			// 値からタスクIDと期間を抽出 (形式: "taskID:duration")
+			// Extract task ID and duration from value (format: "taskID:duration")
 			parts := strings.Split(selectedValue, ":")
 			if len(parts) != 2 {
 				log.Printf("invalid value format: %s", selectedValue)
@@ -112,7 +112,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			taskID := parts[0]
 			duration := parts[1]
 
-			// タスクIDを使ってデータベースから直接タスクを検索
+			// Search for task directly in database using task ID
 			var taskToUpdate models.ReviewTask
 			if err := db.Where("id = ?", taskID).First(&taskToUpdate).Error; err != nil {
 				log.Printf("task id %s not found: %v", taskID, err)
@@ -120,7 +120,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 
-			// 選択された期間に基づいてリマインダーを一時停止
+			// Pause reminder based on the selected duration
 			var pauseUntil time.Time
 
 			switch duration {
@@ -134,28 +134,28 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				pauseUntil = time.Now().Add(4 * time.Hour)
 				taskToUpdate.ReminderPausedUntil = &pauseUntil
 			case "today":
-				// 翌営業日の営業開始時刻まで停止
-				// チャンネル設定を取得
+				// Pause until the next business day's opening time
+				// Get channel config
 				var config models.ChannelConfig
 				if err := db.Where("slack_channel_id = ? AND label_name = ?", taskToUpdate.SlackChannel, taskToUpdate.LabelName).First(&config).Error; err != nil {
-					// 設定が見つからない場合はデフォルト（10:00）を使用
+					// Use default (10:00) if config is not found
 					pauseUntil = services.GetNextBusinessDayMorningWithConfig(time.Now(), nil)
 				} else {
-					// 設定に基づいて営業開始時刻を使用
+					// Use business hours start time from config
 					pauseUntil = services.GetNextBusinessDayMorningWithConfig(time.Now(), &config)
 				}
 				taskToUpdate.ReminderPausedUntil = &pauseUntil
 			case "stop":
-				// レビュー担当者が決まるまで通知しない
+				// Do not notify until a reviewer is assigned
 				taskToUpdate.Status = "paused"
 			default:
-				pauseUntil = time.Now().Add(1 * time.Hour) // デフォルト
+				pauseUntil = time.Now().Add(1 * time.Hour) // Default
 				taskToUpdate.ReminderPausedUntil = &pauseUntil
 			}
 
 			db.Save(&taskToUpdate)
 
-			// 一時停止を通知
+			// Notify about the pause
 			err := services.SendReminderPausedMessage(taskToUpdate, duration)
 			if err != nil {
 				log.Printf("pause reminder send error: %v", err)
@@ -165,10 +165,10 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// 各アクションに対する処理
+		// Handle each action
 		switch actionID {
 		case "review_done":
-			// tsとchannelを使ってタスクを検索（pending状態の場合は少し待ってからリトライ）
+			// Search for task using ts and channel (retry after a short delay if in pending state)
 			var task models.ReviewTask
 			const maxRetries = 5
 			const retryDelay = 200 * time.Millisecond
@@ -180,7 +180,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 					break
 				}
 
-				// レコードが見つからない場合、少し待ってからリトライ
+				// If record not found, wait briefly and retry
 				if retry < maxRetries-1 {
 					log.Printf("task not found (attempt %d/%d): ts=%s, channel=%s, retrying in %v",
 						retry+1, maxRetries, ts, channel, retryDelay)
@@ -194,13 +194,13 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 
-			// レビュー完了通知をスレッドに投稿
+			// Post review completion notification to thread
 			message := fmt.Sprintf("✅ <@%s> さんがレビューを完了しました！感謝！👏", slackUserID)
 			if err := services.PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
 				log.Printf("review done notification error: %v", err)
 			}
 
-			// ステータスを完了に変更
+			// Change status to done
 			task.Status = "done"
 			task.UpdatedAt = time.Now()
 
@@ -214,7 +214,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 
 		case "change_reviewer":
-			// 値を解析: "taskID" または "taskID:replacingReviewerID" 形式
+			// Parse value: "taskID" or "taskID:replacingReviewerID" format
 			actionValue := payload.Actions[0].Value
 			var taskID string
 			var replacingReviewerID string
@@ -225,7 +225,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				taskID = actionValue
 			}
 
-			// タスクIDを使ってデータベースからタスクを検索
+			// Search for task in database using task ID
 			var taskToUpdate models.ReviewTask
 			if err := db.Where("id = ?", taskID).First(&taskToUpdate).Error; err != nil {
 				log.Printf("task id %s not found: %v", taskID, err)
@@ -233,13 +233,13 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 
-			// もしLabelNameが設定されていない既存のタスクの場合はデフォルト値を使用
+			// Use default value if LabelName is not set on existing task
 			if taskToUpdate.LabelName == "" {
 				taskToUpdate.LabelName = "needs-review"
 				db.Save(&taskToUpdate)
 			}
 
-			// 除外対象: PR作成者 + 他の現行レビュワー
+			// Exclusions: PR author + other current reviewers
 			excludeIDs := []string{}
 			if taskToUpdate.PRAuthorSlackID != "" {
 				excludeIDs = append(excludeIDs, taskToUpdate.PRAuthorSlackID)
@@ -254,10 +254,10 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				excludeIDs = append(excludeIDs, taskToUpdate.Reviewer)
 			}
 
-			// 新しいレビュワーを1人選択
+			// Select one new reviewer
 			newReviewerIDs := services.SelectRandomReviewers(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName, 1, excludeIDs)
 
-			// SelectRandomReviewersがDefaultMentionIDのみを返した場合は候補なし
+			// No real candidates if SelectRandomReviewers only returned DefaultMentionID
 			noRealCandidate := false
 			if len(newReviewerIDs) == 0 {
 				noRealCandidate = true
@@ -280,12 +280,12 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			}
 			newReviewerID := newReviewerIDs[0]
 
-			// 古いレビュワーIDを保存
+			// Save the old reviewer ID
 			oldReviewerID := taskToUpdate.Reviewer
 
-			// Reviewers フィールドの更新
+			// Update the Reviewers field
 			if replacingReviewerID != "" && taskToUpdate.Reviewers != "" {
-				// 特定のレビュワーを置換
+				// Replace a specific reviewer
 				var updatedReviewers []string
 				for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
 					trimmed := strings.TrimSpace(id)
@@ -298,7 +298,7 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				taskToUpdate.Reviewers = strings.Join(updatedReviewers, ",")
 				oldReviewerID = replacingReviewerID
 			} else {
-				// 後方互換: 単一レビュワーの変更
+				// Backward compatibility: single reviewer change
 				if taskToUpdate.Reviewers != "" {
 					var updatedReviewers []string
 					for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
@@ -313,12 +313,12 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				}
 			}
 
-			// Reviewer フィールドの更新（後方互換）
+			// Update the Reviewer field (backward compatibility)
 			taskToUpdate.Reviewer = newReviewerID
 			taskToUpdate.UpdatedAt = time.Now()
 			db.Save(&taskToUpdate)
 
-			// レビュワーが変更されたことを通知
+			// Notify that the reviewer has been changed
 			err := services.SendReviewerChangedMessage(taskToUpdate, oldReviewerID)
 			if err != nil {
 				log.Printf("reviewer change notification error: %v", err)

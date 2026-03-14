@@ -13,7 +13,7 @@ import (
 func TestCleanupOldTasks(t *testing.T) {
 	db := setupTestDB(t)
 
-	// テストデータ作成
+	// Create test data
 	now := time.Now()
 	twoDaysAgo := now.AddDate(0, 0, -2)
 	yesterdayAgo := now.AddDate(0, 0, -1)
@@ -31,7 +31,7 @@ func TestCleanupOldTasks(t *testing.T) {
 			SlackChannel: "C12345",
 			Status:       "done",
 			CreatedAt:    twoDaysAgo,
-			UpdatedAt:    twoDaysAgo, // 古い完了タスク (削除対象)
+			UpdatedAt:    twoDaysAgo, // Old done task (should be deleted)
 		},
 		{
 			ID:           "task2",
@@ -43,7 +43,7 @@ func TestCleanupOldTasks(t *testing.T) {
 			SlackChannel: "C12345",
 			Status:       "done",
 			CreatedAt:    yesterdayAgo,
-			UpdatedAt:    now, // 新しい完了タスク (保持)
+			UpdatedAt:    now, // Recent done task (should be kept)
 		},
 		{
 			ID:           "task3",
@@ -55,7 +55,7 @@ func TestCleanupOldTasks(t *testing.T) {
 			SlackChannel: "C12345",
 			Status:       "paused",
 			CreatedAt:    twoWeeksAgo,
-			UpdatedAt:    twoWeeksAgo, // 古い一時停止タスク (削除対象)
+			UpdatedAt:    twoWeeksAgo, // Old paused task (should be deleted)
 		},
 		{
 			ID:           "task4",
@@ -67,7 +67,7 @@ func TestCleanupOldTasks(t *testing.T) {
 			SlackChannel: "C12345",
 			Status:       "archived",
 			CreatedAt:    now,
-			UpdatedAt:    now, // アーカイブタスク (削除対象)
+			UpdatedAt:    now, // Archived task (should be deleted)
 		},
 		{
 			ID:           "task5",
@@ -79,7 +79,7 @@ func TestCleanupOldTasks(t *testing.T) {
 			SlackChannel: "C12345",
 			Status:       "pending",
 			CreatedAt:    now,
-			UpdatedAt:    now, // 保留中タスク (保持)
+			UpdatedAt:    now, // Pending task (should be kept)
 		},
 		{
 			ID:           "task6",
@@ -91,7 +91,7 @@ func TestCleanupOldTasks(t *testing.T) {
 			SlackChannel: "C12345",
 			Status:       "completed",
 			CreatedAt:    tenDaysAgo,
-			UpdatedAt:    tenDaysAgo, // 10日前のcompletedタスク (7日超過で削除対象)
+			UpdatedAt:    tenDaysAgo, // 10-day-old completed task (over 7 days, should be deleted)
 		},
 		{
 			ID:           "task7",
@@ -103,7 +103,7 @@ func TestCleanupOldTasks(t *testing.T) {
 			SlackChannel: "C12345",
 			Status:       "completed",
 			CreatedAt:    now,
-			UpdatedAt:    now, // 新しいcompletedタスク (保持)
+			UpdatedAt:    now, // Recent completed task (should be kept)
 		},
 		{
 			ID:           "task8",
@@ -115,7 +115,7 @@ func TestCleanupOldTasks(t *testing.T) {
 			SlackChannel: "C12345",
 			Status:       "completed",
 			CreatedAt:    twoDaysAgo,
-			UpdatedAt:    twoDaysAgo, // 2日前のcompletedタスク (7日未満なので保持)
+			UpdatedAt:    twoDaysAgo, // 2-day-old completed task (under 7 days, should be kept)
 		},
 	}
 
@@ -123,57 +123,57 @@ func TestCleanupOldTasks(t *testing.T) {
 		db.Create(&task)
 	}
 
-	// クリーンアップ実行
+	// Execute cleanup
 	CleanupOldTasks(db)
 
-	// 削除されたかどうかを確認
+	// Verify deletion results
 	var count int64
 
-	// task1 (古いdoneタスク)は削除されているはず
+	// task1 (old done task) should be deleted
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task1").Count(&count)
 	assert.Equal(t, int64(0), count)
 
-	// task2 (新しいdoneタスク)は保持されているはず
+	// task2 (recent done task) should be kept
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task2").Count(&count)
 	assert.Equal(t, int64(1), count)
 
-	// task3 (古いpausedタスク)は削除されているはず
+	// task3 (old paused task) should be deleted
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task3").Count(&count)
 	assert.Equal(t, int64(0), count)
 
-	// task4 (archivedタスク)は削除されているはず
+	// task4 (archived task) should be deleted
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task4").Count(&count)
 	assert.Equal(t, int64(0), count)
 
-	// task5 (pendingタスク)は保持されているはず
+	// task5 (pending task) should be kept
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task5").Count(&count)
 	assert.Equal(t, int64(1), count)
 
-	// task6 (10日前のcompletedタスク)は削除されているはず
+	// task6 (10-day-old completed task) should be deleted
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task6").Count(&count)
 	assert.Equal(t, int64(0), count)
 
-	// task7 (新しいcompletedタスク)は保持されているはず
+	// task7 (recent completed task) should be kept
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task7").Count(&count)
 	assert.Equal(t, int64(1), count)
 
-	// task8 (2日前のcompletedタスク)は7日未満なので保持されているはず
+	// task8 (2-day-old completed task) should be kept since it's under 7 days
 	db.Model(&models.ReviewTask{}).Where("id = ?", "task8").Count(&count)
 	assert.Equal(t, int64(1), count)
 }
 
 func TestCheckInReviewTasks(t *testing.T) {
-	// 簡略化したテスト：モックの部分だけテスト
+	// Simplified test: only test the mock portion
 	db := setupTestDB(t)
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// テスト用のタスクを作成（単純にin_review状態の1つだけ）
+	// Create a test task (simply one in in_review status)
 	now := time.Now()
 	twoHoursAgo := now.Add(-2 * time.Hour)
 
@@ -194,10 +194,10 @@ func TestCheckInReviewTasks(t *testing.T) {
 
 	db.Create(&task)
 
-	// モックの設定
+	// Set up mocks
 	defer gock.Off()
 
-	// チャンネル情報取得のモック
+	// Mock for channel info retrieval
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "C12345").
@@ -211,7 +211,7 @@ func TestCheckInReviewTasks(t *testing.T) {
 			},
 		})
 
-	// メッセージ送信のモック
+	// Mock for message sending
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Persist().
@@ -220,61 +220,61 @@ func TestCheckInReviewTasks(t *testing.T) {
 			"ok": true,
 		})
 
-	// 関数を実行
+	// Execute function
 	CheckInReviewTasks(db)
 
-	// アサーション - 更新されたことだけを確認
+	// Assertion - only verify that it was updated
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "review-test").First(&updatedTask)
 
-	// テスト成功とする（モックが正しく動作していればOK）
-	// 実際のタイムスタンプの比較は行わない
+	// Consider test successful (OK if mocks are working correctly)
+	// Do not compare actual timestamps
 }
 
 func TestCheckInReviewTasks_ReminderInterval(t *testing.T) {
 	db := setupTestDB(t)
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// テスト用のチャンネル設定を複数作成
+	// Create multiple test channel configs
 	now := time.Now()
 
-	// needs-reviewラベル用設定：60分間隔
+	// Config for needs-review label: 60 minute interval
 	config1 := models.ChannelConfig{
 		ID:                       "config1",
 		SlackChannelID:           "C12345",
 		LabelName:                "needs-review",
 		DefaultMentionID:         "U12345",
-		ReviewerReminderInterval: 60, // 60分
+		ReviewerReminderInterval: 60, // 60 minutes
 		IsActive:                 true,
 		CreatedAt:                now,
 		UpdatedAt:                now,
 	}
 	db.Create(&config1)
 
-	// bugラベル用設定：15分間隔
+	// Config for bug label: 15 minute interval
 	config2 := models.ChannelConfig{
 		ID:                       "config2",
 		SlackChannelID:           "C12345",
 		LabelName:                "bug",
 		DefaultMentionID:         "U67890",
-		ReviewerReminderInterval: 15, // 15分
+		ReviewerReminderInterval: 15, // 15 minutes
 		IsActive:                 true,
 		CreatedAt:                now,
 		UpdatedAt:                now,
 	}
 	db.Create(&config2)
 
-	// テスト用のタスクを作成
+	// Create test tasks
 	twoHoursAgo := now.Add(-2 * time.Hour)
 	twentyMinutesAgo := now.Add(-20 * time.Minute)
 
-	// needs-reviewラベルのタスク（60分間隔、2時間前更新 → リマインド送信される）
+	// Task with needs-review label (60min interval, updated 2 hours ago -> reminder should be sent)
 	task1 := models.ReviewTask{
 		ID:           "task1",
 		PRURL:        "https://github.com/owner/repo/pull/1",
@@ -291,7 +291,7 @@ func TestCheckInReviewTasks_ReminderInterval(t *testing.T) {
 	}
 	db.Create(&task1)
 
-	// bugラベルのタスク（15分間隔、20分前更新 → リマインド送信される）
+	// Task with bug label (15min interval, updated 20 minutes ago -> reminder should be sent)
 	task2 := models.ReviewTask{
 		ID:           "task2",
 		PRURL:        "https://github.com/owner/repo/pull/2",
@@ -308,7 +308,7 @@ func TestCheckInReviewTasks_ReminderInterval(t *testing.T) {
 	}
 	db.Create(&task2)
 
-	// needs-reviewラベルのタスク（60分間隔、20分前更新 → リマインド送信されない）
+	// Task with needs-review label (60min interval, updated 20 minutes ago -> reminder should NOT be sent)
 	task3 := models.ReviewTask{
 		ID:           "task3",
 		PRURL:        "https://github.com/owner/repo/pull/3",
@@ -325,10 +325,10 @@ func TestCheckInReviewTasks_ReminderInterval(t *testing.T) {
 	}
 	db.Create(&task3)
 
-	// モックの設定
+	// Set up mocks
 	defer gock.Off()
 
-	// チャンネル情報取得のモック
+	// Mock for channel info retrieval
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "C12345").
@@ -342,7 +342,7 @@ func TestCheckInReviewTasks_ReminderInterval(t *testing.T) {
 			},
 		})
 
-	// メッセージ送信のモック
+	// Mock for message sending
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Persist().
@@ -351,26 +351,26 @@ func TestCheckInReviewTasks_ReminderInterval(t *testing.T) {
 			"ok": true,
 		})
 
-	// 関数を実行前のタイムスタンプを記録
+	// Record timestamp before function execution
 	beforeExecution := now
 
-	// 関数を実行
+	// Execute function
 	CheckInReviewTasks(db)
 
-	// アサーション
+	// Assertions
 	var updatedTask1 models.ReviewTask
 	db.Where("id = ?", "task1").First(&updatedTask1)
-	// task1は60分間隔で2時間前なのでリマインド送信されるはず
+	// task1 has 60min interval and was updated 2 hours ago, so reminder should be sent
 	assert.True(t, updatedTask1.UpdatedAt.After(beforeExecution), "task1 should be updated")
 
 	var updatedTask2 models.ReviewTask
 	db.Where("id = ?", "task2").First(&updatedTask2)
-	// task2は15分間隔で20分前なのでリマインド送信されるはず
+	// task2 has 15min interval and was updated 20 minutes ago, so reminder should be sent
 	assert.True(t, updatedTask2.UpdatedAt.After(beforeExecution), "task2 should be updated")
 
 	var updatedTask3 models.ReviewTask
 	db.Where("id = ?", "task3").First(&updatedTask3)
-	// task3は60分間隔で20分前なのでリマインド送信されないはず
+	// task3 has 60min interval and was updated 20 minutes ago, so reminder should NOT be sent
 	assert.False(t, updatedTask3.UpdatedAt.After(beforeExecution), "task3 should not be updated")
 }
 
@@ -381,7 +381,7 @@ func TestCleanupExpiredAvailability(t *testing.T) {
 	future := now.Add(24 * time.Hour)
 	past := now.Add(-24 * time.Hour)
 
-	// 無期限休暇（削除されない）
+	// Indefinite leave (should not be deleted)
 	db.Create(&models.ReviewerAvailability{
 		ID:          "perm-away",
 		SlackUserID: "U_PERM",
@@ -390,7 +390,7 @@ func TestCleanupExpiredAvailability(t *testing.T) {
 		UpdatedAt:   now,
 	})
 
-	// 未来の休暇（削除されない）
+	// Future leave (should not be deleted)
 	db.Create(&models.ReviewerAvailability{
 		ID:          "future-away",
 		SlackUserID: "U_FUTURE",
@@ -399,7 +399,7 @@ func TestCleanupExpiredAvailability(t *testing.T) {
 		UpdatedAt:   now,
 	})
 
-	// 期限切れの休暇（削除される）
+	// Expired leave (should be deleted)
 	db.Create(&models.ReviewerAvailability{
 		ID:          "expired-away",
 		SlackUserID: "U_EXPIRED",
@@ -412,15 +412,15 @@ func TestCleanupExpiredAvailability(t *testing.T) {
 
 	var count int64
 
-	// 無期限レコードは残る
+	// Indefinite record should remain
 	db.Model(&models.ReviewerAvailability{}).Where("id = ?", "perm-away").Count(&count)
 	assert.Equal(t, int64(1), count)
 
-	// 未来レコードは残る
+	// Future record should remain
 	db.Model(&models.ReviewerAvailability{}).Where("id = ?", "future-away").Count(&count)
 	assert.Equal(t, int64(1), count)
 
-	// 期限切れレコードは削除される
+	// Expired record should be deleted
 	db.Unscoped().Model(&models.ReviewerAvailability{}).Where("id = ?", "expired-away").Count(&count)
 	assert.Equal(t, int64(0), count)
 }

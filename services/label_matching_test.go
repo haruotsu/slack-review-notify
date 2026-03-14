@@ -263,7 +263,7 @@ func TestIsAddedLabelRelevant(t *testing.T) {
 			name:           "nilコンフィグ",
 			configLabels:   "needs-review",
 			addedLabel:     "needs-review",
-			expectedResult: false, // configがnilの場合のテストは関数内で別途実行
+			expectedResult: false, // Test for nil config is executed separately within the function
 		},
 	}
 

@@ -6,11 +6,11 @@ import (
 	"gorm.io/gorm"
 )
 
-// UserMapping は GitHub username と Slack User ID のマッピングを保持する
+// UserMapping holds the mapping between GitHub username and Slack User ID
 type UserMapping struct {
 	ID             string `gorm:"primaryKey"`
-	GithubUsername string `gorm:"uniqueIndex"` // GitHub のユーザー名
-	SlackUserID    string // Slack のユーザーID
+	GithubUsername string `gorm:"uniqueIndex"` // GitHub username
+	SlackUserID    string // Slack user ID
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	DeletedAt      gorm.DeletedAt `gorm:"index"`

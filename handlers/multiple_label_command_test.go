@@ -26,21 +26,21 @@ func TestMultipleLabelCommandHandler(t *testing.T) {
 		setupConfig    *models.ChannelConfig
 	}{
 		{
-			name:           "複数ラベルでset-mentionコマンド",
+			name:           "set-mention command with multiple labels",
 			command:        "/slack-review-notify",
 			text:           `"hoge-project,needs-review" set-mention @team`,
 			expectedStatus: 200,
 			expectedBody:   "ラベル「hoge-project,needs-review」のメンション先を <@team> に設定しました。",
 		},
 		{
-			name:           "複数ラベルでadd-repoコマンド",
+			name:           "add-repo command with multiple labels",
 			command:        "/slack-review-notify",
 			text:           `"frontend,urgent,needs-review" add-repo owner/webapp`,
 			expectedStatus: 200,
 			expectedBody:   "ラベル「frontend,urgent,needs-review」の通知対象リポジトリに `owner/webapp` を追加しました。",
 		},
 		{
-			name:           "複数ラベル設定の表示",
+			name:           "Display multiple label settings",
 			command:        "/slack-review-notify",
 			text:           `"project-a,needs-review" show`,
 			expectedStatus: 200,
@@ -56,7 +56,7 @@ func TestMultipleLabelCommandHandler(t *testing.T) {
 			},
 		},
 		{
-			name:           "スペース付き複数ラベル設定",
+			name:           "Multiple label settings with spaces",
 			command:        "/slack-review-notify",
 			text:           `"project a, needs review, urgent" set-mention @team`,
 			expectedStatus: 200,
@@ -66,60 +66,60 @@ func TestMultipleLabelCommandHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// セットアップ
+			// Setup
 			db := setupTestDB(t)
 			gin.SetMode(gin.TestMode)
 			services.IsTestMode = true
 
-			// 既存設定があれば作成
+			// Create existing config if provided
 			if tt.setupConfig != nil {
 				tt.setupConfig.ID = "test-config-id"
 				db.Create(tt.setupConfig)
 			}
 
-			// リクエストボディを作成
+			// Create request body
 			data := url.Values{}
 			data.Set("command", tt.command)
 			data.Set("text", tt.text)
 			data.Set("channel_id", "C1234567890")
 			data.Set("user_id", "U1234567890")
 
-			// リクエスト作成
+			// Create request
 			req, _ := http.NewRequest("POST", "/slack/command", strings.NewReader(data.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-			// Slack署名検証をモック（テストモードでスキップ）
+			// Mock Slack signature verification (skipped in test mode)
 			req.Header.Set("X-Slack-Signature", "test")
 			req.Header.Set("X-Slack-Request-Timestamp", "1234567890")
 
 			w := httptest.NewRecorder()
 
-			// Ginルーターを作成してリクエスト実行
+			// Create Gin router and execute request
 			router := gin.Default()
 			router.POST("/slack/command", HandleSlackCommand(db))
 			router.ServeHTTP(w, req)
 
-			// HTTPステータス確認
+			// Verify HTTP status
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
-			// レスポンス内容確認
+			// Verify response content
 			assert.Contains(t, w.Body.String(), tt.expectedBody)
 
-			// データベースに保存されたか確認
+			// Verify saved in database
 			if strings.Contains(tt.text, "set-mention") || strings.Contains(tt.text, "add-repo") {
 				var config models.ChannelConfig
 				labelName := extractLabelFromText(tt.text)
 				result := db.Where("slack_channel_id = ? AND label_name = ?", "C1234567890", labelName).First(&config)
-				assert.NoError(t, result.Error, "設定がデータベースに保存されていません")
+				assert.NoError(t, result.Error, "Config was not saved to database")
 			}
 
-			// クリーンアップ
+			// Cleanup
 			gock.Off()
 		})
 	}
 }
 
-// テキストからラベル名を抽出するヘルパー関数
+// extractLabelFromText is a helper function that extracts the label name from text
 func extractLabelFromText(text string) string {
 	parts := parseCommand(text)
 	if len(parts) > 0 {
@@ -129,12 +129,12 @@ func extractLabelFromText(text string) string {
 }
 
 func TestMultipleLabelHelp(t *testing.T) {
-	// セットアップ
+	// Setup
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// helpコマンドのリクエスト
+	// Request for the help command
 	data := url.Values{}
 	data.Set("command", "/slack-review-notify")
 	data.Set("text", "help")
@@ -152,10 +152,10 @@ func TestMultipleLabelHelp(t *testing.T) {
 	router.POST("/slack/command", HandleSlackCommand(db))
 	router.ServeHTTP(w, req)
 
-	// HTTPステータス確認
+	// Verify HTTP status
 	assert.Equal(t, 200, w.Code)
 
-	// ヘルプメッセージに複数ラベルの説明が含まれているか確認
+	// Verify that the help message contains the multiple labels explanation
 	body := w.Body.String()
 	assert.Contains(t, body, "*複数ラベルAND条件の設定*")
 	assert.Contains(t, body, "カンマ区切りで複数のラベルを指定")

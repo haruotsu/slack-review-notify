@@ -11,11 +11,11 @@ import (
 func TestCheckBusinessHoursTasks(t *testing.T) {
 	db := setupTestDB(t)
 
-	// JST タイムゾーン設定
+	// JST timezone setup
 	jst, err := time.LoadLocation("Asia/Tokyo")
 	assert.NoError(t, err)
 
-	// チャンネル設定を作成
+	// Create channel configuration
 	config := models.ChannelConfig{
 		ID:               "test-config",
 		SlackChannelID:   "C12345",
@@ -27,7 +27,7 @@ func TestCheckBusinessHoursTasks(t *testing.T) {
 	}
 	db.Create(&config)
 
-	// 営業時間外待機状態のタスクを作成
+	// Create a task in waiting-for-business-hours state
 	task := models.ReviewTask{
 		ID:           "waiting-task",
 		PRURL:        "https://github.com/owner/repo/pull/1",
@@ -36,7 +36,7 @@ func TestCheckBusinessHoursTasks(t *testing.T) {
 		Title:        "Test PR",
 		SlackTS:      "1234.5678",
 		SlackChannel: "C12345",
-		Reviewer:     "", // 営業時間外では空
+		Reviewer:     "", // Empty outside business hours
 		Status:       "waiting_business_hours",
 		LabelName:    "needs-review",
 		CreatedAt:    time.Now(),
@@ -44,25 +44,25 @@ func TestCheckBusinessHoursTasks(t *testing.T) {
 	}
 	db.Create(&task)
 
-	// 営業時間外の時刻でテスト（何も起きない）
-	outsideHours := time.Date(2024, 8, 27, 20, 0, 0, 0, jst) // 火曜日 20:00 JST
+	// Test with a time outside business hours (nothing should happen)
+	outsideHours := time.Date(2024, 8, 27, 20, 0, 0, 0, jst) // Tuesday 20:00 JST
 
-	// ここでは実際の時間をモックするのではなく、ロジックを直接テスト
-	// デフォルト設定（10:00-19:00 JST）での営業時間判定のテスト
+	// Instead of mocking the actual time, test the logic directly
+	// Test business hours check with default settings (10:00-19:00 JST)
 	defaultConfig := &models.ChannelConfig{
 		BusinessHoursStart: "10:00",
 		BusinessHoursEnd:   "19:00",
 		Timezone:           "Asia/Tokyo",
 	}
 
-	// 営業時間外判定のテスト（20時は営業時間外）
-	assert.False(t, IsWithinBusinessHours(defaultConfig, outsideHours), "20時は営業時間外")
+	// Test outside business hours check (20:00 is outside business hours)
+	assert.False(t, IsWithinBusinessHours(defaultConfig, outsideHours), "20:00 is outside business hours")
 
-	// 営業時間内の時刻でテスト
-	businessHours := time.Date(2024, 8, 28, 10, 0, 0, 0, jst) // 水曜日 10:00 JST
-	assert.True(t, IsWithinBusinessHours(defaultConfig, businessHours), "10時は営業時間内")
+	// Test with a time within business hours
+	businessHours := time.Date(2024, 8, 28, 10, 0, 0, 0, jst) // Wednesday 10:00 JST
+	assert.True(t, IsWithinBusinessHours(defaultConfig, businessHours), "10:00 is within business hours")
 
-	// この時点でタスクはまだ待機状態
+	// At this point the task should still be in waiting state
 	var beforeTask models.ReviewTask
 	db.First(&beforeTask, "id = ?", "waiting-task")
 	assert.Equal(t, "waiting_business_hours", beforeTask.Status)
@@ -72,7 +72,7 @@ func TestCheckBusinessHoursTasks(t *testing.T) {
 func TestBusinessHoursTaskFlow(t *testing.T) {
 	db := setupTestDB(t)
 
-	// チャンネル設定を作成
+	// Create channel configuration
 	config := models.ChannelConfig{
 		ID:                       "test-config",
 		SlackChannelID:           "C12345",
@@ -85,11 +85,11 @@ func TestBusinessHoursTaskFlow(t *testing.T) {
 	}
 	db.Create(&config)
 
-	// レビュワーリストを設定
+	// Set the reviewer list
 	config.ReviewerList = "U67890,U11111,U22222"
 	db.Save(&config)
 
-	// 営業時間外待機状態のタスクを作成
+	// Create a task in waiting-for-business-hours state
 	task := models.ReviewTask{
 		ID:           "waiting-task",
 		PRURL:        "https://github.com/owner/repo/pull/1",
@@ -106,12 +106,12 @@ func TestBusinessHoursTaskFlow(t *testing.T) {
 	}
 	db.Create(&task)
 
-	// レビュワー選択のテスト
+	// Test reviewer selection
 	selectedReviewers := SelectRandomReviewers(db, "C12345", "needs-review", 1, nil)
-	assert.Len(t, selectedReviewers, 1, "1人のレビュワーが選択される")
-	assert.Contains(t, []string{"U67890", "U11111", "U22222"}, selectedReviewers[0], "レビュワーがリストから正しく選択される")
+	assert.Len(t, selectedReviewers, 1, "One reviewer should be selected")
+	assert.Contains(t, []string{"U67890", "U11111", "U22222"}, selectedReviewers[0], "Reviewer should be correctly selected from the list")
 
-	// タスクのステータス確認
+	// Verify task status
 	var retrievedTask models.ReviewTask
 	db.First(&retrievedTask, "id = ?", "waiting-task")
 	assert.Equal(t, "waiting_business_hours", retrievedTask.Status)
@@ -121,7 +121,7 @@ func TestIsWithinBusinessHoursEdgeCases(t *testing.T) {
 	jst, err := time.LoadLocation("Asia/Tokyo")
 	assert.NoError(t, err)
 
-	// デフォルト設定（10:00-19:00 JST）
+	// Default settings (10:00-19:00 JST)
 	defaultConfig := &models.ChannelConfig{
 		BusinessHoursStart: "10:00",
 		BusinessHoursEnd:   "19:00",
@@ -131,27 +131,27 @@ func TestIsWithinBusinessHoursEdgeCases(t *testing.T) {
 	tests := []struct {
 		name                   string
 		testTime               time.Time
-		expectedWithinBusiness bool // 営業時間内かどうか
+		expectedWithinBusiness bool // Whether it is within business hours
 	}{
 		{
 			name:                   "金曜日18時59分59秒",
 			testTime:               time.Date(2024, 8, 30, 18, 59, 59, 0, jst),
-			expectedWithinBusiness: true, // 営業時間内
+			expectedWithinBusiness: true, // Within business hours
 		},
 		{
 			name:                   "金曜日19時00分00秒",
 			testTime:               time.Date(2024, 8, 30, 19, 0, 0, 0, jst),
-			expectedWithinBusiness: false, // 営業時間外
+			expectedWithinBusiness: false, // Outside business hours
 		},
 		{
 			name:                   "月曜日00時00分00秒",
 			testTime:               time.Date(2024, 8, 26, 0, 0, 0, 0, jst),
-			expectedWithinBusiness: false, // 平日の深夜は営業時間外（10時未満）
+			expectedWithinBusiness: false, // Weekday late night is outside business hours (before 10:00)
 		},
 		{
 			name:                   "土曜日00時00分00秒",
 			testTime:               time.Date(2024, 8, 24, 0, 0, 0, 0, jst),
-			expectedWithinBusiness: false, // 土曜日は営業時間外
+			expectedWithinBusiness: false, // Saturday is outside business hours
 		},
 	}
 

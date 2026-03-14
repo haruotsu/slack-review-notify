@@ -2,13 +2,13 @@ package services
 
 import "fmt"
 
-// PauseOption リマインダー停止オプションの構造体
+// PauseOption is a struct for reminder pause options
 type PauseOption struct {
 	Text  string
 	Value string
 }
 
-// 共通のリマインダー停止オプション
+// Common reminder pause options
 var (
 	PauseOptionOneHour   = PauseOption{Text: "1時間停止", Value: "1h"}
 	PauseOptionTwoHours  = PauseOption{Text: "2時間停止", Value: "2h"}
@@ -17,7 +17,7 @@ var (
 	PauseOptionStop      = PauseOption{Text: "リマインダーを完全に停止", Value: "stop"}
 )
 
-// AllPauseOptions 全てのリマインダー停止オプション
+// AllPauseOptions contains all reminder pause options
 var AllPauseOptions = []PauseOption{
 	PauseOptionOneHour,
 	PauseOptionTwoHours,
@@ -26,19 +26,19 @@ var AllPauseOptions = []PauseOption{
 	PauseOptionStop,
 }
 
-// SlackBlockBuilder Slack Block Kit構築のヘルパー
+// SlackBlockBuilder is a helper for building Slack Block Kit structures
 type SlackBlockBuilder struct {
 	blocks []map[string]interface{}
 }
 
-// NewSlackBlockBuilder 新しいビルダーを作成
+// NewSlackBlockBuilder creates a new builder
 func NewSlackBlockBuilder() *SlackBlockBuilder {
 	return &SlackBlockBuilder{
 		blocks: make([]map[string]interface{}, 0),
 	}
 }
 
-// AddSection セクションブロックを追加
+// AddSection adds a section block
 func (b *SlackBlockBuilder) AddSection(text string) *SlackBlockBuilder {
 	section := map[string]interface{}{
 		"type": "section",
@@ -51,7 +51,7 @@ func (b *SlackBlockBuilder) AddSection(text string) *SlackBlockBuilder {
 	return b
 }
 
-// AddActions アクションブロックを追加
+// AddActions adds an actions block
 func (b *SlackBlockBuilder) AddActions(elements ...map[string]interface{}) *SlackBlockBuilder {
 	if len(elements) == 0 {
 		return b
@@ -65,12 +65,12 @@ func (b *SlackBlockBuilder) AddActions(elements ...map[string]interface{}) *Slac
 	return b
 }
 
-// Build ブロック配列を取得
+// Build returns the block array
 func (b *SlackBlockBuilder) Build() []map[string]interface{} {
 	return b.blocks
 }
 
-// CreateButton ボタン要素を作成
+// CreateButton creates a button element
 func CreateButton(text, actionID, value, style string) map[string]interface{} {
 	if value == "" {
 		value = "default"
@@ -93,7 +93,7 @@ func CreateButton(text, actionID, value, style string) map[string]interface{} {
 	return button
 }
 
-// CreatePauseReminderSelect リマインダー停止セレクトを作成
+// CreatePauseReminderSelect creates a reminder pause select element
 func CreatePauseReminderSelect(taskID, actionID, placeholder string, options []PauseOption) map[string]interface{} {
 	if taskID == "" {
 		taskID = "unknown"
@@ -124,22 +124,22 @@ func CreatePauseReminderSelect(taskID, actionID, placeholder string, options []P
 	}
 }
 
-// CreateChangeReviewerButton レビュワー変更ボタンを作成
+// CreateChangeReviewerButton creates a change reviewer button
 func CreateChangeReviewerButton(taskID string) map[string]interface{} {
 	return CreateButton("変わってほしい！", "change_reviewer", taskID, "danger")
 }
 
-// CreateAllOptionsPauseReminderSelect 全オプション付きリマインダー停止セレクトを作成
+// CreateAllOptionsPauseReminderSelect creates a reminder pause select with all options
 func CreateAllOptionsPauseReminderSelect(taskID, actionID, placeholder string) map[string]interface{} {
 	return CreatePauseReminderSelect(taskID, actionID, placeholder, AllPauseOptions)
 }
 
-// CreateStopOnlyPauseReminderSelect 完全停止のみのリマインダー停止セレクトを作成
+// CreateStopOnlyPauseReminderSelect creates a reminder pause select with only the full stop option
 func CreateStopOnlyPauseReminderSelect(taskID, actionID, placeholder string) map[string]interface{} {
 	return CreatePauseReminderSelect(taskID, actionID, placeholder, []PauseOption{PauseOptionStop})
 }
 
-// CreateMessageBlocks メッセージのみのブロックを作成
+// CreateMessageBlocks creates blocks with message only
 func CreateMessageBlocks(message string) []map[string]interface{} {
 	if message == "" {
 		message = " "
@@ -149,7 +149,7 @@ func CreateMessageBlocks(message string) []map[string]interface{} {
 		Build()
 }
 
-// CreateMessageWithActionBlocks メッセージと1つのアクションのブロックを作成
+// CreateMessageWithActionBlocks creates blocks with a message and one action
 func CreateMessageWithActionBlocks(message string, action map[string]interface{}) []map[string]interface{} {
 	if message == "" {
 		message = " "
@@ -160,7 +160,7 @@ func CreateMessageWithActionBlocks(message string, action map[string]interface{}
 		Build()
 }
 
-// CreateMessageWithActionsBlocks メッセージと複数のアクションのブロックを作成
+// CreateMessageWithActionsBlocks creates blocks with a message and multiple actions
 func CreateMessageWithActionsBlocks(message string, actions ...map[string]interface{}) []map[string]interface{} {
 	if message == "" {
 		message = " "

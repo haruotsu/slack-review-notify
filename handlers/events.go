@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Slackイベントを処理するハンドラ
+// HandleSlackEvents is a handler that processes Slack events
 func HandleSlackEvents(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		body, err := io.ReadAll(c.Request.Body)
@@ -26,7 +26,7 @@ func HandleSlackEvents(db *gorm.DB) gin.HandlerFunc {
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 		log.Printf("slack event received: %s", string(body))
 
-		// 署名を検証
+		// Verify the signature
 		if !services.ValidateSlackRequest(c.Request, body) {
 			log.Println("invalid slack signature")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid slack signature"})
@@ -50,7 +50,7 @@ func HandleSlackEvents(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// URL検証リクエストの処理
+		// Handle URL verification request
 		if payload.Type == "url_verification" {
 			c.JSON(http.StatusOK, gin.H{"challenge": payload.Challenge})
 			return

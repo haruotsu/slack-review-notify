@@ -12,57 +12,57 @@ func TestParseCommand(t *testing.T) {
 		expected []string
 	}{
 		{
-			name:     "通常のスペースなしラベル名",
+			name:     "Normal label name without spaces",
 			input:    "needs-review set-mention @user",
 			expected: []string{"needs-review", "set-mention", "@user"},
 		},
 		{
-			name:     "ダブルクォートで囲まれたスペース付きラベル名",
+			name:     "Label name with spaces enclosed in double quotes",
 			input:    "\"needs review\" set-mention @user",
 			expected: []string{"needs review", "set-mention", "@user"},
 		},
 		{
-			name:     "シングルクォートで囲まれたスペース付きラベル名",
+			name:     "Label name with spaces enclosed in single quotes",
 			input:    "'security review' add-reviewer @security",
 			expected: []string{"security review", "add-reviewer", "@security"},
 		},
 		{
-			name:     "複数のスペース付きパラメータ",
+			name:     "Multiple parameters with spaces",
 			input:    "\"needs review\" set-mention \"@team lead\"",
 			expected: []string{"needs review", "set-mention", "@team lead"},
 		},
 		{
-			name:     "異なるクォート文字の混在",
+			name:     "Mixed different quote characters",
 			input:    "'label name' \"param value\" test",
 			expected: []string{"label name", "param value", "test"},
 		},
 		{
-			name:     "クォート内にクォート文字",
+			name:     "Quote characters inside quotes",
 			input:    "\"label's name\" 'param \"value\"' test",
 			expected: []string{"label's name", "param \"value\"", "test"},
 		},
 		{
-			name:     "空文字列",
+			name:     "Empty string",
 			input:    "",
 			expected: nil,
 		},
 		{
-			name:     "スペースのみ",
+			name:     "Spaces only",
 			input:    "   ",
 			expected: nil,
 		},
 		{
-			name:     "単一の要素",
+			name:     "Single element",
 			input:    "show",
 			expected: []string{"show"},
 		},
 		{
-			name:     "クォートが閉じられていない場合（ダブルクォート）",
+			name:     "Unclosed quote (double quote)",
 			input:    "\"needs review set-mention @user",
 			expected: []string{"needs review set-mention @user"},
 		},
 		{
-			name:     "クォートが閉じられていない場合（シングルクォート）",
+			name:     "Unclosed quote (single quote)",
 			input:    "'security review add-reviewer @security",
 			expected: []string{"security review add-reviewer @security"},
 		},
@@ -72,7 +72,7 @@ func TestParseCommand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := parseCommand(tt.input)
 
-			// nilと空のスライスを同等として扱う
+			// Treat nil and empty slices as equivalent
 			if tt.expected == nil && len(result) == 0 {
 				return
 			}

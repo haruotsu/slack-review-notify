@@ -12,19 +12,19 @@ import (
 )
 
 func TestSendSlackMessage(t *testing.T) {
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables before test and restore after
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Set up mocks
+	defer gock.Off() // Clear mocks when test ends
 
-	// 成功ケースのモック
+	// Mock for success case
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		MatchHeader("Authorization", "Bearer test-token").
@@ -36,22 +36,22 @@ func TestSendSlackMessage(t *testing.T) {
 			"ts":      "1234.5678",
 		})
 
-	// 関数を実行
+	// Execute function
 	ts, channel, err := SendSlackMessage(
 		"https://github.com/owner/repo/pull/1",
 		"Test PR Title",
 		"C12345",
 		"U12345",
-		"", // PR作成者のSlack ID (テストでは空)
+		"", // PR creator's Slack ID (empty for test)
 	)
 
-	// アサーション
+	// Assertions
 	assert.NoError(t, err)
 	assert.Equal(t, "1234.5678", ts)
 	assert.Equal(t, "C12345", channel)
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
 
-	// エラーケースのテスト
+	// Test error case
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Reply(200).
@@ -60,35 +60,35 @@ func TestSendSlackMessage(t *testing.T) {
 			"error": "channel_not_found",
 		})
 
-	// 関数を実行
+	// Execute function
 	_, _, err = SendSlackMessage(
 		"https://github.com/owner/repo/pull/1",
 		"Test PR Title",
 		"INVALID",
 		"U12345",
-		"", // PR作成者のSlack ID (テストでは空)
+		"", // PR creator's Slack ID (empty for test)
 	)
 
-	// アサーション
+	// Assertions
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "channel_not_found")
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
 }
 
 func TestPostToThread(t *testing.T) {
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables before test and restore after
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Set up mocks
+	defer gock.Off() // Clear mocks when test ends
 
-	// 成功ケースのモック
+	// Mock for success case
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		MatchHeader("Authorization", "Bearer test-token").
@@ -98,14 +98,14 @@ func TestPostToThread(t *testing.T) {
 			"ok": true,
 		})
 
-	// 関数を実行
+	// Execute function
 	err := PostToThread("C12345", "1234.5678", "テストメッセージ")
 
-	// アサーション
+	// Assertions
 	assert.NoError(t, err)
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
 
-	// エラーケースのテスト
+	// Test error case
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Reply(200).
@@ -114,29 +114,29 @@ func TestPostToThread(t *testing.T) {
 			"error": "invalid_thread_ts",
 		})
 
-	// 関数を実行
+	// Execute function
 	err = PostToThread("C12345", "invalid", "テストメッセージ")
 
-	// アサーション
+	// Assertions
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid_thread_ts")
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
 }
 
 func TestIsChannelArchived(t *testing.T) {
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables before test and restore after
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Set up mocks
+	defer gock.Off() // Clear mocks when test ends
 
-	// アーカイブされたチャンネルのモック
+	// Mock for an archived channel
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "C12345").
@@ -149,15 +149,15 @@ func TestIsChannelArchived(t *testing.T) {
 			},
 		})
 
-	// 関数を実行
+	// Execute function
 	isArchived, err := IsChannelArchived("C12345")
 
-	// アサーション
+	// Assertions
 	assert.NoError(t, err)
 	assert.True(t, isArchived)
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
 
-	// アーカイブされていないチャンネルのモック
+	// Mock for a non-archived channel
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "C67890").
@@ -170,15 +170,15 @@ func TestIsChannelArchived(t *testing.T) {
 			},
 		})
 
-	// 関数を実行
+	// Execute function
 	isArchived, err = IsChannelArchived("C67890")
 
-	// アサーション
+	// Assertions
 	assert.NoError(t, err)
 	assert.False(t, isArchived)
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
 
-	// 存在しないチャンネルのモック
+	// Mock for a non-existent channel
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "INVALID").
@@ -188,32 +188,32 @@ func TestIsChannelArchived(t *testing.T) {
 			"error": "channel_not_found",
 		})
 
-	// 関数を実行
+	// Execute function
 	isArchived, err = IsChannelArchived("INVALID")
 
-	// アサーション
-	assert.True(t, isArchived) // チャンネルが存在しない場合もアーカイブされているとみなす
-	assert.NoError(t, err)     // エラーではなく、単に結果がtrueになる
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	// Assertions
+	assert.True(t, isArchived) // Non-existent channels are also treated as archived
+	assert.NoError(t, err)     // Not an error, simply returns true
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
 }
 
 func TestSendReminderMessage(t *testing.T) {
-	// テスト用DBのセットアップ
+	// Set up test DB
 	db := setupTestDB(t)
 
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables before test and restore after
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Set up mocks
+	defer gock.Off() // Clear mocks when test ends
 
-	// チャンネル情報取得のモック
+	// Mock for channel info retrieval
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "C12345").
@@ -226,7 +226,7 @@ func TestSendReminderMessage(t *testing.T) {
 			},
 		})
 
-	// メッセージ送信のモック
+	// Mock for message sending
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Reply(200).
@@ -234,7 +234,7 @@ func TestSendReminderMessage(t *testing.T) {
 			"ok": true,
 		})
 
-	// テスト用のタスクを作成
+	// Create a test task
 	task := models.ReviewTask{
 		ID:           "test-id",
 		PRURL:        "https://github.com/owner/repo/pull/1",
@@ -248,14 +248,14 @@ func TestSendReminderMessage(t *testing.T) {
 		UpdatedAt:    time.Now(),
 	}
 
-	// 関数を実行
+	// Execute function
 	err := SendReviewerReminderMessage(db, task)
 
-	// アサーション
+	// Assertions
 	assert.NoError(t, err)
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
 
-	// アーカイブされたチャンネルの場合
+	// Test when channel is archived
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "C67890").
@@ -268,7 +268,7 @@ func TestSendReminderMessage(t *testing.T) {
 			},
 		})
 
-	// テスト用のタスクとチャンネル設定を作成
+	// Create test task and channel config
 	task2 := models.ReviewTask{
 		ID:           "test-id-2",
 		PRURL:        "https://github.com/owner/repo/pull/2",
@@ -295,14 +295,14 @@ func TestSendReminderMessage(t *testing.T) {
 
 	db.Create(&config)
 
-	// 関数を実行
+	// Execute function
 	err = SendReviewerReminderMessage(db, task2)
 
-	// アサーション
+	// Assertions
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "channel is archived")
 
-	// DBが更新されたことを確認
+	// Verify DB was updated
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-id-2").First(&updatedTask)
 	assert.Equal(t, "archived", updatedTask.Status)
@@ -311,26 +311,26 @@ func TestSendReminderMessage(t *testing.T) {
 	db.Where("slack_channel_id = ?", "C67890").First(&updatedConfig)
 	assert.False(t, updatedConfig.IsActive)
 
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
 }
 
 func TestSendReviewerReminderMessage(t *testing.T) {
-	// テスト用DBのセットアップ
+	// Set up test DB
 	db := setupTestDB(t)
 
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables before test and restore after
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Set up mocks
+	defer gock.Off() // Clear mocks when test ends
 
-	// チャンネル情報取得のモック
+	// Mock for channel info retrieval
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "C12345").
@@ -343,7 +343,7 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 			},
 		})
 
-	// メッセージ送信のモック
+	// Mock for message sending
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Reply(200).
@@ -351,7 +351,7 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 			"ok": true,
 		})
 
-	// テスト用のタスクを作成
+	// Create a test task
 	task := models.ReviewTask{
 		ID:           "test-id",
 		PRURL:        "https://github.com/owner/repo/pull/1",
@@ -366,14 +366,14 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 		UpdatedAt:    time.Now(),
 	}
 
-	// 関数を実行
+	// Execute function
 	err := SendReviewerReminderMessage(db, task)
 
-	// アサーション
+	// Assertions
 	assert.NoError(t, err)
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
 
-	// チャンネルがアーカイブされている場合のテスト
+	// Test when channel is archived
 	gock.New("https://slack.com").
 		Get("/api/conversations.info").
 		MatchParam("channel", "C67890").
@@ -386,7 +386,7 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 			},
 		})
 
-	// テスト用のタスクとチャンネル設定を作成
+	// Create test task and channel config
 	task2 := models.ReviewTask{
 		ID:           "test-id-2",
 		PRURL:        "https://github.com/owner/repo/pull/2",
@@ -414,14 +414,14 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 
 	db.Create(&config)
 
-	// 関数を実行
+	// Execute function
 	err = SendReviewerReminderMessage(db, task2)
 
-	// アサーション
+	// Assertions
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "channel is archived")
 
-	// DBが更新されたことを確認
+	// Verify DB was updated
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-id-2").First(&updatedTask)
 	assert.Equal(t, "archived", updatedTask.Status)
@@ -430,38 +430,38 @@ func TestSendReviewerReminderMessage(t *testing.T) {
 	db.Where("slack_channel_id = ?", "C67890").First(&updatedConfig)
 	assert.False(t, updatedConfig.IsActive)
 
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
 }
 
 func TestSendReminderPausedMessage(t *testing.T) {
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables before test and restore after
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Set up mocks
+	defer gock.Off() // Clear mocks when test ends
 
 	testCases := []struct {
 		name     string
 		duration string
 		message  string
 	}{
-		{"1時間", "1h", "はい！1時間リマインドをストップします！"},
-		{"2時間", "2h", "はい！2時間リマインドをストップします！"},
-		{"4時間", "4h", "はい！4時間リマインドをストップします！"},
-		{"今日", "today", "今日はもうリマインドしません。翌営業日の朝に再開します！"},
-		{"完全停止", "stop", "リマインダーを完全に停止しました。レビュー担当者が決まるまで通知しません。"},
-		{"デフォルト", "unknown", "リマインドをストップします！"},
+		{"1 hour", "1h", "はい！1時間リマインドをストップします！"},
+		{"2 hours", "2h", "はい！2時間リマインドをストップします！"},
+		{"4 hours", "4h", "はい！4時間リマインドをストップします！"},
+		{"today", "today", "今日はもうリマインドしません。翌営業日の朝に再開します！"},
+		{"full stop", "stop", "リマインダーを完全に停止しました。レビュー担当者が決まるまで通知しません。"},
+		{"default", "unknown", "リマインドをストップします！"},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// スレッドメッセージ送信のモック
+			// Mock for thread message sending
 			gock.New("https://slack.com").
 				Post("/api/chat.postMessage").
 				MatchHeader("Authorization", "Bearer test-token").
@@ -470,7 +470,7 @@ func TestSendReminderPausedMessage(t *testing.T) {
 					"ok": true,
 				})
 
-			// テスト用のタスクを作成
+			// Create a test task
 			task := models.ReviewTask{
 				ID:           "test-id",
 				SlackTS:      "1234.5678",
@@ -478,17 +478,17 @@ func TestSendReminderPausedMessage(t *testing.T) {
 				Status:       "pending",
 			}
 
-			// 関数を実行
+			// Execute function
 			err := SendReminderPausedMessage(task, tc.duration)
 
-			// アサーション
+			// Assertions
 			assert.NoError(t, err)
-			assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+			assert.True(t, gock.IsDone(), "Not all mocks were used")
 		})
 	}
 }
 
-// IsChannelRelatedErrorのテスト
+// Test for IsChannelRelatedError
 func TestIsChannelRelatedError(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -511,9 +511,9 @@ func TestIsChannelRelatedError(t *testing.T) {
 	}
 }
 
-// GetNextBusinessDayMorning関数のテスト
+// Test for GetNextBusinessDayMorning function
 func TestGetNextBusinessDayMorning(t *testing.T) {
-	// JST タイムゾーンを定義
+	// Define JST timezone
 	jst, _ := time.LoadLocation("Asia/Tokyo")
 
 	testCases := []struct {
@@ -522,29 +522,29 @@ func TestGetNextBusinessDayMorning(t *testing.T) {
 		expected time.Time
 	}{
 		{
-			name:     "月曜日朝9時_当日10時を期待",
-			baseTime: time.Date(2024, 1, 8, 9, 0, 0, 0, jst),  // 月曜日 9:00 JST
-			expected: time.Date(2024, 1, 8, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+			name:     "Monday_9am_expect_same_day_10am",
+			baseTime: time.Date(2024, 1, 8, 9, 0, 0, 0, jst),  // Monday 9:00 JST
+			expected: time.Date(2024, 1, 8, 10, 0, 0, 0, jst), // Monday 10:00 JST
 		},
 		{
-			name:     "月曜日午後2時_火曜日10時を期待",
-			baseTime: time.Date(2024, 1, 8, 14, 0, 0, 0, jst), // 月曜日 14:00 JST
-			expected: time.Date(2024, 1, 9, 10, 0, 0, 0, jst), // 火曜日 10:00 JST
+			name:     "Monday_2pm_expect_Tuesday_10am",
+			baseTime: time.Date(2024, 1, 8, 14, 0, 0, 0, jst), // Monday 14:00 JST
+			expected: time.Date(2024, 1, 9, 10, 0, 0, 0, jst), // Tuesday 10:00 JST
 		},
 		{
-			name:     "金曜日午後2時_月曜日10時を期待",
-			baseTime: time.Date(2024, 1, 12, 14, 0, 0, 0, jst), // 金曜日 14:00 JST
-			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+			name:     "Friday_2pm_expect_Monday_10am",
+			baseTime: time.Date(2024, 1, 12, 14, 0, 0, 0, jst), // Friday 14:00 JST
+			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // Monday 10:00 JST
 		},
 		{
-			name:     "土曜日午後2時_月曜日10時を期待",
-			baseTime: time.Date(2024, 1, 13, 14, 0, 0, 0, jst), // 土曜日 14:00 JST
-			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+			name:     "Saturday_2pm_expect_Monday_10am",
+			baseTime: time.Date(2024, 1, 13, 14, 0, 0, 0, jst), // Saturday 14:00 JST
+			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // Monday 10:00 JST
 		},
 		{
-			name:     "日曜日午後2時_月曜日10時を期待",
-			baseTime: time.Date(2024, 1, 14, 14, 0, 0, 0, jst), // 日曜日 14:00 JST
-			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // 月曜日 10:00 JST
+			name:     "Sunday_2pm_expect_Monday_10am",
+			baseTime: time.Date(2024, 1, 14, 14, 0, 0, 0, jst), // Sunday 14:00 JST
+			expected: time.Date(2024, 1, 15, 10, 0, 0, 0, jst), // Monday 10:00 JST
 		},
 	}
 
@@ -557,27 +557,27 @@ func TestGetNextBusinessDayMorning(t *testing.T) {
 
 	result := GetNextBusinessDayMorningWithConfig(time.Now(), nil)
 
-	// 結果は10:00に設定されている
-	assert.Equal(t, 10, result.Hour(), "時刻は10時に設定されていること")
-	assert.Equal(t, 0, result.Minute(), "分は0分に設定されていること")
-	assert.Equal(t, 0, result.Second(), "秒は0秒に設定されていること")
+	// Result should be set to 10:00
+	assert.Equal(t, 10, result.Hour(), "Hour should be set to 10")
+	assert.Equal(t, 0, result.Minute(), "Minute should be set to 0")
+	assert.Equal(t, 0, result.Second(), "Second should be set to 0")
 
-	// 現在時刻以降であることのチェック
-	assert.True(t, result.After(time.Now().Add(-time.Second)), "結果は現在時刻以降であること")
+	// Check that the result is at or after the current time
+	assert.True(t, result.After(time.Now().Add(-time.Second)), "Result should be at or after the current time")
 }
 
 func TestSendReviewCompletedAutoNotification(t *testing.T) {
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables before test and restore after
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Set up mocks
+	defer gock.Off() // Clear mocks when test ends
 
 	testCases := []struct {
 		name          string
@@ -585,15 +585,15 @@ func TestSendReviewCompletedAutoNotification(t *testing.T) {
 		reviewState   string
 		expectedMsg   string
 	}{
-		{"承認", "reviewer1", "approved", "✅ reviewer1さんがレビューを承認しました！感謝！👏"},
-		{"変更要求", "reviewer2", "changes_requested", "🔄 reviewer2さんが変更を要求しました 感謝！👏"},
-		{"コメント", "reviewer3", "commented", "💬 reviewer3さんがレビューコメントを残しました 感謝！👏"},
-		{"その他", "reviewer4", "other", "👀 reviewer4さんがレビューしました 感謝！👏"},
+		{"approved", "reviewer1", "approved", "✅ reviewer1さんがレビューを承認しました！感謝！👏"},
+		{"changes_requested", "reviewer2", "changes_requested", "🔄 reviewer2さんが変更を要求しました 感謝！👏"},
+		{"commented", "reviewer3", "commented", "💬 reviewer3さんがレビューコメントを残しました 感謝！👏"},
+		{"other", "reviewer4", "other", "👀 reviewer4さんがレビューしました 感謝！👏"},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// スレッドメッセージ送信のモック
+			// Mock for thread message sending
 			gock.New("https://slack.com").
 				Post("/api/chat.postMessage").
 				MatchHeader("Authorization", "Bearer test-token").
@@ -602,7 +602,7 @@ func TestSendReviewCompletedAutoNotification(t *testing.T) {
 					"ok": true,
 				})
 
-			// テスト用のタスクを作成
+			// Create a test task
 			task := models.ReviewTask{
 				ID:           "test-id",
 				SlackTS:      "1234.5678",
@@ -610,17 +610,17 @@ func TestSendReviewCompletedAutoNotification(t *testing.T) {
 				Status:       "in_review",
 			}
 
-			// 関数を実行
+			// Execute function
 			err := SendReviewCompletedAutoNotification(task, tc.reviewerLogin, tc.reviewState)
 
-			// アサーション
+			// Assertions
 			assert.NoError(t, err)
-			assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+			assert.True(t, gock.IsDone(), "Not all mocks were used")
 		})
 	}
 }
 
-// TestFormatReviewerMentions は複数のレビュワーIDをSlackメンション形式に変換する関数のテスト
+// TestFormatReviewerMentions tests the function that converts multiple reviewer IDs into Slack mention format
 func TestFormatReviewerMentions(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -628,37 +628,37 @@ func TestFormatReviewerMentions(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "単一レビュワーID",
+			name:     "single reviewer ID",
 			input:    "haruotsu",
 			expected: "<@haruotsu>",
 		},
 		{
-			name:     "複数レビュワーID（スペース区切り）",
+			name:     "multiple reviewer IDs (space-separated)",
 			input:    "fuga @hoge",
 			expected: "<@fuga> <@hoge>",
 		},
 		{
-			name:     "複数レビュワーID（@付き）",
+			name:     "multiple reviewer IDs (with @ prefix)",
 			input:    "@fuga @hoge",
 			expected: "<@fuga> <@hoge>",
 		},
 		{
-			name:     "混在パターン",
+			name:     "mixed pattern",
 			input:    "fuga @hoge",
 			expected: "<@fuga> <@hoge>",
 		},
 		{
-			name:     "空文字列",
+			name:     "empty string",
 			input:    "",
 			expected: "",
 		},
 		{
-			name:     "3人のレビュワー",
+			name:     "three reviewers",
 			input:    "fuga hoge piyo",
 			expected: "<@fuga> <@hoge> <@piyo>",
 		},
 		{
-			name:     "余分なスペース",
+			name:     "extra spaces",
 			input:    "  user1   @user2  ",
 			expected: "<@user1> <@user2>",
 		},
@@ -672,7 +672,7 @@ func TestFormatReviewerMentions(t *testing.T) {
 	}
 }
 
-// --- 複数レビュワー対応のテスト ---
+// --- Tests for multiple reviewer support ---
 
 func TestSelectRandomReviewers_Basic(t *testing.T) {
 	db := setupTestDB(t)
@@ -687,10 +687,10 @@ func TestSelectRandomReviewers_Basic(t *testing.T) {
 	}
 	db.Create(&testConfig)
 
-	// 2人選択
+	// Select 2
 	result := SelectRandomReviewers(db, "C_MULTI", "needs-review", 2, nil)
 	assert.Equal(t, 2, len(result))
-	// 重複なし
+	// No duplicates
 	assert.NotEqual(t, result[0], result[1])
 }
 
@@ -707,11 +707,11 @@ func TestSelectRandomReviewers_ExcludeIDs(t *testing.T) {
 	}
 	db.Create(&testConfig)
 
-	// U1を除外して2人選択
+	// Select 2 excluding U1
 	result := SelectRandomReviewers(db, "C_EXCL", "needs-review", 2, []string{"U1"})
 	assert.Equal(t, 2, len(result))
 	for _, id := range result {
-		assert.NotEqual(t, "U1", id, "除外対象のU1が含まれている")
+		assert.NotEqual(t, "U1", id, "Excluded U1 was included")
 	}
 }
 
@@ -728,7 +728,7 @@ func TestSelectRandomReviewers_InsufficientAfterExclusion(t *testing.T) {
 	}
 	db.Create(&testConfig)
 
-	// U1を除外して2人要求 → 候補はU2のみ → 1人だけ返す
+	// Request 2 excluding U1 -> only U2 is a candidate -> returns only 1
 	result := SelectRandomReviewers(db, "C_INSUF", "needs-review", 2, []string{"U1"})
 	assert.Equal(t, 1, len(result))
 	assert.Equal(t, "U2", result[0])
@@ -747,14 +747,14 @@ func TestSelectRandomReviewers_AllExcluded(t *testing.T) {
 	}
 	db.Create(&testConfig)
 
-	// 全員除外 → DefaultMentionIDを返す
+	// All excluded -> returns DefaultMentionID
 	result := SelectRandomReviewers(db, "C_ALLX", "needs-review", 1, []string{"U1", "U2"})
 	assert.Equal(t, 1, len(result))
 	assert.Equal(t, "UDEFAULT", result[0])
 }
 
 func TestGetPendingReviewers(t *testing.T) {
-	// 正常ケース: Reviewers設定あり、一部approve済み
+	// Normal case: Reviewers set, some already approved
 	task := models.ReviewTask{
 		Reviewers:  "U1,U2,U3",
 		ApprovedBy: "U1",
@@ -762,7 +762,7 @@ func TestGetPendingReviewers(t *testing.T) {
 	pending := GetPendingReviewers(task)
 	assert.Equal(t, []string{"U2", "U3"}, pending)
 
-	// 全員approve済み
+	// All approved
 	task2 := models.ReviewTask{
 		Reviewers:  "U1,U2",
 		ApprovedBy: "U1,U2",
@@ -770,73 +770,73 @@ func TestGetPendingReviewers(t *testing.T) {
 	pending2 := GetPendingReviewers(task2)
 	assert.Equal(t, 0, len(pending2))
 
-	// Reviewers空（旧データ）→ Reviewerフォールバック
+	// Reviewers empty (legacy data) -> fallback to Reviewer
 	task3 := models.ReviewTask{
 		Reviewer: "UOLD",
 	}
 	pending3 := GetPendingReviewers(task3)
 	assert.Equal(t, []string{"UOLD"}, pending3)
 
-	// 全て空
+	// All empty
 	task4 := models.ReviewTask{}
 	pending4 := GetPendingReviewers(task4)
 	assert.Nil(t, pending4)
 }
 
 func TestAddApproval(t *testing.T) {
-	// 新規追加
+	// New addition
 	task := models.ReviewTask{}
 	added := AddApproval(&task, "U1")
 	assert.True(t, added)
 	assert.Equal(t, "U1", task.ApprovedBy)
 
-	// 2人目追加
+	// Add second person
 	added2 := AddApproval(&task, "U2")
 	assert.True(t, added2)
 	assert.Equal(t, "U1,U2", task.ApprovedBy)
 
-	// 重複追加
+	// Duplicate addition
 	added3 := AddApproval(&task, "U1")
 	assert.False(t, added3)
 	assert.Equal(t, "U1,U2", task.ApprovedBy)
 
-	// 空文字列
+	// Empty string
 	added4 := AddApproval(&task, "")
 	assert.False(t, added4)
 }
 
 func TestIsReviewFullyApproved(t *testing.T) {
-	// 1人必要、1人approve済み → 完了
+	// 1 required, 1 approved -> complete
 	task := models.ReviewTask{ApprovedBy: "U1"}
 	assert.True(t, IsReviewFullyApproved(task, 1))
 
-	// 2人必要、1人approve済み → 未完了
+	// 2 required, 1 approved -> incomplete
 	assert.False(t, IsReviewFullyApproved(task, 2))
 
-	// 2人必要、2人approve済み → 完了
+	// 2 required, 2 approved -> complete
 	task2 := models.ReviewTask{ApprovedBy: "U1,U2"}
 	assert.True(t, IsReviewFullyApproved(task2, 2))
 
-	// 2人必要、3人approve済み → 完了
+	// 2 required, 3 approved -> complete
 	task3 := models.ReviewTask{ApprovedBy: "U1,U2,U3"}
 	assert.True(t, IsReviewFullyApproved(task3, 2))
 
-	// ApprovedBy空 → 未完了
+	// ApprovedBy empty -> incomplete
 	task4 := models.ReviewTask{}
 	assert.False(t, IsReviewFullyApproved(task4, 1))
 
-	// requiredApprovals 0以下 → 1として扱う
+	// requiredApprovals 0 or less -> treated as 1
 	assert.False(t, IsReviewFullyApproved(task4, 0))
 
-	// 割り当て人数 < requiredApprovals の場合、割り当て人数で判定
+	// When assigned count < requiredApprovals, use assigned count for judgment
 	task5 := models.ReviewTask{Reviewers: "U1", ApprovedBy: "U1"}
-	assert.True(t, IsReviewFullyApproved(task5, 3), "割り当て1人でapprove済みなら完了")
+	assert.True(t, IsReviewFullyApproved(task5, 3), "Complete when 1 assigned and approved")
 
 	task6 := models.ReviewTask{Reviewers: "U1,U2", ApprovedBy: "U1"}
-	assert.False(t, IsReviewFullyApproved(task6, 3), "割り当て2人で1人approve済みなら未完了")
+	assert.False(t, IsReviewFullyApproved(task6, 3), "Incomplete when 2 assigned and only 1 approved")
 
 	task7 := models.ReviewTask{Reviewers: "U1,U2", ApprovedBy: "U1,U2"}
-	assert.True(t, IsReviewFullyApproved(task7, 3), "割り当て2人で2人approve済みなら完了")
+	assert.True(t, IsReviewFullyApproved(task7, 3), "Complete when 2 assigned and 2 approved")
 }
 
 func TestCountApprovals(t *testing.T) {
@@ -877,7 +877,7 @@ func TestRemoveApproval(t *testing.T) {
 }
 
 func TestGetPendingReviewersWithApprovedReviewer(t *testing.T) {
-	// 単一Reviewerの場合もApprovedByをチェック
+	// Also check ApprovedBy for single Reviewer case
 	task := models.ReviewTask{
 		Reviewer:   "UOLD",
 		ApprovedBy: "UOLD",
@@ -885,7 +885,7 @@ func TestGetPendingReviewersWithApprovedReviewer(t *testing.T) {
 	pending := GetPendingReviewers(task)
 	assert.Nil(t, pending)
 
-	// 単一ReviewerでApprovedByに含まれない場合
+	// When single Reviewer is not in ApprovedBy
 	task2 := models.ReviewTask{
 		Reviewer:   "UOLD",
 		ApprovedBy: "UOTHER",
@@ -901,7 +901,7 @@ func TestGetAwayUserIDs(t *testing.T) {
 	future := now.Add(24 * time.Hour)
 	past := now.Add(-24 * time.Hour)
 
-	// 無期限休暇
+	// Indefinite leave
 	db.Create(&models.ReviewerAvailability{
 		ID:          "away-1",
 		SlackUserID: "U_AWAY1",
@@ -911,7 +911,7 @@ func TestGetAwayUserIDs(t *testing.T) {
 		UpdatedAt:   now,
 	})
 
-	// 未来まで休暇
+	// Leave until future date
 	db.Create(&models.ReviewerAvailability{
 		ID:          "away-2",
 		SlackUserID: "U_AWAY2",
@@ -921,7 +921,7 @@ func TestGetAwayUserIDs(t *testing.T) {
 		UpdatedAt:   now,
 	})
 
-	// 期限切れ（返さない）
+	// Expired (should not be returned)
 	db.Create(&models.ReviewerAvailability{
 		ID:          "away-3",
 		SlackUserID: "U_EXPIRED",
@@ -943,7 +943,7 @@ func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
 	now := time.Now()
 	future := now.Add(24 * time.Hour)
 
-	// チャンネル設定
+	// Channel config
 	testConfig := models.ChannelConfig{
 		ID:               "away-test-id",
 		SlackChannelID:   "C_AWAY",
@@ -954,7 +954,7 @@ func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
 	}
 	db.Create(&testConfig)
 
-	// U2 を休暇に設定
+	// Set U2 as on leave
 	db.Create(&models.ReviewerAvailability{
 		ID:          "away-u2",
 		SlackUserID: "U2",
@@ -964,11 +964,11 @@ func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
 		UpdatedAt:   now,
 	})
 
-	// 100回繰り返して、U2 が選ばれないことを確認
+	// Repeat 100 times to verify U2 is never selected
 	for i := 0; i < 100; i++ {
 		result := SelectRandomReviewers(db, "C_AWAY", "needs-review", 2, nil)
 		for _, id := range result {
-			assert.NotEqual(t, "U2", id, "休暇中のU2が選択された")
+			assert.NotEqual(t, "U2", id, "U2 on leave was selected")
 		}
 	}
 }

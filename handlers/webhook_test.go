@@ -20,12 +20,12 @@ import (
 )
 
 func TestUnlabeledEventWithExistingTask(t *testing.T) {
-	// セットアップ
+	// Setup
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// チャンネル設定を作成
+	// Create channel config
 	config := models.ChannelConfig{
 		SlackChannelID:   "C1234567890",
 		LabelName:        "needs-review",
@@ -35,7 +35,7 @@ func TestUnlabeledEventWithExistingTask(t *testing.T) {
 	}
 	db.Create(&config)
 
-	// 既存のレビュータスクを作成
+	// Create an existing review task
 	task := models.ReviewTask{
 		ID:           "test-task-id",
 		PRURL:        "https://github.com/test/repo/pull/123",
@@ -51,7 +51,7 @@ func TestUnlabeledEventWithExistingTask(t *testing.T) {
 	}
 	db.Create(&task)
 
-	// unlabeledイベントのペイロードを作成
+	// Create unlabeled event payload
 	prNumber := 123
 	repoName := "repo"
 	ownerLogin := "test"
@@ -79,7 +79,7 @@ func TestUnlabeledEventWithExistingTask(t *testing.T) {
 		},
 	}
 
-	// ハンドラーをテスト
+	// Test the handler
 	router := gin.New()
 	router.POST("/webhook", HandleGitHubWebhook(db))
 
@@ -91,22 +91,22 @@ func TestUnlabeledEventWithExistingTask(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// アサーション
+	// Assertions
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// タスクがcompletedに更新されているか確認
+	// Verify task was updated to completed
 	var updatedTask models.ReviewTask
 	db.First(&updatedTask, "id = ?", "test-task-id")
 	assert.Equal(t, "completed", updatedTask.Status)
 }
 
 func TestUnlabeledEventWithoutExistingTask(t *testing.T) {
-	// セットアップ
+	// Setup
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// unlabeledイベントのペイロードを作成（対応するタスクなし）
+	// Create unlabeled event payload (no corresponding task)
 	prNumber := 456
 	repoName := "repo"
 	ownerLogin := "test"
@@ -134,7 +134,7 @@ func TestUnlabeledEventWithoutExistingTask(t *testing.T) {
 		},
 	}
 
-	// ハンドラーをテスト
+	// Test the handler
 	router := gin.New()
 	router.POST("/webhook", HandleGitHubWebhook(db))
 
@@ -146,22 +146,22 @@ func TestUnlabeledEventWithoutExistingTask(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// アサーション - 特にエラーが発生しないことを確認
+	// Assertions - verify no errors occur
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// タスクが作成されていないことを確認
+	// Verify no task was created
 	var taskCount int64
 	db.Model(&models.ReviewTask{}).Where("pr_number = ?", 456).Count(&taskCount)
 	assert.Equal(t, int64(0), taskCount)
 }
 
 func TestUnlabeledEventWithWaitingBusinessHoursTask(t *testing.T) {
-	// セットアップ
+	// Setup
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// チャンネル設定を作成
+	// Create channel config
 	config := models.ChannelConfig{
 		SlackChannelID:   "C1234567890",
 		LabelName:        "needs-review",
@@ -171,7 +171,7 @@ func TestUnlabeledEventWithWaitingBusinessHoursTask(t *testing.T) {
 	}
 	db.Create(&config)
 
-	// 営業時間外待機中のレビュータスクを作成
+	// Create a review task waiting for business hours
 	task := models.ReviewTask{
 		ID:           "waiting-task-id",
 		PRURL:        "https://github.com/test/repo/pull/789",
@@ -180,14 +180,14 @@ func TestUnlabeledEventWithWaitingBusinessHoursTask(t *testing.T) {
 		Title:        "Waiting Business Hours PR",
 		SlackTS:      "1234567890.789012",
 		SlackChannel: "C1234567890",
-		Status:       "waiting_business_hours", // 営業時間外待機中
+		Status:       "waiting_business_hours", // Waiting for business hours
 		LabelName:    "needs-review",
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
 	db.Create(&task)
 
-	// unlabeledイベントのペイロードを作成
+	// Create unlabeled event payload
 	prNumber := 789
 	repoName := "repo"
 	ownerLogin := "test"
@@ -215,24 +215,24 @@ func TestUnlabeledEventWithWaitingBusinessHoursTask(t *testing.T) {
 		},
 	}
 
-	// HTTPリクエストを作成
+	// Create HTTP request
 	jsonData, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", "pull_request")
 
-	// レスポンスレコーダー作成
+	// Create response recorder
 	w := httptest.NewRecorder()
 
-	// Ginルーターを作成してリクエスト実行
+	// Create Gin router and execute request
 	router := gin.Default()
 	router.POST("/webhook", HandleGitHubWebhook(db))
 	router.ServeHTTP(w, req)
 
-	// HTTPステータスが200であることを確認
+	// Verify HTTP status is 200
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// タスクが完了状態に更新されたことを確認
+	// Verify task was updated to completed status
 	var updatedTask models.ReviewTask
 	result := db.Where("id = ?", "waiting-task-id").First(&updatedTask)
 	assert.NoError(t, result.Error)
@@ -241,22 +241,22 @@ func TestUnlabeledEventWithWaitingBusinessHoursTask(t *testing.T) {
 }
 
 func TestHandleReviewSubmittedEvent(t *testing.T) {
-	// テスト用DB
+	// Test DB
 	db := setupTestDB(t)
 
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables and restore after test
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Mock setup
+	defer gock.Off() // Clean up mocks at test end
 
-	// Slack API成功レスポンスのモック
+	// Mock Slack API success response
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		MatchHeader("Authorization", "Bearer test-token").
@@ -265,7 +265,7 @@ func TestHandleReviewSubmittedEvent(t *testing.T) {
 			"ok": true,
 		})
 
-	// テスト用タスクを作成
+	// Create test task
 	task := models.ReviewTask{
 		ID:           "test-task-review",
 		PRURL:        "https://github.com/owner/repo/pull/123",
@@ -280,7 +280,7 @@ func TestHandleReviewSubmittedEvent(t *testing.T) {
 	}
 	db.Create(&task)
 
-	// テスト用の PullRequestReviewEvent JSON
+	// PullRequestReviewEvent JSON for testing
 	payload := `{
 		"action": "submitted",
 		"pull_request": {
@@ -312,37 +312,37 @@ func TestHandleReviewSubmittedEvent(t *testing.T) {
 	r.POST("/webhook", HandleGitHubWebhook(db))
 	r.ServeHTTP(w, req)
 
-	// ステータスコード確認
+	// Verify status code
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// DBが更新されたことを確認
+	// Verify DB was updated
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-task-review").First(&updatedTask)
 	assert.Equal(t, "completed", updatedTask.Status)
 
-	// モックが使用されたことを確認
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	// Verify mocks were used
+	assert.True(t, gock.IsDone(), "Not all mocks were consumed")
 }
 
 func TestHandleReviewSubmittedEventWithWaitingBusinessHoursTask(t *testing.T) {
-	// テスト用DB
+	// Test DB
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables and restore after test
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Mock setup
+	defer gock.Off() // Clean up mocks at test end
 
-	// Slack API成功レスポンスのモック
+	// Mock Slack API success response
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		MatchHeader("Authorization", "Bearer test-token").
@@ -353,7 +353,7 @@ func TestHandleReviewSubmittedEventWithWaitingBusinessHoursTask(t *testing.T) {
 			"channel": "C1234567890",
 		})
 
-	// 営業時間外待機中のレビュータスクを作成
+	// Create a review task waiting for business hours
 	task := models.ReviewTask{
 		ID:           "waiting-review-task-id",
 		PRURL:        "https://github.com/test/repo/pull/999",
@@ -362,14 +362,14 @@ func TestHandleReviewSubmittedEventWithWaitingBusinessHoursTask(t *testing.T) {
 		Title:        "Waiting Business Hours Review PR",
 		SlackTS:      "1234567890.999888",
 		SlackChannel: "C1234567890",
-		Status:       "waiting_business_hours", // 営業時間外待機中
+		Status:       "waiting_business_hours", // Waiting for business hours
 		LabelName:    "needs-review",
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
 	db.Create(&task)
 
-	// レビュー投稿イベントのペイロードを作成
+	// Create review submitted event payload
 	prNumber := 999
 	repoName := "repo"
 	ownerLogin := "test"
@@ -397,32 +397,32 @@ func TestHandleReviewSubmittedEventWithWaitingBusinessHoursTask(t *testing.T) {
 		},
 	}
 
-	// HTTPリクエストを作成
+	// Create HTTP request
 	jsonData, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", "pull_request_review")
 
-	// レスポンスレコーダー作成
+	// Create response recorder
 	w := httptest.NewRecorder()
 
-	// Ginルーターを作成してリクエスト実行
+	// Create Gin router and execute request
 	router := gin.Default()
 	router.POST("/webhook", HandleGitHubWebhook(db))
 	router.ServeHTTP(w, req)
 
-	// HTTPステータスが200であることを確認
+	// Verify HTTP status is 200
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// タスクが完了状態に更新されたことを確認
+	// Verify task was updated to completed status
 	var updatedTask models.ReviewTask
 	result := db.Where("id = ?", "waiting-review-task-id").First(&updatedTask)
 	assert.NoError(t, result.Error)
 	assert.Equal(t, "completed", updatedTask.Status)
 	assert.True(t, updatedTask.UpdatedAt.After(task.UpdatedAt))
 
-	// モックが使用されたことを確認（Slack API呼び出しが行われた）
-	assert.True(t, gock.IsDone(), "すべてのモックが使用されていません")
+	// Verify mocks were used (Slack API was called)
+	assert.True(t, gock.IsDone(), "Not all mocks were consumed")
 }
 
 func TestMultipleLabelMatching(t *testing.T) {
@@ -433,7 +433,7 @@ func TestMultipleLabelMatching(t *testing.T) {
 		shouldNotify bool
 	}{
 		{
-			name:        "単一ラベル設定で複数ラベルPRがマッチ",
+			name:        "Single label config matches PR with multiple labels",
 			configLabel: "needs-review",
 			prLabels: []*github.Label{
 				{Name: github.Ptr("needs-review")},
@@ -442,7 +442,7 @@ func TestMultipleLabelMatching(t *testing.T) {
 			shouldNotify: true,
 		},
 		{
-			name:        "複数ラベル設定で全ラベル存在時にマッチ",
+			name:        "Multiple label config matches when all labels present",
 			configLabel: "hoge-project,needs-review",
 			prLabels: []*github.Label{
 				{Name: github.Ptr("hoge-project")},
@@ -452,7 +452,7 @@ func TestMultipleLabelMatching(t *testing.T) {
 			shouldNotify: true,
 		},
 		{
-			name:        "複数ラベル設定で一部ラベル不足時にマッチしない",
+			name:        "Multiple label config does not match when some labels missing",
 			configLabel: "hoge-project,needs-review",
 			prLabels: []*github.Label{
 				{Name: github.Ptr("hoge-project")},
@@ -461,7 +461,7 @@ func TestMultipleLabelMatching(t *testing.T) {
 			shouldNotify: false,
 		},
 		{
-			name:        "スペース付きカンマ区切りラベルでマッチ",
+			name:        "Comma-separated labels with spaces match",
 			configLabel: "project-a, needs-review, urgent",
 			prLabels: []*github.Label{
 				{Name: github.Ptr("project-a")},
@@ -475,13 +475,13 @@ func TestMultipleLabelMatching(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// セットアップ
+			// Setup
 			db := setupTestDB(t)
 			gin.SetMode(gin.TestMode)
 			services.IsTestMode = true
 
-			// Slack API呼び出しをモック
-			// チャンネル状態確認のモック
+			// Mock Slack API calls
+			// Mock for channel status check
 			gock.New("https://slack.com").
 				Get("/api/conversations.info").
 				Reply(200).
@@ -501,17 +501,17 @@ func TestMultipleLabelMatching(t *testing.T) {
 					})
 			}
 
-			// チャンネル設定を作成
+			// Create channel config
 			config := models.ChannelConfig{
 				SlackChannelID:   "C1234567890",
 				LabelName:        tt.configLabel,
 				DefaultMentionID: "@here",
-				RepositoryList:   "test/repo", // リポジトリを設定
+				RepositoryList:   "test/repo", // Set repository
 				IsActive:         true,
 			}
 			db.Create(&config)
 
-			// labeled イベントのペイロード作成
+			// Create labeled event payload
 			action := "labeled"
 			prNumber := 123
 
@@ -519,13 +519,13 @@ func TestMultipleLabelMatching(t *testing.T) {
 				Action: &action,
 				Number: &prNumber,
 				Label: &github.Label{
-					Name: github.Ptr("needs-review"), // トリガーとなるラベル
+					Name: github.Ptr("needs-review"), // Triggering label
 				},
 				PullRequest: &github.PullRequest{
 					Number:  &prNumber,
 					HTMLURL: github.Ptr("https://github.com/test/repo/pull/123"),
 					Title:   github.Ptr("Test PR"),
-					Labels:  tt.prLabels, // PRに付いている全ラベル
+					Labels:  tt.prLabels, // All labels on the PR
 				},
 				Repo: &github.Repository{
 					FullName: github.Ptr("test/repo"),
@@ -538,37 +538,37 @@ func TestMultipleLabelMatching(t *testing.T) {
 
 			payloadJSON, _ := json.Marshal(payload)
 
-			// リクエスト作成
+			// Create request
 			req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(payloadJSON))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("X-GitHub-Event", "pull_request")
 
 			w := httptest.NewRecorder()
 
-			// Ginルーターを作成してリクエスト実行
+			// Create Gin router and execute request
 			router := gin.Default()
 			router.POST("/webhook", HandleGitHubWebhook(db))
 			router.ServeHTTP(w, req)
 
-			// HTTPステータスが200であることを確認
+			// Verify HTTP status is 200
 			assert.Equal(t, http.StatusOK, w.Code)
 
-			// タスクが作成されたかチェック
+			// Check if task was created
 			var taskCount int64
 			db.Model(&models.ReviewTask{}).Where("repo = ? AND pr_number = ?", "test/repo", 123).Count(&taskCount)
 
 			if tt.shouldNotify {
-				assert.Equal(t, int64(1), taskCount, "通知すべき場合にタスクが作成されていません")
+				assert.Equal(t, int64(1), taskCount, "Task should be created when notification is expected")
 
-				// モックが使用されたことを確認
+				// Verify mocks were used
 				if gock.HasUnmatchedRequest() {
-					t.Log("未マッチのリクエスト:", gock.GetUnmatchedRequests())
+					t.Log("Unmatched requests:", gock.GetUnmatchedRequests())
 				}
 			} else {
-				assert.Equal(t, int64(0), taskCount, "通知しない場合にタスクが作成されています")
+				assert.Equal(t, int64(0), taskCount, "Task should not be created when notification is not expected")
 			}
 
-			// クリーンアップ
+			// Cleanup
 			gock.Off()
 		})
 	}
@@ -578,12 +578,12 @@ func TestMultipleLabelUnlabeling(t *testing.T) {
 	tests := []struct {
 		name               string
 		configLabel        string
-		prLabelsAfterEvent []*github.Label // unlabeled後のPRラベル状態
-		removedLabel       string          // 削除されたラベル
-		shouldComplete     bool            // タスクが完了すべきかどうか
+		prLabelsAfterEvent []*github.Label // PR label state after unlabeled event
+		removedLabel       string          // The removed label
+		shouldComplete     bool            // Whether the task should be completed
 	}{
 		{
-			name:        "単一ラベル設定でラベル削除時にタスク完了",
+			name:        "Single label config completes task when label removed",
 			configLabel: "needs-review",
 			prLabelsAfterEvent: []*github.Label{
 				{Name: github.Ptr("bug")},
@@ -592,31 +592,31 @@ func TestMultipleLabelUnlabeling(t *testing.T) {
 			shouldComplete: true,
 		},
 		{
-			name:        "複数ラベル設定で必要ラベル削除時にタスク完了",
+			name:        "Multiple label config completes task when required label removed",
 			configLabel: "hoge-project,needs-review",
 			prLabelsAfterEvent: []*github.Label{
-				{Name: github.Ptr("hoge-project")}, // needs-reviewが削除された
+				{Name: github.Ptr("hoge-project")}, // needs-review was removed
 				{Name: github.Ptr("bug")},
 			},
 			removedLabel:   "needs-review",
 			shouldComplete: true,
 		},
 		{
-			name:        "複数ラベル設定で不要ラベル削除時はタスク継続",
+			name:        "Multiple label config continues task when unrelated label removed",
 			configLabel: "hoge-project,needs-review",
 			prLabelsAfterEvent: []*github.Label{
 				{Name: github.Ptr("hoge-project")},
-				{Name: github.Ptr("needs-review")}, // 両方とも残っている
+				{Name: github.Ptr("needs-review")}, // Both remain
 			},
-			removedLabel:   "bug", // 関係ないラベルが削除
+			removedLabel:   "bug", // Unrelated label removed
 			shouldComplete: false,
 		},
 		{
-			name:        "複数ラベル設定で複数の必要ラベルのうち1つ削除",
+			name:        "Multiple label config completes task when one of multiple required labels removed",
 			configLabel: "project-a,needs-review,urgent",
 			prLabelsAfterEvent: []*github.Label{
 				{Name: github.Ptr("needs-review")},
-				{Name: github.Ptr("urgent")}, // project-aが削除された
+				{Name: github.Ptr("urgent")}, // project-a was removed
 			},
 			removedLabel:   "project-a",
 			shouldComplete: true,
@@ -625,12 +625,12 @@ func TestMultipleLabelUnlabeling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// セットアップ
+			// Setup
 			db := setupTestDB(t)
 			gin.SetMode(gin.TestMode)
 			services.IsTestMode = true
 
-			// チャンネル設定を作成
+			// Create channel config
 			config := models.ChannelConfig{
 				SlackChannelID:   "C1234567890",
 				LabelName:        tt.configLabel,
@@ -640,7 +640,7 @@ func TestMultipleLabelUnlabeling(t *testing.T) {
 			}
 			db.Create(&config)
 
-			// 既存のレビュータスクを作成
+			// Create an existing review task
 			task := models.ReviewTask{
 				ID:           "test-task-id",
 				PRURL:        "https://github.com/test/repo/pull/123",
@@ -656,9 +656,9 @@ func TestMultipleLabelUnlabeling(t *testing.T) {
 			}
 			db.Create(&task)
 
-			// Slack API呼び出しをモック
+			// Mock Slack API calls
 			if tt.shouldComplete {
-				// タスク完了時のメッセージ更新
+				// Update message on task completion
 				gock.New("https://slack.com").
 					Post("/api/chat.update").
 					Reply(200).
@@ -666,7 +666,7 @@ func TestMultipleLabelUnlabeling(t *testing.T) {
 						"ok": true,
 					})
 
-				// ラベル削除による完了をスレッドに通知
+				// Notify completion due to label removal in thread
 				gock.New("https://slack.com").
 					Post("/api/chat.postMessage").
 					Reply(200).
@@ -676,7 +676,7 @@ func TestMultipleLabelUnlabeling(t *testing.T) {
 					})
 			}
 
-			// unlabeled イベントのペイロード作成
+			// Create unlabeled event payload
 			action := "unlabeled"
 			prNumber := 123
 
@@ -690,7 +690,7 @@ func TestMultipleLabelUnlabeling(t *testing.T) {
 					Number:  &prNumber,
 					HTMLURL: github.Ptr("https://github.com/test/repo/pull/123"),
 					Title:   github.Ptr("Test PR"),
-					Labels:  tt.prLabelsAfterEvent, // 削除後のラベル状態
+					Labels:  tt.prLabelsAfterEvent, // Label state after removal
 				},
 				Repo: &github.Repository{
 					FullName: github.Ptr("test/repo"),
@@ -703,58 +703,58 @@ func TestMultipleLabelUnlabeling(t *testing.T) {
 
 			payloadJSON, _ := json.Marshal(payload)
 
-			// リクエスト作成
+			// Create request
 			req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(payloadJSON))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("X-GitHub-Event", "pull_request")
 
 			w := httptest.NewRecorder()
 
-			// Ginルーターを作成してリクエスト実行
+			// Create Gin router and execute request
 			router := gin.Default()
 			router.POST("/webhook", HandleGitHubWebhook(db))
 			router.ServeHTTP(w, req)
 
-			// HTTPステータスが200であることを確認
+			// Verify HTTP status is 200
 			assert.Equal(t, http.StatusOK, w.Code)
 
-			// タスクのステータスを確認
+			// Verify task status
 			var updatedTask models.ReviewTask
 			result := db.Where("id = ?", "test-task-id").First(&updatedTask)
 			assert.NoError(t, result.Error)
 
 			if tt.shouldComplete {
-				assert.Equal(t, "completed", updatedTask.Status, "タスクが完了状態になっていません")
+				assert.Equal(t, "completed", updatedTask.Status, "Task should be in completed state")
 			} else {
-				assert.Equal(t, "in_review", updatedTask.Status, "タスクが継続状態でありません")
+				assert.Equal(t, "in_review", updatedTask.Status, "Task should remain in in_review state")
 			}
 
-			// クリーンアップ
+			// Cleanup
 			gock.Off()
 		})
 	}
 }
 
-// 初回レビュー後、2回目のレビューでもスレッドに通知が送られることを確認するテスト
+// Test that thread notifications are sent even for a second review after the initial one
 func TestHandleReviewSubmittedEvent_SecondReviewAfterCompletion(t *testing.T) {
-	// テスト用DB
+	// Test DB
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables and restore after test
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Mock setup
+	defer gock.Off() // Clean up mocks at test end
 
-	// Slack API成功レスポンスのモック（2回目のレビュー通知用）
+	// Mock Slack API success response (for second review notification)
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		MatchHeader("Authorization", "Bearer test-token").
@@ -765,7 +765,7 @@ func TestHandleReviewSubmittedEvent_SecondReviewAfterCompletion(t *testing.T) {
 			"channel": "C1234567890",
 		})
 
-	// 既にレビュー済み（completed状態）のタスクを作成
+	// Create an already reviewed (completed) task
 	task := models.ReviewTask{
 		ID:           "completed-task-id",
 		PRURL:        "https://github.com/test/repo/pull/888",
@@ -774,15 +774,15 @@ func TestHandleReviewSubmittedEvent_SecondReviewAfterCompletion(t *testing.T) {
 		Title:        "Already Reviewed PR",
 		SlackTS:      "1234567890.888888",
 		SlackChannel: "C1234567890",
-		Status:       "completed", // 既に完了済み
+		Status:       "completed", // Already completed
 		Reviewer:     "U1234567890",
 		LabelName:    "needs-review",
-		CreatedAt:    time.Now().Add(-1 * time.Hour),    // 1時間前に作成
-		UpdatedAt:    time.Now().Add(-30 * time.Minute), // 30分前に更新
+		CreatedAt:    time.Now().Add(-1 * time.Hour),    // Created 1 hour ago
+		UpdatedAt:    time.Now().Add(-30 * time.Minute), // Updated 30 minutes ago
 	}
 	db.Create(&task)
 
-	// 2回目のレビュー投稿イベントのペイロードを作成
+	// Create second review submitted event payload
 	prNumber := 888
 	repoName := "repo"
 	ownerLogin := "test"
@@ -810,36 +810,36 @@ func TestHandleReviewSubmittedEvent_SecondReviewAfterCompletion(t *testing.T) {
 		},
 	}
 
-	// HTTPリクエストを作成
+	// Create HTTP request
 	jsonData, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", "pull_request_review")
 
-	// レスポンスレコーダー作成
+	// Create response recorder
 	w := httptest.NewRecorder()
 
-	// Ginルーターを作成してリクエスト実行
+	// Create Gin router and execute request
 	router := gin.Default()
 	router.POST("/webhook", HandleGitHubWebhook(db))
 	router.ServeHTTP(w, req)
 
-	// HTTPステータスが200であることを確認
+	// Verify HTTP status is 200
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// タスクのステータスはcompletedのまま維持されていることを確認
+	// Verify task status remains completed
 	var updatedTask models.ReviewTask
 	result := db.Where("id = ?", "completed-task-id").First(&updatedTask)
 	assert.NoError(t, result.Error)
-	assert.Equal(t, "completed", updatedTask.Status, "タスクステータスはcompletedのまま維持されるべき")
+	assert.Equal(t, "completed", updatedTask.Status, "Task status should remain completed")
 
-	// モックが使用されたことを確認（Slack API呼び出しが行われた = 通知が送られた）
-	assert.True(t, gock.IsDone(), "2回目のレビューでもSlack通知が送られるべき")
+	// Verify mocks were used (Slack API was called = notification was sent)
+	assert.True(t, gock.IsDone(), "Slack notification should be sent even for second review")
 }
 
-// 同一PRに複数のタスクがある場合、最新のスレッドにのみ通知が送られることを確認するテスト
+// Test that when a PR has multiple tasks, notifications are only sent to the latest thread
 func TestHandleReviewSubmittedEvent_OnlyLatestTaskReceivesNotification(t *testing.T) {
-	// テスト用DB
+	// Test DB
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
@@ -850,9 +850,9 @@ func TestHandleReviewSubmittedEvent_OnlyLatestTaskReceivesNotification(t *testin
 	}()
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	defer gock.Off() // テスト終了時にモックをクリア
+	defer gock.Off() // Clean up mocks at test end
 
-	// Slack API成功レスポンスのモック
+	// Mock Slack API success response
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		MatchHeader("Authorization", "Bearer test-token").
@@ -863,7 +863,7 @@ func TestHandleReviewSubmittedEvent_OnlyLatestTaskReceivesNotification(t *testin
 			"channel": "C1234567890",
 		})
 
-	// 同一PRに対して、古いタスク（2時間前に作成）を作成
+	// Create an old task for the same PR (created 2 hours ago)
 	oldTask := models.ReviewTask{
 		ID:           "old-task-id",
 		PRURL:        "https://github.com/test/repo/pull/777",
@@ -875,12 +875,12 @@ func TestHandleReviewSubmittedEvent_OnlyLatestTaskReceivesNotification(t *testin
 		Status:       "completed",
 		Reviewer:     "U1111111111",
 		LabelName:    "needs-review",
-		CreatedAt:    time.Now().Add(-2 * time.Hour), // 2時間前に作成
+		CreatedAt:    time.Now().Add(-2 * time.Hour), // Created 2 hours ago
 		UpdatedAt:    time.Now().Add(-2 * time.Hour),
 	}
 	db.Create(&oldTask)
 
-	// 同一PRに対して、新しいタスク（1時間前に作成）を作成
+	// Create a new task for the same PR (created 1 hour ago)
 	newTask := models.ReviewTask{
 		ID:           "new-task-id",
 		PRURL:        "https://github.com/test/repo/pull/777",
@@ -892,12 +892,12 @@ func TestHandleReviewSubmittedEvent_OnlyLatestTaskReceivesNotification(t *testin
 		Status:       "completed",
 		Reviewer:     "U2222222222",
 		LabelName:    "needs-review",
-		CreatedAt:    time.Now().Add(-1 * time.Hour), // 1時間前に作成（より新しい）
+		CreatedAt:    time.Now().Add(-1 * time.Hour), // Created 1 hour ago (newer)
 		UpdatedAt:    time.Now().Add(-1 * time.Hour),
 	}
 	db.Create(&newTask)
 
-	// レビュー投稿イベントのペイロードを作成
+	// Create review submitted event payload
 	prNumber := 777
 	repoName := "repo"
 	ownerLogin := "test"
@@ -925,34 +925,34 @@ func TestHandleReviewSubmittedEvent_OnlyLatestTaskReceivesNotification(t *testin
 		},
 	}
 
-	// HTTPリクエストを作成
+	// Create HTTP request
 	jsonData, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", "pull_request_review")
 
-	// レスポンスレコーダー作成
+	// Create response recorder
 	w := httptest.NewRecorder()
 
-	// Ginルーターを作成してリクエスト実行
+	// Create Gin router and execute request
 	router := gin.Default()
 	router.POST("/webhook", HandleGitHubWebhook(db))
 	router.ServeHTTP(w, req)
 
-	// HTTPステータスが200であることを確認
+	// Verify HTTP status is 200
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// モックが1回だけ使用されたことを確認（最新のタスクにのみ通知が送られた）
-	assert.True(t, gock.IsDone(), "最新のタスクにのみSlack通知が送られるべき")
+	// Verify mock was used exactly once (notification sent only to the latest task)
+	assert.True(t, gock.IsDone(), "Slack notification should be sent only to the latest task")
 
-	// 未消費のモックがないことを確認（2回呼ばれていないことの確認）
+	// Verify no unconsumed mocks (confirming it was not called twice)
 	pendingMocks := gock.Pending()
-	assert.Equal(t, 0, len(pendingMocks), "Slack APIは1回だけ呼ばれるべき（古いタスクには通知しない）")
+	assert.Equal(t, 0, len(pendingMocks), "Slack API should be called only once (no notification for old tasks)")
 }
 
-// 異なるチャンネルのタスクには両方通知が送られることを確認するテスト
+// Test that notifications are sent to tasks in different channels
 func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *testing.T) {
-	// テスト用DB
+	// Test DB
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
@@ -963,9 +963,9 @@ func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *tes
 	}()
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	defer gock.Off() // テスト終了時にモックをクリア
+	defer gock.Off() // Clean up mocks at test end
 
-	// チャンネル1への通知用モック
+	// Mock for channel 1 notification
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		MatchHeader("Authorization", "Bearer test-token").
@@ -976,7 +976,7 @@ func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *tes
 			"channel": "C1111111111",
 		})
 
-	// チャンネル2への通知用モック
+	// Mock for channel 2 notification
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		MatchHeader("Authorization", "Bearer test-token").
@@ -987,7 +987,7 @@ func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *tes
 			"channel": "C2222222222",
 		})
 
-	// チャンネル1のタスク（needs-review ラベル）
+	// Channel 1 task (needs-review label)
 	task1 := models.ReviewTask{
 		ID:           "task-channel-1",
 		PRURL:        "https://github.com/test/repo/pull/999",
@@ -995,7 +995,7 @@ func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *tes
 		PRNumber:     999,
 		Title:        "Test PR with Multiple Channels",
 		SlackTS:      "1234567890.111111",
-		SlackChannel: "C1111111111", // チャンネル1
+		SlackChannel: "C1111111111", // Channel 1
 		Status:       "completed",
 		Reviewer:     "U1111111111",
 		LabelName:    "needs-review",
@@ -1004,7 +1004,7 @@ func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *tes
 	}
 	db.Create(&task1)
 
-	// チャンネル2のタスク（needs-design-review ラベル）
+	// Channel 2 task (needs-design-review label)
 	task2 := models.ReviewTask{
 		ID:           "task-channel-2",
 		PRURL:        "https://github.com/test/repo/pull/999",
@@ -1012,7 +1012,7 @@ func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *tes
 		PRNumber:     999,
 		Title:        "Test PR with Multiple Channels",
 		SlackTS:      "1234567890.222222",
-		SlackChannel: "C2222222222", // チャンネル2（異なるチャンネル）
+		SlackChannel: "C2222222222", // Channel 2 (different channel)
 		Status:       "completed",
 		Reviewer:     "U2222222222",
 		LabelName:    "needs-design-review",
@@ -1021,7 +1021,7 @@ func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *tes
 	}
 	db.Create(&task2)
 
-	// レビュー投稿イベントのペイロードを作成
+	// Create review submitted event payload
 	prNumber := 999
 	repoName := "repo"
 	ownerLogin := "test"
@@ -1049,51 +1049,51 @@ func TestHandleReviewSubmittedEvent_DifferentChannelsReceiveNotifications(t *tes
 		},
 	}
 
-	// HTTPリクエストを作成
+	// Create HTTP request
 	jsonData, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", "pull_request_review")
 
-	// レスポンスレコーダー作成
+	// Create response recorder
 	w := httptest.NewRecorder()
 
-	// Ginルーターを作成してリクエスト実行
+	// Create Gin router and execute request
 	router := gin.Default()
 	router.POST("/webhook", HandleGitHubWebhook(db))
 	router.ServeHTTP(w, req)
 
-	// HTTPステータスが200であることを確認
+	// Verify HTTP status is 200
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// モックが2回使用されたことを確認（両方のチャンネルに通知が送られた）
-	assert.True(t, gock.IsDone(), "両方のチャンネルにSlack通知が送られるべき")
+	// Verify mocks were used twice (notifications sent to both channels)
+	assert.True(t, gock.IsDone(), "Slack notifications should be sent to both channels")
 
-	// 未消費のモックがないことを確認
+	// Verify no unconsumed mocks
 	pendingMocks := gock.Pending()
-	assert.Equal(t, 0, len(pendingMocks), "Slack APIは2回呼ばれるべき（各チャンネルに1回ずつ）")
+	assert.Equal(t, 0, len(pendingMocks), "Slack API should be called twice (once per channel)")
 }
 
-// 同一チャンネル・同一PRの古いタスクもcompletedになることを確認するテスト
+// Test that old tasks for the same channel and PR also get completed
 func TestHandleReviewSubmittedEvent_OldTasksAlsoCompleted(t *testing.T) {
-	// テスト用DB
+	// Test DB
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// テスト前の環境変数を保存し、テスト後に復元
+	// Save environment variables and restore after test
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() {
 		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
 	}()
 
-	// テスト用の環境変数を設定
+	// Set test environment variables
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
 
-	// モックの設定
-	defer gock.Off() // テスト終了時にモックをクリア
+	// Mock setup
+	defer gock.Off() // Clean up mocks at test end
 
-	// Slack API成功レスポンスのモック（1回だけ呼ばれる - 最新タスクのみ）
+	// Mock Slack API success response (called only once - latest task only)
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		MatchHeader("Authorization", "Bearer test-token").
@@ -1104,7 +1104,7 @@ func TestHandleReviewSubmittedEvent_OldTasksAlsoCompleted(t *testing.T) {
 			"channel": "C1234567890",
 		})
 
-	// 同一PR・同一チャンネルに古いタスク（in_review）を作成
+	// Create old task (in_review) for the same PR and channel
 	oldTask := models.ReviewTask{
 		ID:           "old-in-review-task",
 		PRURL:        "https://github.com/test/repo/pull/555",
@@ -1113,15 +1113,15 @@ func TestHandleReviewSubmittedEvent_OldTasksAlsoCompleted(t *testing.T) {
 		Title:        "Test PR with Old Task",
 		SlackTS:      "1234567890.111111",
 		SlackChannel: "C1234567890",
-		Status:       "in_review", // 古いタスクはin_review状態
+		Status:       "in_review", // Old task is in in_review state
 		Reviewer:     "U1111111111",
 		LabelName:    "needs-review",
-		CreatedAt:    time.Now().Add(-2 * time.Hour), // 2時間前
+		CreatedAt:    time.Now().Add(-2 * time.Hour), // 2 hours ago
 		UpdatedAt:    time.Now().Add(-2 * time.Hour),
 	}
 	db.Create(&oldTask)
 
-	// 同一PR・同一チャンネルに新しいタスク（in_review）を作成
+	// Create new task (in_review) for the same PR and channel
 	newTask := models.ReviewTask{
 		ID:           "new-in-review-task",
 		PRURL:        "https://github.com/test/repo/pull/555",
@@ -1130,15 +1130,15 @@ func TestHandleReviewSubmittedEvent_OldTasksAlsoCompleted(t *testing.T) {
 		Title:        "Test PR with Old Task",
 		SlackTS:      "1234567890.222222",
 		SlackChannel: "C1234567890",
-		Status:       "in_review", // 新しいタスクもin_review状態
+		Status:       "in_review", // New task is also in in_review state
 		Reviewer:     "U2222222222",
 		LabelName:    "needs-review",
-		CreatedAt:    time.Now().Add(-1 * time.Hour), // 1時間前（より新しい）
+		CreatedAt:    time.Now().Add(-1 * time.Hour), // 1 hour ago (newer)
 		UpdatedAt:    time.Now().Add(-1 * time.Hour),
 	}
 	db.Create(&newTask)
 
-	// レビュー投稿イベントのペイロードを作成
+	// Create review submitted event payload
 	prNumber := 555
 	repoName := "repo"
 	ownerLogin := "test"
@@ -1166,38 +1166,38 @@ func TestHandleReviewSubmittedEvent_OldTasksAlsoCompleted(t *testing.T) {
 		},
 	}
 
-	// HTTPリクエストを作成
+	// Create HTTP request
 	jsonData, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", "pull_request_review")
 
-	// レスポンスレコーダー作成
+	// Create response recorder
 	w := httptest.NewRecorder()
 
-	// Ginルーターを作成してリクエスト実行
+	// Create Gin router and execute request
 	router := gin.Default()
 	router.POST("/webhook", HandleGitHubWebhook(db))
 	router.ServeHTTP(w, req)
 
-	// HTTPステータスが200であることを確認
+	// Verify HTTP status is 200
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// 古いタスクもcompletedになっていることを確認
+	// Verify old task is also completed
 	var updatedOldTask models.ReviewTask
 	db.Where("id = ?", "old-in-review-task").First(&updatedOldTask)
-	assert.Equal(t, "completed", updatedOldTask.Status, "古いタスクもcompletedになるべき（リマインド防止）")
+	assert.Equal(t, "completed", updatedOldTask.Status, "Old task should also be completed (to prevent reminders)")
 
-	// 新しいタスクもcompletedになっていることを確認
+	// Verify new task is also completed
 	var updatedNewTask models.ReviewTask
 	db.Where("id = ?", "new-in-review-task").First(&updatedNewTask)
-	assert.Equal(t, "completed", updatedNewTask.Status, "新しいタスクもcompletedになるべき")
+	assert.Equal(t, "completed", updatedNewTask.Status, "New task should also be completed")
 
-	// モックが使用されたことを確認
-	assert.True(t, gock.IsDone(), "最新のタスクにのみSlack通知が送られるべき")
+	// Verify mocks were used
+	assert.True(t, gock.IsDone(), "Slack notification should be sent only to the latest task")
 }
 
-// --- レビューコメント/変更要求時にタスクをcompletedにしてリマインドを停止するテスト ---
+// --- Tests for completing tasks and stopping reminders on review comment/changes requested ---
 
 func TestHandleReviewSubmittedEvent_CommentedCompletesTask(t *testing.T) {
 	db := setupTestDB(t)
@@ -1212,7 +1212,7 @@ func TestHandleReviewSubmittedEvent_CommentedCompletesTask(t *testing.T) {
 
 	defer gock.Off()
 
-	// Slack API通知モック
+	// Mock Slack API notification
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		MatchHeader("Authorization", "Bearer test-token").
@@ -1255,7 +1255,7 @@ func TestHandleReviewSubmittedEvent_CommentedCompletesTask(t *testing.T) {
 
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "commented-task").First(&updatedTask)
-	assert.Equal(t, "completed", updatedTask.Status, "commentedレビュー後はcompletedになりリマインドが止まるべき")
+	assert.Equal(t, "completed", updatedTask.Status, "Should be completed after commented review to stop reminders")
 }
 
 func TestHandleReviewSubmittedEvent_ChangesRequestedCompletesTask(t *testing.T) {
@@ -1271,7 +1271,7 @@ func TestHandleReviewSubmittedEvent_ChangesRequestedCompletesTask(t *testing.T) 
 
 	defer gock.Off()
 
-	// Slack API通知モック
+	// Mock Slack API notification
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		MatchHeader("Authorization", "Bearer test-token").
@@ -1314,7 +1314,7 @@ func TestHandleReviewSubmittedEvent_ChangesRequestedCompletesTask(t *testing.T) 
 
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "changes-requested-task").First(&updatedTask)
-	assert.Equal(t, "completed", updatedTask.Status, "changes_requestedレビュー後はcompletedになりリマインドが止まるべき")
+	assert.Equal(t, "completed", updatedTask.Status, "Should be completed after changes_requested review to stop reminders")
 }
 
 func TestHandleReviewSubmittedEvent_CommentedCompletesOldTasksToo(t *testing.T) {
@@ -1335,7 +1335,7 @@ func TestHandleReviewSubmittedEvent_CommentedCompletesOldTasksToo(t *testing.T) 
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
-	// 同一PR・同一チャンネルに古いタスク（in_review）
+	// Old task (in_review) for same PR and channel
 	oldTask := models.ReviewTask{
 		ID:           "old-comment-task",
 		PRURL:        "https://github.com/owner/repo/pull/302",
@@ -1386,7 +1386,7 @@ func TestHandleReviewSubmittedEvent_CommentedCompletesOldTasksToo(t *testing.T) 
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// 古いタスクもcompletedになっていること（リマインド防止）
+	// Old task should also be completed (to prevent reminders)
 	var updatedOld models.ReviewTask
 	db.Where("id = ?", "old-comment-task").First(&updatedOld)
 	assert.Equal(t, "completed", updatedOld.Status)
@@ -1414,7 +1414,7 @@ func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnComment(t *testing.T) 
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
-	// snoozed状態のタスク
+	// Task in snoozed state
 	task := models.ReviewTask{
 		ID:           "snoozed-comment-task",
 		PRURL:        "https://github.com/owner/repo/pull/400",
@@ -1451,7 +1451,7 @@ func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnComment(t *testing.T) 
 
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "snoozed-comment-task").First(&updatedTask)
-	assert.Equal(t, "completed", updatedTask.Status, "snoozed状態のタスクもcommentedレビュー後にcompletedになるべき")
+	assert.Equal(t, "completed", updatedTask.Status, "Snoozed task should also be completed after commented review")
 }
 
 func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnChangesRequested(t *testing.T) {
@@ -1472,7 +1472,7 @@ func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnChangesRequested(t *te
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
-	// snoozed状態のタスク
+	// Task in snoozed state
 	task := models.ReviewTask{
 		ID:           "snoozed-changes-task",
 		PRURL:        "https://github.com/owner/repo/pull/401",
@@ -1509,10 +1509,10 @@ func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnChangesRequested(t *te
 
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "snoozed-changes-task").First(&updatedTask)
-	assert.Equal(t, "completed", updatedTask.Status, "snoozed状態のタスクもchanges_requestedレビュー後にcompletedになるべき")
+	assert.Equal(t, "completed", updatedTask.Status, "Snoozed task should also be completed after changes_requested review")
 }
 
-// --- snoozed状態のタスクがfully approved時にcompletedになるテスト ---
+// --- Tests for snoozed tasks becoming completed when fully approved ---
 
 func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnFullApproval(t *testing.T) {
 	db := setupTestDB(t)
@@ -1527,7 +1527,7 @@ func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnFullApproval(t *testin
 
 	defer gock.Off()
 
-	// レビュー通知 + 完了メッセージ + approve通知
+	// Review notification + completion message + approve notification
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Reply(200).
@@ -1537,7 +1537,7 @@ func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnFullApproval(t *testin
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
-	// RequiredApprovals=1のチャンネル設定
+	// Channel config with RequiredApprovals=1
 	config := models.ChannelConfig{
 		ID:                "config-snoozed-approve",
 		SlackChannelID:    "C_SNOOZED_APPROVE",
@@ -1555,7 +1555,7 @@ func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnFullApproval(t *testin
 	}
 	db.Create(&userMapping)
 
-	// snoozed状態のタスク
+	// Task in snoozed state
 	task := models.ReviewTask{
 		ID:           "snoozed-approve-task",
 		PRURL:        "https://github.com/owner/repo/pull/600",
@@ -1593,13 +1593,13 @@ func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnFullApproval(t *testin
 
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "snoozed-approve-task").First(&updatedTask)
-	assert.Equal(t, "completed", updatedTask.Status, "snoozed状態でもfully approved時はcompletedになるべき")
+	assert.Equal(t, "completed", updatedTask.Status, "Snoozed task should be completed when fully approved")
 }
 
-// --- 複数レビュワー対応のWebhookテスト ---
+// --- Webhook tests for multiple reviewers ---
 
 func TestHandleReviewSubmittedEvent_PartialApproval(t *testing.T) {
-	// テスト用DB
+	// Test DB
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
@@ -1612,19 +1612,19 @@ func TestHandleReviewSubmittedEvent_PartialApproval(t *testing.T) {
 
 	defer gock.Off()
 
-	// レビュー通知のモック
+	// Mock for review notification
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
-	// 部分approve時の進捗メッセージのモック
+	// Mock for progress message on partial approval
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
-	// RequiredApprovals=2のチャンネル設定
+	// Channel config with RequiredApprovals=2
 	config := models.ChannelConfig{
 		ID:                "config-partial",
 		SlackChannelID:    "C_PARTIAL",
@@ -1643,7 +1643,7 @@ func TestHandleReviewSubmittedEvent_PartialApproval(t *testing.T) {
 	}
 	db.Create(&userMapping)
 
-	// 2人アサインされたタスク
+	// Task with 2 reviewers assigned
 	task := models.ReviewTask{
 		ID:           "partial-task",
 		PRURL:        "https://github.com/owner/repo/pull/200",
@@ -1659,7 +1659,7 @@ func TestHandleReviewSubmittedEvent_PartialApproval(t *testing.T) {
 	}
 	db.Create(&task)
 
-	// 1人目がapprove
+	// First reviewer approves
 	payload := `{
 		"action": "submitted",
 		"pull_request": {"number": 200, "html_url": "https://github.com/owner/repo/pull/200"},
@@ -1678,15 +1678,15 @@ func TestHandleReviewSubmittedEvent_PartialApproval(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// タスクはまだin_reviewのまま（1/2 approve）
+	// Task should still be in_review (1/2 approve)
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "partial-task").First(&updatedTask)
-	assert.Equal(t, "in_review", updatedTask.Status, "1/2 approveなのでまだin_review")
+	assert.Equal(t, "in_review", updatedTask.Status, "Should still be in_review with 1/2 approvals")
 	assert.Contains(t, updatedTask.ApprovedBy, "UREVIEWER1")
 }
 
 func TestHandleReviewSubmittedEvent_FullApproval(t *testing.T) {
-	// テスト用DB
+	// Test DB
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
@@ -1699,13 +1699,13 @@ func TestHandleReviewSubmittedEvent_FullApproval(t *testing.T) {
 
 	defer gock.Off()
 
-	// レビュー通知のモック
+	// Mock for review notification
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
-	// RequiredApprovals=2のチャンネル設定
+	// Channel config with RequiredApprovals=2
 	config := models.ChannelConfig{
 		ID:                "config-full",
 		SlackChannelID:    "C_FULL",
@@ -1724,7 +1724,7 @@ func TestHandleReviewSubmittedEvent_FullApproval(t *testing.T) {
 	}
 	db.Create(&userMapping)
 
-	// 既に1人approveされたタスク
+	// Task already approved by one reviewer
 	task := models.ReviewTask{
 		ID:           "full-task",
 		PRURL:        "https://github.com/owner/repo/pull/201",
@@ -1741,7 +1741,7 @@ func TestHandleReviewSubmittedEvent_FullApproval(t *testing.T) {
 	}
 	db.Create(&task)
 
-	// 2人目がapprove
+	// Second reviewer approves
 	payload := `{
 		"action": "submitted",
 		"pull_request": {"number": 201, "html_url": "https://github.com/owner/repo/pull/201"},
@@ -1760,16 +1760,16 @@ func TestHandleReviewSubmittedEvent_FullApproval(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// タスクがcompletedになっている（2/2 approve）
+	// Task should be completed (2/2 approve)
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "full-task").First(&updatedTask)
-	assert.Equal(t, "completed", updatedTask.Status, "2/2 approveなのでcompleted")
+	assert.Equal(t, "completed", updatedTask.Status, "Should be completed with 2/2 approvals")
 	assert.Contains(t, updatedTask.ApprovedBy, "UREVIEWER1")
 	assert.Contains(t, updatedTask.ApprovedBy, "UREVIEWER2")
 }
 
 func TestHandleReviewSubmittedEvent_BackwardCompat(t *testing.T) {
-	// テスト用DB - RequiredApprovals=1（デフォルト）で既存動作
+	// Test DB - existing behavior with RequiredApprovals=1 (default)
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
@@ -1782,13 +1782,13 @@ func TestHandleReviewSubmittedEvent_BackwardCompat(t *testing.T) {
 
 	defer gock.Off()
 
-	// レビュー通知のモック
+	// Mock for review notification
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
-	// RequiredApprovals未設定（デフォルト=1）のチャンネル設定
+	// Channel config without RequiredApprovals set (default=1)
 	config := models.ChannelConfig{
 		ID:               "config-compat",
 		SlackChannelID:   "C_COMPAT",
@@ -1798,7 +1798,7 @@ func TestHandleReviewSubmittedEvent_BackwardCompat(t *testing.T) {
 	}
 	db.Create(&config)
 
-	// 旧データ形式のタスク（Reviewers空）
+	// Task in old data format (empty Reviewers)
 	task := models.ReviewTask{
 		ID:           "compat-task",
 		PRURL:        "https://github.com/owner/repo/pull/202",
@@ -1813,7 +1813,7 @@ func TestHandleReviewSubmittedEvent_BackwardCompat(t *testing.T) {
 	}
 	db.Create(&task)
 
-	// approveイベント
+	// Approve event
 	payload := `{
 		"action": "submitted",
 		"pull_request": {"number": 202, "html_url": "https://github.com/owner/repo/pull/202"},
@@ -1832,10 +1832,10 @@ func TestHandleReviewSubmittedEvent_BackwardCompat(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// RequiredApprovals=1なので1回のapproveでcompleted
+	// Since RequiredApprovals=1, one approval results in completed
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "compat-task").First(&updatedTask)
-	assert.Equal(t, "completed", updatedTask.Status, "RequiredApprovals=1で1回approveなのでcompleted")
+	assert.Equal(t, "completed", updatedTask.Status, "Should be completed with RequiredApprovals=1 and 1 approval")
 }
 
 func TestHandleReviewRequestedEvent_CompletedTask(t *testing.T) {
@@ -1843,14 +1843,14 @@ func TestHandleReviewRequestedEvent_CompletedTask(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// gockでSlack APIをモック
+	// Mock Slack API with gock
 	defer gock.Off()
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
-	// completedタスクを作成
+	// Create completed task
 	task := models.ReviewTask{
 		ID:           "completed-task",
 		PRURL:        "https://github.com/owner/repo/pull/300",
@@ -1885,13 +1885,13 @@ func TestHandleReviewRequestedEvent_CompletedTask(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// completedタスクがin_reviewに戻っているはず
+	// Completed task should be reverted to in_review
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "completed-task").First(&updatedTask)
 	assert.Equal(t, "in_review", updatedTask.Status)
 
-	// 通知が送られたはず（gockのモックが消費されている）
-	assert.True(t, gock.IsDone(), "re-request通知がSlackに送られるべき")
+	// Notification should have been sent (gock mocks consumed)
+	assert.True(t, gock.IsDone(), "Re-request notification should be sent to Slack")
 }
 
 func TestHandleReviewRequestedEvent_InReviewTask(t *testing.T) {
@@ -1899,14 +1899,14 @@ func TestHandleReviewRequestedEvent_InReviewTask(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// gockでSlack APIをモック
+	// Mock Slack API with gock
 	defer gock.Off()
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
-	// in_reviewタスクを作成
+	// Create in_review task
 	task := models.ReviewTask{
 		ID:           "inreview-task",
 		PRURL:        "https://github.com/owner/repo/pull/301",
@@ -1941,13 +1941,13 @@ func TestHandleReviewRequestedEvent_InReviewTask(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// in_reviewのままであるはず
+	// Should remain in_review
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "inreview-task").First(&updatedTask)
 	assert.Equal(t, "in_review", updatedTask.Status)
 
-	// 通知が送られたはず（gockのモックが消費されている）
-	assert.True(t, gock.IsDone(), "re-request通知がSlackに送られるべき")
+	// Notification should have been sent (gock mocks consumed)
+	assert.True(t, gock.IsDone(), "Re-request notification should be sent to Slack")
 }
 
 func TestHandleReviewSubmittedEvent_DismissedOnlyUpdatesApprovedBy(t *testing.T) {
@@ -1955,7 +1955,7 @@ func TestHandleReviewSubmittedEvent_DismissedOnlyUpdatesApprovedBy(t *testing.T)
 	gin.SetMode(gin.TestMode)
 	services.IsTestMode = true
 
-	// チャンネル設定を作成（2approve必要）
+	// Create channel config (requires 2 approvals)
 	config := models.ChannelConfig{
 		SlackChannelID:    "C12345",
 		LabelName:         "needs-review",
@@ -1965,13 +1965,13 @@ func TestHandleReviewSubmittedEvent_DismissedOnlyUpdatesApprovedBy(t *testing.T)
 	}
 	db.Create(&config)
 
-	// UserMapping作成
+	// Create UserMapping
 	db.Create(&models.UserMapping{
 		SlackUserID:    "UREVIEWER",
 		GithubUsername: "reviewer1",
 	})
 
-	// approveされたin_reviewタスクを作成
+	// Create an in_review task that has been approved
 	task := models.ReviewTask{
 		ID:           "dismiss-task",
 		PRURL:        "https://github.com/owner/repo/pull/400",
@@ -1989,7 +1989,7 @@ func TestHandleReviewSubmittedEvent_DismissedOnlyUpdatesApprovedBy(t *testing.T)
 	}
 	db.Create(&task)
 
-	// dismissイベント
+	// Dismiss event
 	payload := `{
 		"action": "submitted",
 		"pull_request": {"number": 400, "html_url": "https://github.com/owner/repo/pull/400"},
@@ -2008,12 +2008,12 @@ func TestHandleReviewSubmittedEvent_DismissedOnlyUpdatesApprovedBy(t *testing.T)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// ステータスは変わらない、approved_byだけ更新される
+	// Status should not change, only approved_by is updated
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "dismiss-task").First(&updatedTask)
-	assert.Equal(t, "in_review", updatedTask.Status, "ステータスは変更されない")
-	assert.Equal(t, "", updatedTask.ApprovedBy, "approved_byからdismissされたレビュワーが削除される")
-	assert.Nil(t, updatedTask.ReminderPausedUntil, "リマインドの一時停止は設定されない")
+	assert.Equal(t, "in_review", updatedTask.Status, "Status should not change")
+	assert.Equal(t, "", updatedTask.ApprovedBy, "Dismissed reviewer should be removed from approved_by")
+	assert.Nil(t, updatedTask.ReminderPausedUntil, "Reminder pause should not be set")
 }
 
 
