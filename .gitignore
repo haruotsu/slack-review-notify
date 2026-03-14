@@ -10,3 +10,12 @@
 slack-review-notify
 CLAUDE.local.md
 coverage.html
+
+# E2E tests
+e2e/node_modules/
+e2e/test-results.json
+e2e/test-results/
+e2e/playwright-report/
+e2e/*.js
+e2e/check-*.ts
+e2e/thread-screenshot.ts

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"slack-review-notify/i18n"
 	"slack-review-notify/models"
 	"slack-review-notify/services"
 
@@ -173,6 +174,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 					Reviewer:     "",        // Updated later
 					Status:       "pending", // Temporary state
 					LabelName:    config.LabelName,
+					Language:     config.Language,
 					CreatedAt:    time.Now(),
 					UpdatedAt:    time.Now(),
 				}
@@ -206,6 +208,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 							pr.GetTitle(),
 							config.SlackChannelID,
 							creatorSlackID,
+							config.Language,
 						)
 						taskStatus = "waiting_business_hours"
 						// Reviewer will be set on the next business day morning
@@ -226,6 +229,7 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 							config.SlackChannelID,
 							config.DefaultMentionID,
 							creatorSlackID,
+							config.Language,
 						)
 						taskStatus = "in_review"
 						if err != nil {
@@ -525,8 +529,8 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 		}
 
 		// Post re-review request notification to thread
-		message := fmt.Sprintf("🔄 %s さんが %s に再レビューを依頼しました。対応をお願いします！",
-			senderMention, reviewerMention)
+		t := i18n.L(latestTask.Language)
+		message := t("notify.re_review_requested", senderMention, reviewerMention)
 		if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, message); err != nil {
 			log.Printf("re-review notification error: %v", err)
 		}
@@ -645,7 +649,8 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			if fullyApproved {
 				// Post review complete message to thread
 				approvedCount := services.CountApprovals(latestTask)
-				completeMsg := fmt.Sprintf("🎉 %d/%d approved - レビュー完了！", approvedCount, requiredApprovals)
+				t := i18n.L(latestTask.Language)
+				completeMsg := t("notify.fully_approved", approvedCount, requiredApprovals)
 				if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, completeMsg); err != nil {
 					log.Printf("failed to post review complete message: %v", err)
 				}

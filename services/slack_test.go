@@ -42,7 +42,8 @@ func TestSendSlackMessage(t *testing.T) {
 		"Test PR Title",
 		"C12345",
 		"U12345",
-		"", // PR creator's Slack ID (empty for test)
+		"",   // PR creator's Slack ID (empty for test)
+		"ja", // language
 	)
 
 	// Assertions
@@ -66,7 +67,8 @@ func TestSendSlackMessage(t *testing.T) {
 		"Test PR Title",
 		"INVALID",
 		"U12345",
-		"", // PR creator's Slack ID (empty for test)
+		"",   // PR creator's Slack ID (empty for test)
+		"ja", // language
 	)
 
 	// Assertions

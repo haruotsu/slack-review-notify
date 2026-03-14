@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"slack-review-notify/i18n"
 	"slack-review-notify/models"
 	"strings"
 	"time"
@@ -320,14 +321,15 @@ func IsReviewFullyApproved(task models.ReviewTask, requiredApprovals int) bool {
 }
 
 // SendSlackMessageOffHours sends a message without mentions for off-hours
-func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID string) (string, string, error) {
+func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID, lang string) (string, string, error) {
+	t := i18n.L(lang)
 	var message string
 	if creatorSlackID != "" {
-		message = fmt.Sprintf("<@%s> からのレビュー依頼が登録されました\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n📝 レビューのメンションは翌営業日の朝にお送りします", creatorSlackID, title, prURL)
+		message = t("notify.off_hours.with_creator", creatorSlackID, title, prURL)
 	} else {
-		message = fmt.Sprintf("📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n (レビューのメンションは翌営業日の朝にお送りします)", title, prURL)
+		message = t("notify.off_hours.without_creator", title, prURL)
 	}
-	doneButton := CreateButton("レビュー完了", "review_done", "done", "primary")
+	doneButton := CreateButton(t("button.review_done"), "review_done", "done", "primary")
 	blocks := CreateMessageWithActionBlocks(message, doneButton)
 
 	body := map[string]interface{}{
@@ -373,15 +375,16 @@ func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID string) (str
 
 // PostBusinessHoursNotificationToThread sends a notification with mentions to a thread when business hours begin
 func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID string) error {
+	t := i18n.L(task.Language)
 	mentionText := buildMentionText(mentionID)
 
 	// Append reviewer info if a reviewer is assigned
 	var reviewerText string
 	if task.Reviewer != "" {
-		reviewerText = fmt.Sprintf("\n\n🎯 *レビュワー*: @%s さん、よろしくお願いします！", task.Reviewer)
+		reviewerText = t("notify.reviewer_in_morning", task.Reviewer)
 	}
 
-	message := fmt.Sprintf("🌅 *おはようございます！* %s\n\n📋 こちらのPRのレビューをお願いします。%s", mentionText, reviewerText)
+	message := t("notify.business_hours_morning", mentionText, reviewerText)
 
 	blocks := CreateMessageBlocks(message)
 
@@ -425,16 +428,17 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 	return nil
 }
 
-func SendSlackMessage(prURL, title, channel, mentionID, creatorSlackID string) (string, string, error) {
+func SendSlackMessage(prURL, title, channel, mentionID, creatorSlackID, lang string) (string, string, error) {
+	t := i18n.L(lang)
 	mentionText := buildMentionText(mentionID)
 
 	var message string
 	if creatorSlackID != "" {
-		message = fmt.Sprintf("%s <@%s> からのレビュー依頼があります\n\n*PRタイトル*: %s\n*URL*: <%s>", mentionText, creatorSlackID, title, prURL)
+		message = t("notify.review_request.with_creator", mentionText, creatorSlackID, title, prURL)
 	} else {
-		message = fmt.Sprintf("%s *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>", mentionText, title, prURL)
+		message = t("notify.review_request.without_creator", mentionText, title, prURL)
 	}
-	doneButton := CreateButton("レビュー完了", "review_done", "done", "primary")
+	doneButton := CreateButton(t("button.review_done"), "review_done", "done", "primary")
 	blocks := CreateMessageWithActionBlocks(message, doneButton)
 
 	body := map[string]interface{}{
@@ -518,8 +522,9 @@ func PostToThread(channel, ts, message string) error {
 }
 
 // PostToThreadWithButtons posts a message with buttons to a thread
-func PostToThreadWithButtons(channel, ts, message string, taskID string) error {
-	pauseButton := CreateButton("リマインドを一時停止", "pause_reminder_thread", taskID, "danger")
+func PostToThreadWithButtons(channel, ts, message string, taskID, lang string) error {
+	t := i18n.L(lang)
+	pauseButton := CreateButton(t("button.pause_reminder"), "pause_reminder_thread", taskID, "danger")
 	blocks := CreateMessageWithActionBlocks(message, pauseButton)
 
 	body := map[string]interface{}{
@@ -566,6 +571,7 @@ func PostToThreadWithButtons(channel, ts, message string, taskID string) error {
 
 // SendReviewerReminderMessage sends a reminder message to reviewers
 func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
+	t := i18n.L(task.Language)
 	// Check if the channel is archived
 	isArchived, err := IsChannelArchived(task.SlackChannel)
 	if err != nil {
@@ -626,9 +632,9 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	} else if task.Reviewer != "" {
 		mentionText = fmt.Sprintf("<@%s>", task.Reviewer)
 	}
-	message := fmt.Sprintf("%s レビューしてくれたら嬉しいです...👀", mentionText)
+	message := t("notify.reminder", mentionText)
 
-	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder", "リマインダーを停止")
+	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder", t("button.stop_reminder"), task.Language)
 	blocks := CreateMessageWithActionBlocks(message, pauseSelect)
 
 	// Post message with buttons to the thread
@@ -660,21 +666,22 @@ func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 
 // SendReminderPausedMessage notifies that the reminder has been paused
 func SendReminderPausedMessage(task models.ReviewTask, duration string) error {
+	t := i18n.L(task.Language)
 	var message string
 
 	switch duration {
 	case "1h":
-		message = "はい！1時間リマインドをストップします！"
+		message = t("notify.reminder_paused.1h")
 	case "2h":
-		message = "はい！2時間リマインドをストップします！"
+		message = t("notify.reminder_paused.2h")
 	case "4h":
-		message = "はい！4時間リマインドをストップします！"
+		message = t("notify.reminder_paused.4h")
 	case "today":
-		message = "今日はもうリマインドしません。翌営業日の朝に再開します！"
+		message = t("notify.reminder_paused.today")
 	case "stop":
-		message = "リマインダーを完全に停止しました。レビュー担当者が決まるまで通知しません。"
+		message = t("notify.reminder_paused.stop")
 	default:
-		message = "リマインドをストップします！"
+		message = t("notify.reminder_paused.default")
 	}
 
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
@@ -782,6 +789,7 @@ func IsChannelArchived(channelID string) (bool, error) {
 
 // PostReviewerAssignedMessageWithChangeButton displays the auto-assigned reviewers and shows a change button
 func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
+	t := i18n.L(task.Language)
 	var message string
 	if task.Reviewers != "" {
 		var mentions []string
@@ -790,13 +798,13 @@ func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
 				mentions = append(mentions, fmt.Sprintf("<@%s>", trimmed))
 			}
 		}
-		message = fmt.Sprintf("自動でレビュワーが割り当てられました: %s レビューをお願いします！", strings.Join(mentions, " "))
+		message = t("notify.reviewer_auto_assigned", strings.Join(mentions, " "))
 	} else {
-		message = fmt.Sprintf("自動でレビュワーが割り当てられました: <@%s> レビューをお願いします！", task.Reviewer)
+		message = t("notify.reviewer_auto_assigned", fmt.Sprintf("<@%s>", task.Reviewer))
 	}
 
-	changeButton := CreateChangeReviewerButton(task.ID)
-	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder_initial", "リマインダーを停止")
+	changeButton := CreateChangeReviewerButton(task.ID, task.Language)
+	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder_initial", t("button.stop_reminder"), task.Language)
 	blocks := CreateMessageWithActionsBlocks(message, changeButton, pauseSelect)
 
 	// Post message with buttons to the thread
@@ -849,10 +857,11 @@ func formatReviewerMentions(reviewerIDs string) string {
 
 // SendReviewerChangedMessage notifies that the reviewer has been changed
 func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) error {
+	t := i18n.L(task.Language)
 	oldMentions := formatReviewerMentions(oldReviewerID)
 	newMentions := formatReviewerMentions(task.Reviewer)
 
-	message := fmt.Sprintf("レビュワーを変更しました: %s → %s さん、よろしくお願いします！", oldMentions, newMentions)
+	message := t("notify.reviewer_changed", oldMentions, newMentions)
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
@@ -928,9 +937,10 @@ func GetNextBusinessDayMorningWithConfig(now time.Time, config *models.ChannelCo
 
 // SendOutOfHoursReminderMessage sends a reminder message for off-hours
 func SendOutOfHoursReminderMessage(db *gorm.DB, task models.ReviewTask) error {
-	message := fmt.Sprintf("@%s レビューしてくれたら嬉しいです...👀\n\n営業時間外のため、次回のリマインドは翌営業日に送信します。", task.Reviewer)
+	t := i18n.L(task.Language)
+	message := t("notify.out_of_hours_reminder", task.Reviewer)
 
-	pauseSelect := CreateStopOnlyPauseReminderSelect(task.ID, "pause_reminder", "リマインダーを停止")
+	pauseSelect := CreateStopOnlyPauseReminderSelect(task.ID, "pause_reminder", t("button.stop_reminder"), task.Language)
 	blocks := CreateMessageWithActionBlocks(message, pauseSelect)
 
 	// Post message with buttons to the thread
@@ -962,12 +972,13 @@ func SendOutOfHoursReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 
 // UpdateSlackMessageForCompletedTask updates the Slack message to indicate that the task is completed
 func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
+	t := i18n.L(task.Language)
 	if IsTestMode {
 		log.Printf("test mode: would update slack message for completed task: %s", task.ID)
 		return nil
 	}
 
-	message := fmt.Sprintf("✅ *%s*\n🔗 %s\n\n*レビュー完了*: このPRのラベルが外れたため、レビュータスクを終了しました。", task.Title, task.PRURL)
+	message := t("notify.task_completed", task.Title, task.PRURL)
 	blocks := CreateMessageBlocks(message)
 
 	// Call the message update API
@@ -1005,22 +1016,23 @@ func UpdateSlackMessageForCompletedTask(task models.ReviewTask) error {
 
 // SendReviewCompletedAutoNotification sends an automatic notification when a review is completed
 func SendReviewCompletedAutoNotification(task models.ReviewTask, reviewerLogin string, reviewState string) error {
+	t := i18n.L(task.Language)
 	var message string
 	var emoji string
 
 	switch reviewState {
 	case "approved":
 		emoji = "✅"
-		message = fmt.Sprintf("%s %sさんがレビューを承認しました！感謝！👏", emoji, reviewerLogin)
+		message = t("notify.review_approved", emoji, reviewerLogin)
 	case "changes_requested":
 		emoji = "🔄"
-		message = fmt.Sprintf("%s %sさんが変更を要求しました 感謝！👏", emoji, reviewerLogin)
+		message = t("notify.review_changes_requested", emoji, reviewerLogin)
 	case "commented":
 		emoji = "💬"
-		message = fmt.Sprintf("%s %sさんがレビューコメントを残しました 感謝！👏", emoji, reviewerLogin)
+		message = t("notify.review_commented", emoji, reviewerLogin)
 	default:
 		emoji = "👀"
-		message = fmt.Sprintf("%s %sさんがレビューしました 感謝！👏", emoji, reviewerLogin)
+		message = t("notify.review_default", emoji, reviewerLogin)
 	}
 
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
@@ -1028,25 +1040,25 @@ func SendReviewCompletedAutoNotification(task models.ReviewTask, reviewerLogin s
 
 // PostLabelRemovedNotification notifies the thread about task completion due to label removal
 func PostLabelRemovedNotification(task models.ReviewTask, removedLabels []string) error {
+	t := i18n.L(task.Language)
 	if IsTestMode {
 		log.Printf("test mode: would post label removed notification for task: %s", task.ID)
 		return nil
 	}
 
-	var labelText string
+	var message string
 	if len(removedLabels) == 1 {
-		labelText = fmt.Sprintf("`%s`ラベル", removedLabels[0])
+		message = t("notify.label_removed_single", removedLabels[0])
 	} else {
-		labelText = fmt.Sprintf("`%s`ラベルのいずれか", strings.Join(removedLabels, "`, `"))
+		message = t("notify.label_removed_multiple", strings.Join(removedLabels, "`, `"))
 	}
-
-	message := fmt.Sprintf("🏷️ %sが削除されたため、レビュータスクを完了しました。", labelText)
 
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
 }
 
 // PostPRClosedNotification notifies the thread that the PR has been closed
 func PostPRClosedNotification(task models.ReviewTask, merged bool) error {
+	t := i18n.L(task.Language)
 	if IsTestMode {
 		log.Printf("test mode: would post PR closed notification for task: %s (merged: %v)", task.ID, merged)
 		return nil
@@ -1054,9 +1066,9 @@ func PostPRClosedNotification(task models.ReviewTask, merged bool) error {
 
 	var message string
 	if merged {
-		message = "🎉 PRがマージされました！お疲れさまでした！"
+		message = t("notify.pr_merged")
 	} else {
-		message = "🔒 PRがクローズされました。"
+		message = t("notify.pr_closed")
 	}
 
 	return PostToThread(task.SlackChannel, task.SlackTS, message)

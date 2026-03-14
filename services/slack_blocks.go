@@ -1,6 +1,10 @@
 package services
 
-import "fmt"
+import (
+	"fmt"
+
+	"slack-review-notify/i18n"
+)
 
 // PauseOption is a struct for reminder pause options
 type PauseOption struct {
@@ -8,22 +12,21 @@ type PauseOption struct {
 	Value string
 }
 
-// Common reminder pause options
-var (
-	PauseOptionOneHour   = PauseOption{Text: "1時間停止", Value: "1h"}
-	PauseOptionTwoHours  = PauseOption{Text: "2時間停止", Value: "2h"}
-	PauseOptionFourHours = PauseOption{Text: "4時間停止", Value: "4h"}
-	PauseOptionToday     = PauseOption{Text: "今日は通知しない (翌営業日の朝まで停止)", Value: "today"}
-	PauseOptionStop      = PauseOption{Text: "リマインダーを完全に停止", Value: "stop"}
-)
+// GetAllPauseOptions returns all pause options with translated text
+func GetAllPauseOptions(lang string) []PauseOption {
+	t := i18n.L(lang)
+	return []PauseOption{
+		{Text: t("pause.1h"), Value: "1h"},
+		{Text: t("pause.2h"), Value: "2h"},
+		{Text: t("pause.4h"), Value: "4h"},
+		{Text: t("pause.today"), Value: "today"},
+		{Text: t("pause.stop"), Value: "stop"},
+	}
+}
 
-// AllPauseOptions contains all reminder pause options
-var AllPauseOptions = []PauseOption{
-	PauseOptionOneHour,
-	PauseOptionTwoHours,
-	PauseOptionFourHours,
-	PauseOptionToday,
-	PauseOptionStop,
+// GetStopOnlyPauseOption returns the stop-only pause option with translated text
+func GetStopOnlyPauseOption(lang string) PauseOption {
+	return PauseOption{Text: i18n.TWithLang(lang, "pause.stop"), Value: "stop"}
 }
 
 // SlackBlockBuilder is a helper for building Slack Block Kit structures
@@ -94,12 +97,12 @@ func CreateButton(text, actionID, value, style string) map[string]interface{} {
 }
 
 // CreatePauseReminderSelect creates a reminder pause select element
-func CreatePauseReminderSelect(taskID, actionID, placeholder string, options []PauseOption) map[string]interface{} {
+func CreatePauseReminderSelect(taskID, actionID, placeholder, lang string, options []PauseOption) map[string]interface{} {
 	if taskID == "" {
 		taskID = "unknown"
 	}
 	if placeholder == "" {
-		placeholder = "選択してください"
+		placeholder = i18n.TWithLang(lang, "common.select_placeholder")
 	}
 
 	selectOptions := make([]map[string]interface{}, len(options))
@@ -125,18 +128,18 @@ func CreatePauseReminderSelect(taskID, actionID, placeholder string, options []P
 }
 
 // CreateChangeReviewerButton creates a change reviewer button
-func CreateChangeReviewerButton(taskID string) map[string]interface{} {
-	return CreateButton("変わってほしい！", "change_reviewer", taskID, "danger")
+func CreateChangeReviewerButton(taskID, lang string) map[string]interface{} {
+	return CreateButton(i18n.TWithLang(lang, "button.change_reviewer"), "change_reviewer", taskID, "danger")
 }
 
 // CreateAllOptionsPauseReminderSelect creates a reminder pause select with all options
-func CreateAllOptionsPauseReminderSelect(taskID, actionID, placeholder string) map[string]interface{} {
-	return CreatePauseReminderSelect(taskID, actionID, placeholder, AllPauseOptions)
+func CreateAllOptionsPauseReminderSelect(taskID, actionID, placeholder, lang string) map[string]interface{} {
+	return CreatePauseReminderSelect(taskID, actionID, placeholder, lang, GetAllPauseOptions(lang))
 }
 
 // CreateStopOnlyPauseReminderSelect creates a reminder pause select with only the full stop option
-func CreateStopOnlyPauseReminderSelect(taskID, actionID, placeholder string) map[string]interface{} {
-	return CreatePauseReminderSelect(taskID, actionID, placeholder, []PauseOption{PauseOptionStop})
+func CreateStopOnlyPauseReminderSelect(taskID, actionID, placeholder, lang string) map[string]interface{} {
+	return CreatePauseReminderSelect(taskID, actionID, placeholder, lang, []PauseOption{GetStopOnlyPauseOption(lang)})
 }
 
 // CreateMessageBlocks creates blocks with message only
