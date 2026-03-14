@@ -3,9 +3,13 @@ package i18n
 import (
 	"fmt"
 	"os"
+	"sync"
 )
 
-var currentLang = "ja"
+var (
+	currentLang = "ja"
+	langMu      sync.RWMutex
+)
 
 var messages = map[string]map[string]string{
 	"ja": messagesJa,
@@ -23,12 +27,17 @@ func Init() {
 
 // SetLang sets the current language.
 func SetLang(lang string) {
+	langMu.Lock()
+	defer langMu.Unlock()
 	currentLang = lang
 }
 
 // T returns the translated string using the global language setting.
 func T(key string, args ...interface{}) string {
-	return TWithLang(currentLang, key, args...)
+	langMu.RLock()
+	lang := currentLang
+	langMu.RUnlock()
+	return TWithLang(lang, key, args...)
 }
 
 // TWithLang returns the translated string for a specific language.

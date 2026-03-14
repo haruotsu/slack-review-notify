@@ -216,6 +216,7 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"common.until":              "until %s",
 	"common.indefinite":         "Indefinite",
 	"common.reason":             ", reason: %s",
+	"common.reason_paren":       " (%s)",
 
 	// ==================== Pause Options ====================
 	"pause.1h":    "Pause 1 hour",

@@ -216,6 +216,7 @@ var messagesJa = map[string]string{
 	"common.until":              "%s まで",
 	"common.indefinite":         "無期限",
 	"common.reason":             "、理由: %s",
+	"common.reason_paren":       "（%s）",
 
 	// ==================== Pause Options ====================
 	"pause.1h":    "1時間停止",

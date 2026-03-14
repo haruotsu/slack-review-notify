@@ -68,11 +68,11 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			if len(parts) == 0 {
 				// Show help when no arguments are provided
 				var emptyHelpConfig models.ChannelConfig
-			emptyHelpLang := "ja"
-			if err := db.Where("slack_channel_id = ?", channelID).First(&emptyHelpConfig).Error; err == nil {
-				emptyHelpLang = getLang(&emptyHelpConfig)
-			}
-			showHelp(c, emptyHelpLang)
+				emptyHelpLang := "ja"
+				if err := db.Where("slack_channel_id = ?", channelID).First(&emptyHelpConfig).Error; err == nil {
+					emptyHelpLang = getLang(&emptyHelpConfig)
+				}
+				showHelp(c, emptyHelpLang)
 				return
 			}
 
@@ -285,7 +285,13 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		c.String(200, i18n.TWithLang("ja", "cmd.unknown"))
+		// Try to get language from channel config for fallback message
+	var fallbackConfig models.ChannelConfig
+	fallbackLang := "ja"
+	if err := db.Where("slack_channel_id = ?", channelID).First(&fallbackConfig).Error; err == nil {
+		fallbackLang = getLang(&fallbackConfig)
+	}
+	c.String(200, i18n.TWithLang(fallbackLang, "cmd.unknown"))
 	}
 }
 
@@ -1250,11 +1256,7 @@ func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
 			line += t("common.indefinite")
 		}
 		if r.Reason != "" {
-			if lang == "en" {
-				line += fmt.Sprintf(" (%s)", r.Reason)
-			} else {
-				line += fmt.Sprintf("（%s）", r.Reason)
-			}
+			line += t("common.reason_paren", r.Reason)
 		}
 		response += line + "\n"
 	}
@@ -1308,8 +1310,6 @@ func setLanguage(c *gin.Context, db *gorm.DB, channelID, labelName, newLang stri
 		c.String(200, t("cmd.set_language.invalid"))
 		return
 	}
-	lang := newLang
-
 	var config models.ChannelConfig
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
 	if result.Error != nil {
@@ -1317,21 +1317,29 @@ func setLanguage(c *gin.Context, db *gorm.DB, channelID, labelName, newLang stri
 			ID:             uuid.NewString(),
 			SlackChannelID: channelID,
 			LabelName:      labelName,
-			Language:        lang,
+			Language:        newLang,
 			IsActive:       true,
 			CreatedAt:      time.Now(),
 			UpdatedAt:      time.Now(),
 		}
-		db.Create(&config)
-		t := i18n.L(lang)
-		c.String(200, t("cmd.set_language.set", labelName, lang))
+		if err := db.Create(&config).Error; err != nil {
+			log.Printf("failed to create config for set-language: %v", err)
+			c.String(200, "Error: failed to save language setting")
+			return
+		}
+		t := i18n.L(newLang)
+		c.String(200, t("cmd.set_language.set", labelName, newLang))
 		return
 	}
 
-	config.Language = lang
+	config.Language = newLang
 	config.UpdatedAt = time.Now()
-	db.Save(&config)
+	if err := db.Save(&config).Error; err != nil {
+		log.Printf("failed to update config for set-language: %v", err)
+		c.String(200, "Error: failed to save language setting")
+		return
+	}
 
-	t := i18n.L(lang)
-	c.String(200, t("cmd.set_language.updated", labelName, lang))
+	t := i18n.L(newLang)
+	c.String(200, t("cmd.set_language.updated", labelName, newLang))
 }
