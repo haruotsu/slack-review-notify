@@ -8,6 +8,7 @@ const SLACKHOG = "http://localhost:4112";
 const JA = "C12345";
 const EN = "C67890";
 const JA_OFF = "C1234567890";
+const EN_OFF = "C9876543210";
 
 function slackSig(body: string) {
   const ts = Math.floor(Date.now() / 1000).toString();
@@ -100,10 +101,22 @@ test("full feature screenshots with threads", async ({ page }) => {
   await cmd("set-timezone UTC", EN);
   await cmd("set-required-approvals 2", EN);
 
-  // JA OFF channel: default business hours (09:00-18:00 JST, Saturday = off hours)
+  // JA OFF channel: very narrow business hours to guarantee off-hours
   await cmd("set-mention <@UTEAMOFF>", JA_OFF);
   await cmd("add-repo org/api", JA_OFF);
   await cmd("add-reviewer <@UREV_OFF1>,<@UREV_OFF2>", JA_OFF);
+  await cmd("set-business-hours-start 03:00", JA_OFF);
+  await cmd("set-business-hours-end 03:01", JA_OFF);
+  await cmd("set-timezone UTC", JA_OFF);
+
+  // EN channel: add off-hours label config (separate label with narrow business hours)
+  await cmd("en-off-hours set-mention <@UTEAMENOFF>", EN);
+  await cmd("en-off-hours add-repo org/infra", EN);
+  await cmd("en-off-hours add-reviewer <@UREV_ENOFF1>,<@UREV_ENOFF2>", EN);
+  await cmd("en-off-hours set-language en", EN);
+  await cmd("en-off-hours set-business-hours-start 03:00", EN);
+  await cmd("en-off-hours set-business-hours-end 03:01", EN);
+  await cmd("en-off-hours set-timezone UTC", EN);
 
   // ===================== SCENARIO 1: JA PR labeled =====================
   await wh("pull_request", {
@@ -246,6 +259,18 @@ test("full feature screenshots with threads", async ({ page }) => {
   await openThread(page, 1); // second message
   await shot(page, "10-en-pr-closed");
 
+  // ===================== SCENARIO 11a: EN OFF hours =====================
+  await wh("pull_request", {
+    action: "labeled", label: { name: "en-off-hours" },
+    pull_request: { number: 30, title: "chore: update CI pipeline", html_url: "https://github.com/org/infra/pull/30", state: "open", labels: [{ name: "en-off-hours" }], user: { login: "bob" } },
+    repository: { name: "infra", owner: { login: "org" } },
+  });
+  await sleep(2000);
+
+  await gotoSlackHog(page);
+  await selectCh(page, EN);
+  await shot(page, "14-en-off-hours");
+
   // ===================== SCENARIO 11: JA label removed =====================
   await wh("pull_request", {
     action: "labeled", label: { name: "needs-review" },
@@ -267,25 +292,63 @@ test("full feature screenshots with threads", async ({ page }) => {
   await openThread(page, 2);
   await shot(page, "11-ja-label-removed");
 
-  // ===================== SCENARIO 12: Reminder =====================
+  // ===================== SCENARIO 11c: EN label removed =====================
+  await wh("pull_request", {
+    action: "labeled", label: { name: "needs-review" },
+    pull_request: { number: 12, title: "refactor: extract API client", html_url: "https://github.com/org/frontend/pull/12", state: "open", labels: [{ name: "needs-review" }], user: { login: "bob" } },
+    repository: { name: "frontend", owner: { login: "org" } },
+  });
+  await sleep(2000);
+  await wh("pull_request", {
+    action: "unlabeled", label: { name: "needs-review" },
+    pull_request: { number: 12, title: "refactor: extract API client", html_url: "https://github.com/org/frontend/pull/12", state: "open", labels: [], user: { login: "bob" } },
+    repository: { name: "frontend", owner: { login: "org" } },
+  });
+  await sleep(500);
+
+  await gotoSlackHog(page);
+  await selectCh(page, EN);
+  // Find the label-removed message in EN channel (should be the latest with thread)
+  const enBadges = page.locator(".reply-badge");
+  const enBadgeCnt = await enBadges.count();
+  await openThread(page, enBadgeCnt - 1);
+  await shot(page, "15-en-label-removed");
+
+  // ===================== SCENARIO 12: Reminder (JA + EN) =====================
+  // Create both JA and EN PRs before waiting, so they share the 130s wait
   await wh("pull_request", {
     action: "labeled", label: { name: "needs-review" },
     pull_request: { number: 4, title: "docs: READMEの更新", html_url: "https://github.com/org/backend/pull/4", state: "open", labels: [{ name: "needs-review" }], user: { login: "alice" } },
     repository: { name: "backend", owner: { login: "org" } },
   });
+  await sleep(500);
+  await wh("pull_request", {
+    action: "labeled", label: { name: "needs-review" },
+    pull_request: { number: 99, title: "docs: update API reference", html_url: "https://github.com/org/frontend/pull/99", state: "open", labels: [{ name: "needs-review" }], user: { login: "bob" } },
+    repository: { name: "frontend", owner: { login: "org" } },
+  });
   await sleep(2000);
   console.log("Waiting 130s for reminder...");
   await sleep(130000);
 
+  // JA reminder screenshot
   await gotoSlackHog(page);
   await selectCh(page, JA);
-  // Reminder should be on the last message (PR #4)
   const badges = page.locator(".reply-badge");
   const cnt = await badges.count();
   await openThread(page, cnt - 1);
   await shot(page, "12-ja-reminder");
 
+  // EN reminder screenshot
+  await gotoSlackHog(page);
+  await selectCh(page, EN);
+  const enReminderBadges = page.locator(".reply-badge");
+  const enReminderCnt = await enReminderBadges.count();
+  await openThread(page, enReminderCnt - 1);
+  await shot(page, "16-en-reminder");
+
   // ===================== SCENARIO 13: Overview =====================
+  await closeThread(page);
   await gotoSlackHog(page);
   await shot(page, "13-overview");
 });

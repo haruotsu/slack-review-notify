@@ -2,7 +2,7 @@
 
 **Automatically notify Slack of GitHub PR review requests via labels, assign reviewers, and send reminders.**
 
-> **[日本語](./README_ja.md)** | **[English](./README_en.md)**
+> **[English](./README_en.md)** | **[日本語](./README_ja.md)**
 
 ## Features
 - **Slack command configuration**: Manage all settings directly from Slack
@@ -21,19 +21,34 @@
 
 ## Demo
 
-### PR Notification + Reviewer Auto-Assign
-![](docs/screenshots/02-en-pr-labeled-with-reviewer.png)
+### Review Flow
+![EN Review Flow](docs/gifs/en-review-flow.gif)
 
-### Review Thread (changes requested / commented / re-review)
-![](docs/screenshots/08-en-re-review.png)
+### Other Features
+![Features Overview EN](docs/gifs/en-features-overview.gif)
 
-### PR Closed
-![](docs/screenshots/10-en-pr-closed.png)
+> Per-channel language setting via `/slack-review-notify set-language en|ja`
 
 <details>
-<summary>Real Slack screenshot (Japanese)</summary>
+<summary>All screenshots</summary>
 
-![](images/slack-review-notify-demo.png)
+| # | Feature | Screenshot |
+|---|---------|------------|
+| 1 | PR notification + reviewer (JA) | ![](docs/screenshots/01-ja-pr-labeled-with-reviewer.png) |
+| 2 | PR notification + reviewer (EN) | ![](docs/screenshots/02-en-pr-labeled-with-reviewer.png) |
+| 3 | Off-hours notification (JA) | ![](docs/screenshots/03-ja-off-hours.png) |
+| 4 | Review approved 1/2 (JA thread) | ![](docs/screenshots/04-ja-review-approved-partial.png) |
+| 5 | Fully approved 2/2 (JA thread) | ![](docs/screenshots/05-ja-review-fully-approved.png) |
+| 6 | Changes requested (EN thread) | ![](docs/screenshots/06-en-changes-requested.png) |
+| 7 | Review comment (EN thread) | ![](docs/screenshots/07-en-commented.png) |
+| 8 | Re-review requested (EN thread) | ![](docs/screenshots/08-en-re-review.png) |
+| 9 | PR merged (JA thread) | ![](docs/screenshots/09-ja-pr-merged.png) |
+| 10 | PR closed (EN thread) | ![](docs/screenshots/10-en-pr-closed.png) |
+| 11 | Label removed (JA thread) | ![](docs/screenshots/11-ja-label-removed.png) |
+| 12 | Reminder + pause dropdown (JA) | ![](docs/screenshots/12-ja-reminder.png) |
+| 13 | All channels overview | ![](docs/screenshots/13-overview.png) |
+| 14 | Off-hours notification (EN) | ![](docs/screenshots/14-en-off-hours.png) |
+| 15 | Label removed (EN thread) | ![](docs/screenshots/15-en-label-removed.png) |
 
 </details>
 
@@ -309,7 +324,12 @@ Creating a tag in the `v*` format automatically builds and releases binaries for
 - macOS (amd64, arm64)
 - Windows (amd64)
 
-## Contributing
+## Contributors
+
+<a href="https://github.com/haruotsu/slack-review-notify/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=haruotsu/slack-review-notify" />
+</a>
+
 Stars & PRs welcome. For large changes, please open an issue first to discuss.
 
 ## License

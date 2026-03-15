@@ -2,7 +2,7 @@
 
 **GitHub PRのレビュー依頼をラベルによってSlackに自動通知し、レビュワーのアサインおよびレビューのリマインドを行うツールです。**
 
-> **[日本語](./README_ja.md)** | **[English](./README_en.md)**
+> **[English](./README_en.md)** | **[日本語](./README_ja.md)**
 
 ## 機能
 - **Slackコマンドによる設定管理**: すべての設定をSlackから変更可能
