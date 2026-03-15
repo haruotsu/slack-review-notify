@@ -314,3 +314,184 @@ func TestHandleSlackAction_ChangeReviewer_NoLabelName(t *testing.T) {
 	// Verify that LabelName has been updated to default value
 	assert.Equal(t, "needs-review", updatedTask.LabelName)
 }
+
+// Test that change_reviewer button works correctly with English language setting
+func TestHandleSlackAction_ChangeReviewer_EnglishLanguage(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/action", HandleSlackAction(db))
+
+	// Create config with English language and 2 reviewers
+	config := models.ChannelConfig{
+		ID:               "config-en-1",
+		SlackChannelID:   "C12345",
+		LabelName:        "needs-review",
+		DefaultMentionID: "U00000",
+		ReviewerList:     "U11111,U22222",
+		Language:          "en",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	db.Create(&config)
+
+	// Create task with English language
+	task := models.ReviewTask{
+		ID:           "test-task-en-1",
+		PRURL:        "https://github.com/test/repo/pull/10",
+		Repo:         "test/repo",
+		PRNumber:     10,
+		Title:        "Test PR English",
+		SlackTS:      "9999.1111",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		Reviewer:     "U11111",
+		Reviewers:    "U11111",
+		LabelName:    "needs-review",
+		Language:     "en",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	payload := SlackActionPayload{
+		Type: "block_actions",
+		User: struct {
+			ID string `json:"id"`
+		}{ID: "U99999"},
+		Actions: []struct {
+			ActionID       string `json:"action_id"`
+			Value          string `json:"value,omitempty"`
+			SelectedOption struct {
+				Value string `json:"value"`
+				Text  struct {
+					Text string `json:"text"`
+				} `json:"text"`
+			} `json:"selected_option,omitempty"`
+		}{
+			{
+				ActionID: "change_reviewer",
+				Value:    "test-task-en-1",
+			},
+		},
+		Container: struct {
+			ChannelID string `json:"channel_id"`
+		}{ChannelID: "C12345"},
+		Message: struct {
+			Ts string `json:"ts"`
+		}{Ts: "9999.1111"},
+	}
+
+	payloadJSON, _ := json.Marshal(payload)
+	form := url.Values{}
+	form.Add("payload", string(payloadJSON))
+
+	req := httptest.NewRequest("POST", "/slack/action", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify reviewer was changed
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "test-task-en-1").First(&updatedTask)
+	assert.NotEqual(t, "U11111", updatedTask.Reviewer)
+	assert.Contains(t, []string{"U11111", "U22222"}, updatedTask.Reviewer)
+	// Language should still be English
+	assert.Equal(t, "en", updatedTask.Language)
+}
+
+// Test that single-reviewer "cannot change" message uses correct language
+func TestHandleSlackAction_ChangeReviewer_SingleReviewer_English(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/action", HandleSlackAction(db))
+
+	// Create config with only one reviewer, English language
+	config := models.ChannelConfig{
+		ID:               "config-en-2",
+		SlackChannelID:   "C12345",
+		LabelName:        "needs-review",
+		DefaultMentionID: "U00000",
+		ReviewerList:     "U11111",
+		Language:          "en",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	db.Create(&config)
+
+	// Create task with English language and single reviewer
+	task := models.ReviewTask{
+		ID:           "test-task-en-2",
+		PRURL:        "https://github.com/test/repo/pull/11",
+		Repo:         "test/repo",
+		PRNumber:     11,
+		Title:        "Test PR English Single",
+		SlackTS:      "9999.2222",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		Reviewer:     "U11111",
+		LabelName:    "needs-review",
+		Language:     "en",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	payload := SlackActionPayload{
+		Type: "block_actions",
+		User: struct {
+			ID string `json:"id"`
+		}{ID: "U99999"},
+		Actions: []struct {
+			ActionID       string `json:"action_id"`
+			Value          string `json:"value,omitempty"`
+			SelectedOption struct {
+				Value string `json:"value"`
+				Text  struct {
+					Text string `json:"text"`
+				} `json:"text"`
+			} `json:"selected_option,omitempty"`
+		}{
+			{
+				ActionID: "change_reviewer",
+				Value:    "test-task-en-2",
+			},
+		},
+		Container: struct {
+			ChannelID string `json:"channel_id"`
+		}{ChannelID: "C12345"},
+		Message: struct {
+			Ts string `json:"ts"`
+		}{Ts: "9999.2222"},
+	}
+
+	payloadJSON, _ := json.Marshal(payload)
+	form := url.Values{}
+	form.Add("payload", string(payloadJSON))
+
+	req := httptest.NewRequest("POST", "/slack/action", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// Should succeed (message posted to thread in test mode)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Reviewer should NOT have changed (only one registered)
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "test-task-en-2").First(&updatedTask)
+	assert.Equal(t, "U11111", updatedTask.Reviewer)
+}

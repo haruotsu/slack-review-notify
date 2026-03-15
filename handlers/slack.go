@@ -3,13 +3,13 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"slack-review-notify/i18n"
 	"slack-review-notify/models"
 	"slack-review-notify/services"
 
@@ -195,7 +195,8 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			// Post review completion notification to thread
-			message := fmt.Sprintf("✅ <@%s> さんがレビューを完了しました！感謝！👏", slackUserID)
+			t := i18n.L(task.Language)
+			message := t("notify.review_done_button", slackUserID)
 			if err := services.PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
 				log.Printf("review done notification error: %v", err)
 			}
@@ -271,7 +272,8 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			if noRealCandidate {
-				message := "レビュワーが1人しか登録されていないため、変更できません。他のレビュワーを登録してください。"
+				t := i18n.L(taskToUpdate.Language)
+				message := t("notify.cannot_change_reviewer")
 				if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
 					log.Printf("notification error: %v", err)
 				}

@@ -20,6 +20,7 @@ type ChannelConfig struct {
 	BusinessHoursStart       string `gorm:"default:'09:00'"`      // Business hours start (HH:MM format)
 	BusinessHoursEnd         string `gorm:"default:'18:00'"`      // Business hours end (HH:MM format)
 	Timezone                 string `gorm:"default:'Asia/Tokyo'"` // Timezone (default: JST)
+	Language                 string `gorm:"default:'ja'"`         // Language for messages (ja, en)
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
 	DeletedAt                gorm.DeletedAt `gorm:"index"`

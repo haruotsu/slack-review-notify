@@ -29,6 +29,28 @@
 
 > Per-channel language setting via `/slack-review-notify set-language en|ja`
 
+<details>
+<summary>All screenshots</summary>
+
+| # | Feature | Screenshot |
+|---|---------|------------|
+| 1 | PR notification + reviewer (JA) | ![](docs/screenshots/01-ja-pr-labeled-with-reviewer.png) |
+| 2 | PR notification + reviewer (EN) | ![](docs/screenshots/02-en-pr-labeled-with-reviewer.png) |
+| 3 | Off-hours notification (JA) | ![](docs/screenshots/03-ja-off-hours.png) |
+| 4 | Review approved 1/2 (JA thread) | ![](docs/screenshots/04-ja-review-approved-partial.png) |
+| 5 | Fully approved 2/2 (JA thread) | ![](docs/screenshots/05-ja-review-fully-approved.png) |
+| 6 | Changes requested (EN thread) | ![](docs/screenshots/06-en-changes-requested.png) |
+| 7 | Review comment (EN thread) | ![](docs/screenshots/07-en-commented.png) |
+| 8 | Re-review requested (EN thread) | ![](docs/screenshots/08-en-re-review.png) |
+| 9 | PR merged (JA thread) | ![](docs/screenshots/09-ja-pr-merged.png) |
+| 10 | PR closed (EN thread) | ![](docs/screenshots/10-en-pr-closed.png) |
+| 11 | Label removed (JA thread) | ![](docs/screenshots/11-ja-label-removed.png) |
+| 12 | Reminder + pause dropdown (JA) | ![](docs/screenshots/12-ja-reminder.png) |
+| 13 | All channels overview | ![](docs/screenshots/13-overview.png) |
+| 14 | Off-hours notification (EN) | ![](docs/screenshots/14-en-off-hours.png) |
+| 15 | Label removed (EN thread) | ![](docs/screenshots/15-en-label-removed.png) |
+
+</details>
 
 ## Setup
 ### GitHub Configuration
@@ -208,7 +230,7 @@ Set up user mappings first so PR authors receive thread notifications.
 
 ## Development
 
-### Development with SlackHog
+### Development with SlackHog (Slack API Mock)
 
 [SlackHog](https://github.com/harakeishi/slackhog) is a Slack API mock server that lets you develop and test without a real Slack workspace.
 
@@ -263,6 +285,12 @@ npx playwright test full-screenshot.test.ts --timeout=300000
 
 ### Deployment
 Run the application on Kubernetes, AWS EC2, or any environment you prefer.
+
+#### Release Workflow (triggered by tag creation)
+Creating a tag in the `v*` format automatically builds and releases binaries for:
+- Linux (amd64)
+- macOS (amd64, arm64)
+- Windows (amd64)
 
 ## Contributors
 

@@ -3,6 +3,8 @@ package services
 import (
 	"reflect"
 	"testing"
+
+	"slack-review-notify/i18n"
 )
 
 func TestNewSlackBlockBuilder(t *testing.T) {
@@ -195,7 +197,7 @@ func TestCreatePauseReminderSelect(t *testing.T) {
 		{Text: "完全停止", Value: "stop"},
 	}
 
-	selectElement := CreatePauseReminderSelect("task123", "pause_action", "選択してください", options)
+	selectElement := CreatePauseReminderSelect("task123", "pause_action", "選択してください", "ja", options)
 
 	expected := map[string]interface{}{
 		"type": "static_select",
@@ -228,28 +230,29 @@ func TestCreatePauseReminderSelect(t *testing.T) {
 }
 
 func TestCreateAllOptionsPauseReminderSelect(t *testing.T) {
-	selectElement := CreateAllOptionsPauseReminderSelect("task123", "pause_action", "選択...")
+	selectElement := CreateAllOptionsPauseReminderSelect("task123", "pause_action", "選択...", "ja")
 
-	// Check that AllPauseOptions is used correctly
+	// Check that GetAllPauseOptions() is used correctly
+	allOptions := GetAllPauseOptions("ja")
 	options, ok := selectElement["options"].([]map[string]interface{})
 	if !ok {
 		t.Fatal("options should be a slice of maps")
 	}
 
-	if len(options) != len(AllPauseOptions) {
-		t.Errorf("expected %d options, got %d", len(AllPauseOptions), len(options))
+	if len(options) != len(allOptions) {
+		t.Errorf("expected %d options, got %d", len(allOptions), len(options))
 	}
 
 	// Check the first option
 	firstOption := options[0]
-	expectedValue := "task123:" + AllPauseOptions[0].Value
+	expectedValue := "task123:" + allOptions[0].Value
 	if firstOption["value"] != expectedValue {
 		t.Errorf("expected first option value %s, got %v", expectedValue, firstOption["value"])
 	}
 }
 
 func TestCreateStopOnlyPauseReminderSelect(t *testing.T) {
-	selectElement := CreateStopOnlyPauseReminderSelect("task123", "pause_action", "完全停止")
+	selectElement := CreateStopOnlyPauseReminderSelect("task123", "pause_action", "完全停止", "ja")
 
 	options, ok := selectElement["options"].([]map[string]interface{})
 	if !ok {
@@ -267,12 +270,27 @@ func TestCreateStopOnlyPauseReminderSelect(t *testing.T) {
 }
 
 func TestCreateChangeReviewerButton(t *testing.T) {
-	button := CreateChangeReviewerButton("task123")
+	button := CreateChangeReviewerButton("task123", "ja")
 
-	expected := CreateButton("変わってほしい！", "change_reviewer", "task123", "danger")
+	expected := CreateButton(i18n.TWithLang("ja", "button.change_reviewer"), "change_reviewer", "task123", "danger")
 
 	if !reflect.DeepEqual(button, expected) {
 		t.Errorf("expected %+v, got %+v", expected, button)
+	}
+}
+
+func TestCreateChangeReviewerButton_English(t *testing.T) {
+	button := CreateChangeReviewerButton("task456", "en")
+
+	text := button["text"].(map[string]interface{})
+	if text["text"] != "Change Reviewer!" {
+		t.Errorf("expected 'Change Reviewer!', got %v", text["text"])
+	}
+	if button["action_id"] != "change_reviewer" {
+		t.Errorf("expected action_id 'change_reviewer', got %v", button["action_id"])
+	}
+	if button["value"] != "task456" {
+		t.Errorf("expected value 'task456', got %v", button["value"])
 	}
 }
 
@@ -367,11 +385,11 @@ func TestCreatePauseReminderSelect_EmptyValues(t *testing.T) {
 		{Text: "停止", Value: "stop"},
 	}
 
-	selectElement := CreatePauseReminderSelect("", "", "", options)
+	selectElement := CreatePauseReminderSelect("", "", "", "ja", options)
 
 	// Verify that default values are set for taskID and placeholder
 	placeholderObj := selectElement["placeholder"].(map[string]interface{})
-	if placeholderObj["text"] != "選択してください" {
+	if placeholderObj["text"] != i18n.TWithLang("ja", "common.select_placeholder") {
 		t.Errorf("expected default placeholder, got %v", placeholderObj["text"])
 	}
 

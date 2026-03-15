@@ -22,7 +22,8 @@ type ReviewTask struct {
 	LabelName           string
 	WatchingUntil       *time.Time
 	ReminderPausedUntil *time.Time
-	OutOfHoursReminded  bool // Flag indicating whether reminders were automatically paused outside business hours
+	OutOfHoursReminded  bool   // Flag indicating whether reminders were automatically paused outside business hours
+	Language            string // Language for messages (copied from ChannelConfig)
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	DeletedAt           gorm.DeletedAt `gorm:"index"`
