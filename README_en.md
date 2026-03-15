@@ -230,38 +230,6 @@ Set up user mappings first so PR authors receive thread notifications.
 
 ## Development
 
-### Local Development
-```bash
-# Install dependencies
-make deps
-
-# Dev server with hot reload
-make dev
-
-# Build binary
-make build
-
-# Run the application (after build)
-make run
-
-# Run tests
-make test
-
-# Run tests with coverage
-make test-coverage
-
-# Run linter
-make lint
-
-# Install golangci-lint (first time only)
-make lint-install
-
-# Cleanup (remove build artifacts and DB files)
-make clean
-```
-
-Port: 8080
-
 ### Development with SlackHog (Slack API Mock)
 
 [SlackHog](https://github.com/harakeishi/slackhog) is a Slack API mock server that lets you develop and test without a real Slack workspace.

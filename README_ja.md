@@ -227,39 +227,6 @@ PR作成者にもスレッド通知が届くようにするため、最初にユ
 ```
 
 ## 開発
-
-### ローカルでの開発方法
-```bash
-# 依存関係のインストール
-make deps
-
-# 開発サーバーの実行（ホットリロード）
-make dev
-
-# バイナリのビルド
-make build
-
-# アプリケーションの実行（ビルド後）
-make run
-
-# テストの実行
-make test
-
-# カバレッジ付きテスト
-make test-coverage
-
-# Lintの実行
-make lint
-
-# golangci-lintのインストール（初回のみ）
-make lint-install
-
-# クリーンアップ（ビルド成果物とDBファイルを削除）
-make clean
-```
-
-ポートは8080です。
-
 ### SlackHogを使った開発 (Slack APIモック)
 
 [SlackHog](https://github.com/harakeishi/slackhog) はSlack APIのモックサーバーです。実際のSlackワークスペースなしで開発・テストができます。
