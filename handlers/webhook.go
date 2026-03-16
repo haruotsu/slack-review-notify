@@ -528,6 +528,31 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			log.Printf("task reactivated for re-review: id=%s, repo=%s, pr=%d", latestTask.ID, repoFullName, pr.GetNumber())
 		}
 
+		// Update Reviewers list: add re-requested reviewer and remove their approval
+		if reviewerSlackID != "" {
+			updates := map[string]interface{}{
+				"updated_at": time.Now(),
+			}
+
+			// Add reviewer to Reviewers list if not already present
+			if services.AddReviewer(&latestTask, reviewerSlackID) {
+				updates["reviewers"] = latestTask.Reviewers
+				log.Printf("added reviewer %s to task reviewers: id=%s", reviewerSlackID, latestTask.ID)
+			}
+
+			// Remove from ApprovedBy if previously approved (re-request means new review needed)
+			if services.RemoveApproval(&latestTask, reviewerSlackID) {
+				updates["approved_by"] = latestTask.ApprovedBy
+				log.Printf("removed approval from %s for re-review: id=%s", reviewerSlackID, latestTask.ID)
+			}
+
+			if len(updates) > 1 { // more than just updated_at
+				if err := db.Model(&models.ReviewTask{}).Where("id = ?", latestTask.ID).Updates(updates).Error; err != nil {
+					log.Printf("failed to update reviewers for re-review: %v", err)
+				}
+			}
+		}
+
 		// Post re-review request notification to thread
 		t := i18n.L(latestTask.Language)
 		message := t("notify.re_review_requested", senderMention, reviewerMention)

@@ -974,3 +974,29 @@ func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
 		}
 	}
 }
+
+func TestAddReviewer(t *testing.T) {
+	t.Run("adds reviewer to empty Reviewers", func(t *testing.T) {
+		task := models.ReviewTask{Reviewers: ""}
+		assert.True(t, AddReviewer(&task, "U1"))
+		assert.Equal(t, "U1", task.Reviewers)
+	})
+
+	t.Run("adds reviewer to existing Reviewers", func(t *testing.T) {
+		task := models.ReviewTask{Reviewers: "U1,U2"}
+		assert.True(t, AddReviewer(&task, "U3"))
+		assert.Equal(t, "U1,U2,U3", task.Reviewers)
+	})
+
+	t.Run("does not add duplicate reviewer", func(t *testing.T) {
+		task := models.ReviewTask{Reviewers: "U1,U2"}
+		assert.False(t, AddReviewer(&task, "U2"))
+		assert.Equal(t, "U1,U2", task.Reviewers)
+	})
+
+	t.Run("returns false for empty slackUserID", func(t *testing.T) {
+		task := models.ReviewTask{Reviewers: "U1"}
+		assert.False(t, AddReviewer(&task, ""))
+		assert.Equal(t, "U1", task.Reviewers)
+	})
+}

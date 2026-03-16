@@ -272,6 +272,24 @@ func RemoveApproval(task *models.ReviewTask, slackUserID string) bool {
 	return true
 }
 
+// AddReviewer adds a reviewer to task.Reviewers (preventing duplicates). Returns true if newly added
+func AddReviewer(task *models.ReviewTask, slackUserID string) bool {
+	if slackUserID == "" {
+		return false
+	}
+
+	if isInCSV(task.Reviewers, slackUserID) {
+		return false
+	}
+
+	if task.Reviewers != "" {
+		task.Reviewers = task.Reviewers + "," + slackUserID
+	} else {
+		task.Reviewers = slackUserID
+	}
+	return true
+}
+
 // CountApprovals returns the number of approvals in task.ApprovedBy
 func CountApprovals(task models.ReviewTask) int {
 	if task.ApprovedBy == "" {

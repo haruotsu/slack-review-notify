@@ -1950,6 +1950,183 @@ func TestHandleReviewRequestedEvent_InReviewTask(t *testing.T) {
 	assert.True(t, gock.IsDone(), "Re-request notification should be sent to Slack")
 }
 
+func TestHandleReviewRequestedEvent_UpdatesReviewers(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// Create user mapping for the re-requested reviewer
+	db.Create(&models.UserMapping{
+		ID:             "mapping-1",
+		GithubUsername: "new-reviewer",
+		SlackUserID:    "UNEW",
+	})
+
+	// Create in_review task with existing reviewers
+	task := models.ReviewTask{
+		ID:           "reviewers-update-task",
+		PRURL:        "https://github.com/owner/repo/pull/400",
+		Repo:         "owner/repo",
+		PRNumber:     400,
+		Title:        "Test PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		Reviewers:    "UOLD1,UOLD2",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "review_requested",
+		"pull_request": {"number": 400, "html_url": "https://github.com/owner/repo/pull/400"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"},
+		"requested_reviewer": {"login": "new-reviewer"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Reviewer should be added to Reviewers list
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "reviewers-update-task").First(&updatedTask)
+	assert.Equal(t, "UOLD1,UOLD2,UNEW", updatedTask.Reviewers)
+}
+
+func TestHandleReviewRequestedEvent_RemovesApprovalOnReRequest(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// Create user mapping
+	db.Create(&models.UserMapping{
+		ID:             "mapping-2",
+		GithubUsername: "approved-reviewer",
+		SlackUserID:    "UAPPROVED",
+	})
+
+	// Create task where reviewer already approved
+	task := models.ReviewTask{
+		ID:           "approval-reset-task",
+		PRURL:        "https://github.com/owner/repo/pull/401",
+		Repo:         "owner/repo",
+		PRNumber:     401,
+		Title:        "Test PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		Reviewers:    "UAPPROVED,UOTHER",
+		ApprovedBy:   "UAPPROVED",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "review_requested",
+		"pull_request": {"number": 401, "html_url": "https://github.com/owner/repo/pull/401"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"},
+		"requested_reviewer": {"login": "approved-reviewer"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Approval should be removed (re-request means new review needed)
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "approval-reset-task").First(&updatedTask)
+	assert.Equal(t, "", updatedTask.ApprovedBy)
+	// Reviewers should remain unchanged (already present)
+	assert.Equal(t, "UAPPROVED,UOTHER", updatedTask.Reviewers)
+}
+
+func TestHandleReviewRequestedEvent_NoMappingSkipsReviewerUpdate(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// No user mapping created - reviewer has no Slack mapping
+
+	task := models.ReviewTask{
+		ID:           "no-mapping-task",
+		PRURL:        "https://github.com/owner/repo/pull/402",
+		Repo:         "owner/repo",
+		PRNumber:     402,
+		Title:        "Test PR",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		Reviewers:    "UOLD1",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "review_requested",
+		"pull_request": {"number": 402, "html_url": "https://github.com/owner/repo/pull/402"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"},
+		"requested_reviewer": {"login": "unknown-reviewer"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Reviewers should remain unchanged when no mapping exists
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "no-mapping-task").First(&updatedTask)
+	assert.Equal(t, "UOLD1", updatedTask.Reviewers)
+}
+
 func TestHandleReviewSubmittedEvent_DismissedOnlyUpdatesApprovedBy(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
