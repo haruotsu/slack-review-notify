@@ -546,10 +546,8 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 				log.Printf("removed approval from %s for re-review: id=%s", reviewerSlackID, latestTask.ID)
 			}
 
-			if len(updates) > 1 { // more than just updated_at
-				if err := db.Model(&models.ReviewTask{}).Where("id = ?", latestTask.ID).Updates(updates).Error; err != nil {
-					log.Printf("failed to update reviewers for re-review: %v", err)
-				}
+			if err := db.Model(&models.ReviewTask{}).Where("id = ?", latestTask.ID).Updates(updates).Error; err != nil {
+				log.Printf("failed to update reviewers for re-review: %v", err)
 			}
 		}
 
