@@ -605,3 +605,200 @@ func TestHandleSlackAction_ChangeReviewer_AlsoReplacesAwayReviewers(t *testing.T
 			"new reviewers should be from available candidates")
 	}
 }
+
+// Test that non-away reviewers are NOT replaced (only the clicked one is)
+func TestHandleSlackAction_ChangeReviewer_NoAwayReviewers(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/action", HandleSlackAction(db))
+
+	config := models.ChannelConfig{
+		ID:               "config-noaway-1",
+		SlackChannelID:   "C12345",
+		LabelName:        "needs-review",
+		DefaultMentionID: "U00000",
+		ReviewerList:     "U11111,U22222,U33333,U44444",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	db.Create(&config)
+
+	// Task with 2 reviewers, neither is away
+	task := models.ReviewTask{
+		ID:           "test-task-noaway-1",
+		PRURL:        "https://github.com/test/repo/pull/30",
+		Repo:         "test/repo",
+		PRNumber:     30,
+		Title:        "Test PR No Away",
+		SlackTS:      "6666.1111",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		Reviewer:     "U11111",
+		Reviewers:    "U11111,U22222",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	payload := SlackActionPayload{
+		Type: "block_actions",
+		User: struct {
+			ID string `json:"id"`
+		}{ID: "U99999"},
+		Actions: []struct {
+			ActionID       string `json:"action_id"`
+			Value          string `json:"value,omitempty"`
+			SelectedOption struct {
+				Value string `json:"value"`
+				Text  struct {
+					Text string `json:"text"`
+				} `json:"text"`
+			} `json:"selected_option,omitempty"`
+		}{
+			{
+				ActionID: "change_reviewer",
+				Value:    "test-task-noaway-1:U11111",
+			},
+		},
+		Container: struct {
+			ChannelID string `json:"channel_id"`
+		}{ChannelID: "C12345"},
+		Message: struct {
+			Ts string `json:"ts"`
+		}{Ts: "6666.1111"},
+	}
+
+	payloadJSON, _ := json.Marshal(payload)
+	form := url.Values{}
+	form.Add("payload", string(payloadJSON))
+
+	req := httptest.NewRequest("POST", "/slack/action", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "test-task-noaway-1").First(&updatedTask)
+
+	reviewerIDs := strings.Split(updatedTask.Reviewers, ",")
+	assert.Equal(t, 2, len(reviewerIDs), "should still have 2 reviewers")
+
+	// U11111 (clicked) should be replaced, U22222 (not away) should remain
+	assert.NotEqual(t, "U11111", strings.TrimSpace(reviewerIDs[0]),
+		"U11111 should be replaced")
+	assert.Equal(t, "U22222", strings.TrimSpace(reviewerIDs[1]),
+		"U22222 should remain (not away)")
+}
+
+// Test partial replacement when not enough candidates for all away reviewers
+func TestHandleSlackAction_ChangeReviewer_PartialReplacementWhenCandidatesInsufficient(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/action", HandleSlackAction(db))
+
+	// Only 3 reviewers total, 2 assigned, need to replace 2 but only 1 candidate left
+	config := models.ChannelConfig{
+		ID:               "config-partial-1",
+		SlackChannelID:   "C12345",
+		LabelName:        "needs-review",
+		DefaultMentionID: "U00000",
+		ReviewerList:     "U11111,U22222,U33333",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	db.Create(&config)
+
+	task := models.ReviewTask{
+		ID:           "test-task-partial-1",
+		PRURL:        "https://github.com/test/repo/pull/40",
+		Repo:         "test/repo",
+		PRNumber:     40,
+		Title:        "Test PR Partial",
+		SlackTS:      "7777.1111",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		Reviewer:     "U11111",
+		Reviewers:    "U11111,U22222",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	// U22222 is away
+	away := models.ReviewerAvailability{
+		ID:          "away-partial-1",
+		SlackUserID: "U22222",
+		AwayUntil:   nil,
+		Reason:      "vacation",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	db.Create(&away)
+
+	payload := SlackActionPayload{
+		Type: "block_actions",
+		User: struct {
+			ID string `json:"id"`
+		}{ID: "U99999"},
+		Actions: []struct {
+			ActionID       string `json:"action_id"`
+			Value          string `json:"value,omitempty"`
+			SelectedOption struct {
+				Value string `json:"value"`
+				Text  struct {
+					Text string `json:"text"`
+				} `json:"text"`
+			} `json:"selected_option,omitempty"`
+		}{
+			{
+				ActionID: "change_reviewer",
+				Value:    "test-task-partial-1:U11111",
+			},
+		},
+		Container: struct {
+			ChannelID string `json:"channel_id"`
+		}{ChannelID: "C12345"},
+		Message: struct {
+			Ts string `json:"ts"`
+		}{Ts: "7777.1111"},
+	}
+
+	payloadJSON, _ := json.Marshal(payload)
+	form := url.Values{}
+	form.Add("payload", string(payloadJSON))
+
+	req := httptest.NewRequest("POST", "/slack/action", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "test-task-partial-1").First(&updatedTask)
+
+	// U11111 (clicked) should be replaced with U33333 (only candidate)
+	// U22222 (away) cannot be replaced (no more candidates), stays as is
+	reviewerIDs := strings.Split(updatedTask.Reviewers, ",")
+	assert.Equal(t, 2, len(reviewerIDs), "should still have 2 reviewers")
+	assert.Equal(t, "U33333", strings.TrimSpace(reviewerIDs[0]),
+		"U11111 should be replaced with U33333")
+	assert.Equal(t, "U22222", strings.TrimSpace(reviewerIDs[1]),
+		"U22222 stays because no more candidates available")
+}

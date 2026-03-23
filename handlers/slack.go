@@ -313,9 +313,17 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			// Build a mapping of old -> new reviewer replacements
-			newIdx := 0
+			// Assign explicit replacement first to ensure deterministic mapping
 			replacementMap := make(map[string]string) // old ID -> new ID
+			newIdx := 0
+			if newIdx < len(newReviewerIDs) {
+				replacementMap[explicitReplace] = newReviewerIDs[newIdx]
+				newIdx++
+			}
 			for oldID := range replaceSet {
+				if oldID == explicitReplace {
+					continue
+				}
 				if newIdx < len(newReviewerIDs) {
 					replacementMap[oldID] = newReviewerIDs[newIdx]
 					newIdx++
