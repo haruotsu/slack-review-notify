@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -320,10 +321,15 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				replacementMap[explicitReplace] = newReviewerIDs[newIdx]
 				newIdx++
 			}
+			// Sort remaining IDs for deterministic assignment
+			var remainingOldIDs []string
 			for oldID := range replaceSet {
-				if oldID == explicitReplace {
-					continue
+				if oldID != explicitReplace {
+					remainingOldIDs = append(remainingOldIDs, oldID)
 				}
+			}
+			sort.Strings(remainingOldIDs)
+			for _, oldID := range remainingOldIDs {
 				if newIdx < len(newReviewerIDs) {
 					replacementMap[oldID] = newReviewerIDs[newIdx]
 					newIdx++
