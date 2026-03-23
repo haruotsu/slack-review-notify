@@ -240,23 +240,54 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				db.Save(&taskToUpdate)
 			}
 
-			// Exclusions: PR author + other current reviewers
+			// Build the set of reviewers to replace:
+			// 1. The explicitly clicked reviewer (replacingReviewerID or taskToUpdate.Reviewer)
+			// 2. Any other current reviewers who are now away
+			awayIDs := services.GetAwayUserIDs(db)
+			awaySet := make(map[string]bool)
+			for _, id := range awayIDs {
+				if id != "" {
+					awaySet[id] = true
+				}
+			}
+
+			// Determine which reviewer was explicitly requested to replace
+			explicitReplace := replacingReviewerID
+			if explicitReplace == "" {
+				explicitReplace = taskToUpdate.Reviewer
+			}
+
+			// Collect all reviewer IDs that need replacement (explicit + away)
+			replaceSet := make(map[string]bool)
+			replaceSet[explicitReplace] = true
+
+			var currentReviewerList []string
+			if taskToUpdate.Reviewers != "" {
+				for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
+					if trimmed := strings.TrimSpace(id); trimmed != "" {
+						currentReviewerList = append(currentReviewerList, trimmed)
+						if awaySet[trimmed] {
+							replaceSet[trimmed] = true
+						}
+					}
+				}
+			} else if taskToUpdate.Reviewer != "" {
+				currentReviewerList = []string{taskToUpdate.Reviewer}
+			}
+
+			replacementCount := len(replaceSet)
+
+			// Exclusions: PR author + all current reviewers (including those being replaced)
 			excludeIDs := []string{}
 			if taskToUpdate.PRAuthorSlackID != "" {
 				excludeIDs = append(excludeIDs, taskToUpdate.PRAuthorSlackID)
 			}
-			if taskToUpdate.Reviewers != "" {
-				for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
-					if trimmed := strings.TrimSpace(id); trimmed != "" {
-						excludeIDs = append(excludeIDs, trimmed)
-					}
-				}
-			} else if taskToUpdate.Reviewer != "" {
-				excludeIDs = append(excludeIDs, taskToUpdate.Reviewer)
+			for _, id := range currentReviewerList {
+				excludeIDs = append(excludeIDs, id)
 			}
 
-			// Select one new reviewer
-			newReviewerIDs := services.SelectRandomReviewers(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName, 1, excludeIDs)
+			// Select enough new reviewers to replace all
+			newReviewerIDs := services.SelectRandomReviewers(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName, replacementCount, excludeIDs)
 
 			// No real candidates if SelectRandomReviewers only returned DefaultMentionID
 			noRealCandidate := false
@@ -280,50 +311,61 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				c.Status(http.StatusOK)
 				return
 			}
-			newReviewerID := newReviewerIDs[0]
 
-			// Save the old reviewer ID
-			oldReviewerID := taskToUpdate.Reviewer
-
-			// Update the Reviewers field
-			if replacingReviewerID != "" && taskToUpdate.Reviewers != "" {
-				// Replace a specific reviewer
-				var updatedReviewers []string
-				for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
-					trimmed := strings.TrimSpace(id)
-					if trimmed == replacingReviewerID {
-						updatedReviewers = append(updatedReviewers, newReviewerID)
-					} else {
-						updatedReviewers = append(updatedReviewers, trimmed)
-					}
-				}
-				taskToUpdate.Reviewers = strings.Join(updatedReviewers, ",")
-				oldReviewerID = replacingReviewerID
-			} else {
-				// Backward compatibility: single reviewer change
-				if taskToUpdate.Reviewers != "" {
-					var updatedReviewers []string
-					for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
-						trimmed := strings.TrimSpace(id)
-						if trimmed == taskToUpdate.Reviewer {
-							updatedReviewers = append(updatedReviewers, newReviewerID)
-						} else {
-							updatedReviewers = append(updatedReviewers, trimmed)
-						}
-					}
-					taskToUpdate.Reviewers = strings.Join(updatedReviewers, ",")
+			// Build a mapping of old -> new reviewer replacements
+			newIdx := 0
+			replacementMap := make(map[string]string) // old ID -> new ID
+			for oldID := range replaceSet {
+				if newIdx < len(newReviewerIDs) {
+					replacementMap[oldID] = newReviewerIDs[newIdx]
+					newIdx++
 				}
 			}
 
-			// Update the Reviewer field (backward compatibility)
-			taskToUpdate.Reviewer = newReviewerID
+			// Save the old reviewer ID for notification
+			oldReviewerID := taskToUpdate.Reviewer
+			if replacingReviewerID != "" {
+				oldReviewerID = replacingReviewerID
+			}
+
+			// Update the Reviewers field by replacing all matched reviewers
+			if len(currentReviewerList) > 0 {
+				var updatedReviewers []string
+				for _, id := range currentReviewerList {
+					if newID, ok := replacementMap[id]; ok {
+						updatedReviewers = append(updatedReviewers, newID)
+					} else {
+						updatedReviewers = append(updatedReviewers, id)
+					}
+				}
+				taskToUpdate.Reviewers = strings.Join(updatedReviewers, ",")
+			}
+
+			// Update the Reviewer field (backward compatibility): use the replacement for the explicit one
+			if newID, ok := replacementMap[explicitReplace]; ok {
+				taskToUpdate.Reviewer = newID
+			} else if len(newReviewerIDs) > 0 {
+				taskToUpdate.Reviewer = newReviewerIDs[0]
+			}
+
 			taskToUpdate.UpdatedAt = time.Now()
 			db.Save(&taskToUpdate)
 
-			// Notify that the reviewer has been changed
+			// Notify that the reviewer has been changed (for the explicit replacement)
 			err := services.SendReviewerChangedMessage(taskToUpdate, oldReviewerID)
 			if err != nil {
 				log.Printf("reviewer change notification error: %v", err)
+			}
+
+			// Notify for each additional away reviewer that was replaced
+			for oldID, newID := range replacementMap {
+				if oldID != explicitReplace {
+					awayTask := taskToUpdate
+					awayTask.Reviewer = newID
+					if notifyErr := services.SendReviewerChangedMessage(awayTask, oldID); notifyErr != nil {
+						log.Printf("away reviewer change notification error: %v", notifyErr)
+					}
+				}
 			}
 
 			c.Status(http.StatusOK)

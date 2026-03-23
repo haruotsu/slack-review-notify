@@ -495,3 +495,113 @@ func TestHandleSlackAction_ChangeReviewer_SingleReviewer_English(t *testing.T) {
 	db.Where("id = ?", "test-task-en-2").First(&updatedTask)
 	assert.Equal(t, "U11111", updatedTask.Reviewer)
 }
+
+// Test that away reviewers are also replaced when "change reviewer" button is clicked
+func TestHandleSlackAction_ChangeReviewer_AlsoReplacesAwayReviewers(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/action", HandleSlackAction(db))
+
+	// Create config with 5 reviewers
+	config := models.ChannelConfig{
+		ID:               "config-away-1",
+		SlackChannelID:   "C12345",
+		LabelName:        "needs-review",
+		DefaultMentionID: "U00000",
+		ReviewerList:     "U11111,U22222,U33333,U44444,U55555",
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	db.Create(&config)
+
+	// Create task with 2 reviewers assigned: U11111 and U22222
+	task := models.ReviewTask{
+		ID:           "test-task-away-1",
+		PRURL:        "https://github.com/test/repo/pull/20",
+		Repo:         "test/repo",
+		PRNumber:     20,
+		Title:        "Test PR Away",
+		SlackTS:      "5555.1111",
+		SlackChannel: "C12345",
+		Status:       "in_review",
+		Reviewer:     "U11111",
+		Reviewers:    "U11111,U22222",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	// Set U22222 as away (on vacation)
+	away := models.ReviewerAvailability{
+		ID:          "away-1",
+		SlackUserID: "U22222",
+		AwayUntil:   nil, // indefinitely away
+		Reason:      "vacation",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	db.Create(&away)
+
+	// Click "change reviewer" for U11111 (replacingReviewerID = U11111)
+	payload := SlackActionPayload{
+		Type: "block_actions",
+		User: struct {
+			ID string `json:"id"`
+		}{ID: "U99999"},
+		Actions: []struct {
+			ActionID       string `json:"action_id"`
+			Value          string `json:"value,omitempty"`
+			SelectedOption struct {
+				Value string `json:"value"`
+				Text  struct {
+					Text string `json:"text"`
+				} `json:"text"`
+			} `json:"selected_option,omitempty"`
+		}{
+			{
+				ActionID: "change_reviewer",
+				Value:    "test-task-away-1:U11111", // replacing U11111
+			},
+		},
+		Container: struct {
+			ChannelID string `json:"channel_id"`
+		}{ChannelID: "C12345"},
+		Message: struct {
+			Ts string `json:"ts"`
+		}{Ts: "5555.1111"},
+	}
+
+	payloadJSON, _ := json.Marshal(payload)
+	form := url.Values{}
+	form.Add("payload", string(payloadJSON))
+
+	req := httptest.NewRequest("POST", "/slack/action", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "test-task-away-1").First(&updatedTask)
+
+	// Both U11111 (clicked) and U22222 (away) should be replaced
+	reviewerIDs := strings.Split(updatedTask.Reviewers, ",")
+	assert.Equal(t, 2, len(reviewerIDs), "should still have 2 reviewers")
+
+	for _, id := range reviewerIDs {
+		trimmed := strings.TrimSpace(id)
+		assert.NotEqual(t, "U11111", trimmed, "U11111 (clicked) should be replaced")
+		assert.NotEqual(t, "U22222", trimmed, "U22222 (away) should also be replaced")
+		// Should be from the remaining candidates: U33333, U44444, U55555
+		assert.Contains(t, []string{"U33333", "U44444", "U55555"}, trimmed,
+			"new reviewers should be from available candidates")
+	}
+}
