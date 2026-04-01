@@ -535,7 +535,8 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			labelName = "needs-review"
 		}
 		if err := db.Where("slack_channel_id = ? AND label_name = ?", latestTask.SlackChannel, labelName).First(&config).Error; err == nil {
-			if !services.IsWithinBusinessHours(&config, time.Now()) {
+			now := time.Now()
+			if !services.IsWithinBusinessHours(&config, now) {
 				// Outside business hours: append to pending sender/reviewer (support multiple re-reviews)
 				var current models.ReviewTask
 				if err := db.Where("id = ?", latestTask.ID).First(&current).Error; err != nil {
@@ -548,14 +549,21 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					newSender = current.PendingReReviewSender + "," + senderMention
 					newReviewer = current.PendingReReviewReviewer + "," + reviewerMention
 				}
-				result := db.Model(&models.ReviewTask{}).Where("id = ?", latestTask.ID).Updates(map[string]interface{}{
-					"pending_re_review_notify":   true,
-					"pending_re_review_sender":   newSender,
-					"pending_re_review_reviewer": newReviewer,
-					"updated_at":                 time.Now(),
-				})
+				// CAS: include updated_at in WHERE to detect concurrent modifications
+				result := db.Model(&models.ReviewTask{}).
+					Where("id = ? AND updated_at = ?", latestTask.ID, current.UpdatedAt).
+					Updates(map[string]interface{}{
+						"pending_re_review_notify":   true,
+						"pending_re_review_sender":   newSender,
+						"pending_re_review_reviewer": newReviewer,
+						"updated_at":                 now,
+					})
 				if result.Error != nil {
 					log.Printf("failed to defer re-review notification: %v", result.Error)
+					continue
+				}
+				if result.RowsAffected == 0 {
+					log.Printf("re-review defer CAS miss (concurrent update): task=%s", latestTask.ID)
 					continue
 				}
 				log.Printf("re-review notification deferred until business hours: task=%s", latestTask.ID)
