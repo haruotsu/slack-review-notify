@@ -109,7 +109,9 @@ func CheckPendingReReviewNotifications(db *gorm.DB) {
 		if err := db.Where("slack_channel_id = ? AND label_name = ?", task.SlackChannel, labelName).First(&config).Error; err != nil {
 			// Config deleted or not found: clear pending flag to avoid infinite retry
 			log.Printf("channel config not found for pending re-review task: %s, clearing pending flag: %v", task.ID, err)
-			clearPendingReReviewFlags(db, task.ID, now)
+			if err := clearPendingReReviewFlags(db, task.ID, now); err != nil {
+				log.Printf("failed to clear pending re-review flags for orphan task: %s: %v", task.ID, err)
+			}
 			continue
 		}
 
