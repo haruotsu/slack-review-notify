@@ -1,0 +1,5 @@
+port: 4112
+max_messages: 1000
+channels:
+  - C_E2E_BH
+  - C_E2E_NOBH
