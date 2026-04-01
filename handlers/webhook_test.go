@@ -2024,19 +2024,27 @@ func TestHandleReviewRequestedEvent_OutsideBusinessHours_DefersNotification(t *t
 	defer gock.Off()
 	// No Slack mock — notification should NOT be sent
 
-	// Create channel config with business hours (9:00-18:00 JST)
+	// Set business hours to 03:00-03:01 so we're almost always outside
+	loc, _ := time.LoadLocation("Asia/Tokyo")
+	now := time.Now().In(loc)
+	if now.Hour() == 3 && now.Minute() == 0 {
+		t.Skip("Skipping: current time falls within the narrow test business hours window")
+	}
+	if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
+		t.Skip("Skipping: weekend (business hours always false regardless of time range)")
+	}
+
 	config := models.ChannelConfig{
 		ID:                 "config-bh-test",
 		SlackChannelID:     "C_BH_TEST",
 		LabelName:          "needs-review",
 		IsActive:           true,
-		BusinessHoursStart: "09:00",
-		BusinessHoursEnd:   "18:00",
+		BusinessHoursStart: "03:00",
+		BusinessHoursEnd:   "03:01",
 		Timezone:           "Asia/Tokyo",
 	}
 	db.Create(&config)
 
-	// Create in_review task
 	task := models.ReviewTask{
 		ID:           "rereview-offhours-task",
 		PRURL:        "https://github.com/owner/repo/pull/500",
@@ -2071,24 +2079,11 @@ func TestHandleReviewRequestedEvent_OutsideBusinessHours_DefersNotification(t *t
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// Check that re-review notification is deferred
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "rereview-offhours-task").First(&updatedTask)
-
-	// If currently outside business hours, notification should be deferred
-	loc, _ := time.LoadLocation("Asia/Tokyo")
-	now := time.Now().In(loc)
-	hour := now.Hour()
-	isBusinessHours := hour >= 9 && hour < 18 && now.Weekday() != time.Saturday && now.Weekday() != time.Sunday
-
-	if !isBusinessHours {
-		assert.True(t, updatedTask.PendingReReviewNotify, "Re-review notification should be deferred outside business hours")
-		assert.NotEmpty(t, updatedTask.PendingReReviewSender, "Sender should be stored")
-		assert.NotEmpty(t, updatedTask.PendingReReviewReviewer, "Reviewer should be stored")
-	} else {
-		// During business hours, notification should be sent immediately (not deferred)
-		assert.False(t, updatedTask.PendingReReviewNotify, "Re-review notification should be sent immediately during business hours")
-	}
+	assert.True(t, updatedTask.PendingReReviewNotify, "Re-review notification should be deferred outside business hours")
+	assert.NotEmpty(t, updatedTask.PendingReReviewSender, "Sender should be stored")
+	assert.NotEmpty(t, updatedTask.PendingReReviewReviewer, "Reviewer should be stored")
 }
 
 func TestHandleReviewRequestedEvent_WithinBusinessHours_SendsImmediately(t *testing.T) {

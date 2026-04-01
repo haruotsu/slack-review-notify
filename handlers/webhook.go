@@ -536,13 +536,28 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 		}
 		if err := db.Where("slack_channel_id = ? AND label_name = ?", latestTask.SlackChannel, labelName).First(&config).Error; err == nil {
 			if !services.IsWithinBusinessHours(&config, time.Now()) {
-				// Outside business hours: defer notification
-				db.Model(&models.ReviewTask{}).Where("id = ?", latestTask.ID).Updates(map[string]interface{}{
+				// Outside business hours: append to pending sender/reviewer (support multiple re-reviews)
+				var current models.ReviewTask
+				if err := db.Where("id = ?", latestTask.ID).First(&current).Error; err != nil {
+					log.Printf("failed to fetch task for defer: %v", err)
+					continue
+				}
+				newSender := senderMention
+				newReviewer := reviewerMention
+				if current.PendingReReviewNotify && current.PendingReReviewSender != "" {
+					newSender = current.PendingReReviewSender + "," + senderMention
+					newReviewer = current.PendingReReviewReviewer + "," + reviewerMention
+				}
+				result := db.Model(&models.ReviewTask{}).Where("id = ?", latestTask.ID).Updates(map[string]interface{}{
 					"pending_re_review_notify":   true,
-					"pending_re_review_sender":   senderMention,
-					"pending_re_review_reviewer": reviewerMention,
+					"pending_re_review_sender":   newSender,
+					"pending_re_review_reviewer": newReviewer,
 					"updated_at":                 time.Now(),
 				})
+				if result.Error != nil {
+					log.Printf("failed to defer re-review notification: %v", result.Error)
+					continue
+				}
 				log.Printf("re-review notification deferred until business hours: task=%s", latestTask.ID)
 				continue
 			}
