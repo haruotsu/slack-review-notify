@@ -2016,4 +2016,131 @@ func TestHandleReviewSubmittedEvent_DismissedOnlyUpdatesApprovedBy(t *testing.T)
 	assert.Nil(t, updatedTask.ReminderPausedUntil, "Reminder pause should not be set")
 }
 
+func TestHandleReviewRequestedEvent_OutsideBusinessHours_DefersNotification(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
 
+	defer gock.Off()
+	// No Slack mock — notification should NOT be sent
+
+	// Create channel config with business hours (9:00-18:00 JST)
+	config := models.ChannelConfig{
+		ID:                 "config-bh-test",
+		SlackChannelID:     "C_BH_TEST",
+		LabelName:          "needs-review",
+		IsActive:           true,
+		BusinessHoursStart: "09:00",
+		BusinessHoursEnd:   "18:00",
+		Timezone:           "Asia/Tokyo",
+	}
+	db.Create(&config)
+
+	// Create in_review task
+	task := models.ReviewTask{
+		ID:           "rereview-offhours-task",
+		PRURL:        "https://github.com/owner/repo/pull/500",
+		Repo:         "owner/repo",
+		PRNumber:     500,
+		Title:        "Test PR",
+		SlackTS:      "1234.7777",
+		SlackChannel: "C_BH_TEST",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "review_requested",
+		"pull_request": {"number": 500, "html_url": "https://github.com/owner/repo/pull/500"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"},
+		"requested_reviewer": {"login": "reviewer1"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Check that re-review notification is deferred
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "rereview-offhours-task").First(&updatedTask)
+
+	// If currently outside business hours, notification should be deferred
+	loc, _ := time.LoadLocation("Asia/Tokyo")
+	now := time.Now().In(loc)
+	hour := now.Hour()
+	isBusinessHours := hour >= 9 && hour < 18 && now.Weekday() != time.Saturday && now.Weekday() != time.Sunday
+
+	if !isBusinessHours {
+		assert.True(t, updatedTask.PendingReReviewNotify, "Re-review notification should be deferred outside business hours")
+		assert.NotEmpty(t, updatedTask.PendingReReviewSender, "Sender should be stored")
+		assert.NotEmpty(t, updatedTask.PendingReReviewReviewer, "Reviewer should be stored")
+	} else {
+		// During business hours, notification should be sent immediately (not deferred)
+		assert.False(t, updatedTask.PendingReReviewNotify, "Re-review notification should be sent immediately during business hours")
+	}
+}
+
+func TestHandleReviewRequestedEvent_WithinBusinessHours_SendsImmediately(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// No channel config created — without config, business hours check is skipped
+	// and notification should be sent immediately
+
+	task := models.ReviewTask{
+		ID:           "rereview-bh-task",
+		PRURL:        "https://github.com/owner/repo/pull/501",
+		Repo:         "owner/repo",
+		PRNumber:     501,
+		Title:        "Test PR",
+		SlackTS:      "1234.8888",
+		SlackChannel: "C_NO_CONFIG",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "review_requested",
+		"pull_request": {"number": 501, "html_url": "https://github.com/owner/repo/pull/501"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"},
+		"requested_reviewer": {"login": "reviewer1"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "rereview-bh-task").First(&updatedTask)
+	assert.False(t, updatedTask.PendingReReviewNotify, "Notification should be sent immediately without business hours config")
+	assert.True(t, gock.IsDone(), "Slack notification should have been sent")
+}

@@ -528,6 +528,26 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			log.Printf("task reactivated for re-review: id=%s, repo=%s, pr=%d", latestTask.ID, repoFullName, pr.GetNumber())
 		}
 
+		// Check business hours before sending re-review notification
+		var config models.ChannelConfig
+		labelName := latestTask.LabelName
+		if labelName == "" {
+			labelName = "needs-review"
+		}
+		if err := db.Where("slack_channel_id = ? AND label_name = ?", latestTask.SlackChannel, labelName).First(&config).Error; err == nil {
+			if !services.IsWithinBusinessHours(&config, time.Now()) {
+				// Outside business hours: defer notification
+				db.Model(&models.ReviewTask{}).Where("id = ?", latestTask.ID).Updates(map[string]interface{}{
+					"pending_re_review_notify":   true,
+					"pending_re_review_sender":   senderMention,
+					"pending_re_review_reviewer": reviewerMention,
+					"updated_at":                 time.Now(),
+				})
+				log.Printf("re-review notification deferred until business hours: task=%s", latestTask.ID)
+				continue
+			}
+		}
+
 		// Post re-review request notification to thread
 		t := i18n.L(latestTask.Language)
 		message := t("notify.re_review_requested", senderMention, reviewerMention)

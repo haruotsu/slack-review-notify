@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"slack-review-notify/i18n"
 	"slack-review-notify/models"
 )
 
@@ -82,6 +83,53 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 				log.Printf("reviewer assigned notification error: %v", err)
 			}
 		}
+	}
+}
+
+// CheckPendingReReviewNotifications sends deferred re-review notifications when business hours begin
+func CheckPendingReReviewNotifications(db *gorm.DB) {
+	now := time.Now()
+
+	var tasks []models.ReviewTask
+	result := db.Where("pending_re_review_notify = ?", true).Find(&tasks)
+	if result.Error != nil {
+		log.Printf("pending re-review check error: %v", result.Error)
+		return
+	}
+
+	for _, task := range tasks {
+		var config models.ChannelConfig
+		labelName := task.LabelName
+		if labelName == "" {
+			labelName = "needs-review"
+		}
+
+		if err := db.Where("slack_channel_id = ? AND label_name = ?", task.SlackChannel, labelName).First(&config).Error; err != nil {
+			log.Printf("channel config not found for pending re-review task: %s, error: %v", task.ID, err)
+			continue
+		}
+
+		if !IsWithinBusinessHours(&config, now) {
+			continue
+		}
+
+		// Send the deferred re-review notification
+		t := i18n.L(task.Language)
+		message := t("notify.re_review_requested", task.PendingReReviewSender, task.PendingReReviewReviewer)
+		if err := PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
+			log.Printf("deferred re-review notification error (task: %s): %v", task.ID, err)
+			continue
+		}
+
+		// Clear the pending flag
+		db.Model(&models.ReviewTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
+			"pending_re_review_notify":   false,
+			"pending_re_review_sender":   "",
+			"pending_re_review_reviewer": "",
+			"updated_at":                 now,
+		})
+
+		log.Printf("deferred re-review notification sent: task=%s", task.ID)
 	}
 }
 
