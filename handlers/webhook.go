@@ -528,6 +528,55 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			log.Printf("task reactivated for re-review: id=%s, repo=%s, pr=%d", latestTask.ID, repoFullName, pr.GetNumber())
 		}
 
+		// Check business hours before sending re-review notification
+		var config models.ChannelConfig
+		labelName := latestTask.LabelName
+		if labelName == "" {
+			labelName = "needs-review"
+		}
+		if err := db.Where("slack_channel_id = ? AND label_name = ?", latestTask.SlackChannel, labelName).First(&config).Error; err == nil {
+			now := time.Now()
+			if !services.IsWithinBusinessHours(&config, now) {
+				// Outside business hours: append to pending sender/reviewer (support multiple re-reviews)
+				var current models.ReviewTask
+				if err := db.Where("id = ?", latestTask.ID).First(&current).Error; err != nil {
+					log.Printf("failed to fetch task for defer: %v", err)
+					continue
+				}
+				newSender := senderMention
+				newReviewer := reviewerMention
+				if current.PendingReReviewNotify && current.PendingReReviewSender != "" {
+					newSender = current.PendingReReviewSender + "," + senderMention
+					newReviewer = current.PendingReReviewReviewer + "," + reviewerMention
+				}
+				// CAS: include updated_at in WHERE to detect concurrent modifications
+				result := db.Model(&models.ReviewTask{}).
+					Where("id = ? AND updated_at = ?", latestTask.ID, current.UpdatedAt).
+					Updates(map[string]interface{}{
+						"pending_re_review_notify":   true,
+						"pending_re_review_sender":   newSender,
+						"pending_re_review_reviewer": newReviewer,
+						"updated_at":                 now,
+					})
+				if result.Error != nil {
+					log.Printf("failed to defer re-review notification: %v", result.Error)
+					continue
+				}
+				if result.RowsAffected == 0 {
+					log.Printf("re-review defer CAS miss (concurrent update): task=%s", latestTask.ID)
+					continue
+				}
+				log.Printf("re-review notification deferred until business hours: task=%s", latestTask.ID)
+				// Send immediate feedback without mention so sender knows the request was received
+				t := i18n.L(latestTask.Language)
+				deferMsg := t("notify.re_review_deferred", senderLogin)
+				if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, deferMsg); err != nil {
+					log.Printf("deferred re-review feedback message error: %v", err)
+				}
+				continue
+			}
+		}
+
 		// Post re-review request notification to thread
 		t := i18n.L(latestTask.Language)
 		message := t("notify.re_review_requested", senderMention, reviewerMention)

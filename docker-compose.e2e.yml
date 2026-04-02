@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    ports:
+      - "18080:8080"
+    environment:
+      - SLACK_API_BASE_URL=http://slackhog:4112/api
+      - SLACK_BOT_TOKEN=xoxb-e2e-test-token
+      - SLACK_SIGNING_SECRET=e2e-test-secret
+      - DB_PATH=/app/data/review_tasks.db
+    volumes:
+      - e2e-app-data:/app/data
+    depends_on:
+      - slackhog
+
+  slackhog:
+    image: ghcr.io/harakeishi/slackhog
+    ports:
+      - "14112:4112"
+    volumes:
+      - ./slackhog.e2e.yaml:/etc/slackhog/slackhog.yaml
+    command: ["-config", "/etc/slackhog/slackhog.yaml"]
+
+volumes:
+  e2e-app-data:

@@ -1,4 +1,4 @@
-.PHONY: build run test clean all help lint lint-install deps dev slackhog up down
+.PHONY: build run test clean all help lint lint-install deps dev slackhog up down e2e e2e-setup e2e-teardown
 
 APP_NAME := slack-review-notify
 GO := go
@@ -52,3 +52,18 @@ up:
 
 down:
 	docker compose down
+
+e2e-setup:
+	@docker rm -f slackhog-e2e 2>/dev/null || true
+	docker run --rm -d -p 14112:4112 --name slackhog-e2e \
+		-v $(CURDIR)/slackhog.e2e.yaml:/etc/slackhog/slackhog.yaml:ro \
+		ghcr.io/harakeishi/slackhog -config /etc/slackhog/slackhog.yaml
+	@echo "Waiting for slackhog to start..."
+	@for i in 1 2 3 4 5; do curl -sf http://localhost:14112/_api/messages > /dev/null 2>&1 && break || sleep 1; done
+
+e2e-teardown:
+	docker rm -f slackhog-e2e 2>/dev/null || true
+
+e2e: e2e-setup
+	$(GO) test -tags e2e -v -count=1 . || ($(MAKE) e2e-teardown && exit 1)
+	$(MAKE) e2e-teardown

@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"slack-review-notify/i18n"
 	"slack-review-notify/models"
 )
 
@@ -83,6 +84,79 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 			}
 		}
 	}
+}
+
+// CheckPendingReReviewNotifications sends deferred re-review notifications when business hours begin
+func CheckPendingReReviewNotifications(db *gorm.DB) {
+	now := time.Now()
+
+	var tasks []models.ReviewTask
+	// Only process active tasks (exclude done/archived/completed that no longer need notification)
+	result := db.Where("pending_re_review_notify = ? AND status IN ?", true,
+		[]string{"in_review", "pending", "snoozed", "waiting_business_hours"}).Find(&tasks)
+	if result.Error != nil {
+		log.Printf("pending re-review check error: %v", result.Error)
+		return
+	}
+
+	for _, task := range tasks {
+		var config models.ChannelConfig
+		labelName := task.LabelName
+		if labelName == "" {
+			labelName = "needs-review"
+		}
+
+		if err := db.Where("slack_channel_id = ? AND label_name = ?", task.SlackChannel, labelName).First(&config).Error; err != nil {
+			// Config deleted or not found: clear pending flag to avoid infinite retry
+			log.Printf("channel config not found for pending re-review task: %s, clearing pending flag: %v", task.ID, err)
+			if err := clearPendingReReviewFlags(db, task.ID, task.UpdatedAt, now); err != nil {
+				log.Printf("failed to clear pending re-review flags for orphan task: %s: %v", task.ID, err)
+			}
+			continue
+		}
+
+		if !IsWithinBusinessHours(&config, now) {
+			continue
+		}
+
+		// Send deferred re-review notifications (may contain multiple sender/reviewer pairs)
+		senders := strings.Split(task.PendingReReviewSender, ",")
+		reviewers := strings.Split(task.PendingReReviewReviewer, ",")
+		t := i18n.L(task.Language)
+		for idx := 0; idx < len(senders) && idx < len(reviewers); idx++ {
+			message := t("notify.re_review_requested", senders[idx], reviewers[idx])
+			if err := PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
+				log.Printf("deferred re-review notification error (task: %s, idx: %d): %v", task.ID, idx, err)
+				// Continue to try remaining notifications
+			}
+		}
+
+		// Clear the pending flag
+		if err := clearPendingReReviewFlags(db, task.ID, task.UpdatedAt, now); err != nil {
+			log.Printf("failed to clear pending re-review flags (task: %s): %v", task.ID, err)
+		} else {
+			log.Printf("deferred re-review notification sent: task=%s", task.ID)
+		}
+	}
+}
+
+// clearPendingReReviewFlags resets the pending re-review fields on a task using CAS pattern
+func clearPendingReReviewFlags(db *gorm.DB, taskID string, expectedUpdatedAt time.Time, now time.Time) error {
+	result := db.Model(&models.ReviewTask{}).
+		Where("id = ? AND updated_at = ?", taskID, expectedUpdatedAt).
+		Updates(map[string]interface{}{
+			"pending_re_review_notify":   false,
+			"pending_re_review_sender":   "",
+			"pending_re_review_reviewer": "",
+			"updated_at":                 now,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		log.Printf("clearPendingReReviewFlags CAS miss (concurrent update): task=%s", taskID)
+	}
+	return nil
 }
 
 // CheckInReviewTasks checks tasks that are in review and sends reminders as needed

@@ -22,8 +22,11 @@ type ReviewTask struct {
 	LabelName           string
 	WatchingUntil       *time.Time
 	ReminderPausedUntil *time.Time
-	OutOfHoursReminded  bool   // Flag indicating whether reminders were automatically paused outside business hours
-	Language            string // Language for messages (copied from ChannelConfig)
+	OutOfHoursReminded      bool   // Flag indicating whether reminders were automatically paused outside business hours
+	PendingReReviewNotify   bool   // Flag indicating a re-review notification is pending until business hours
+	PendingReReviewSender   string // Slack mention string of the re-review requester (e.g., "<@U123>" or "username")
+	PendingReReviewReviewer string // Slack mention string of the reviewer to be notified (e.g., "<@U456>" or "username")
+	Language                string // Language for messages (copied from ChannelConfig)
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	DeletedAt           gorm.DeletedAt `gorm:"index"`

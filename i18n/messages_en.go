@@ -269,5 +269,6 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"notify.pr_closed": "🔒 PR has been closed.",
 
 	"notify.re_review_requested": "🔄 %s requested a re-review from %s. Please take a look!",
+	"notify.re_review_deferred":  "🔄 %s requested a re-review. Outside business hours — notification will be sent on the next business day morning.",
 	"notify.fully_approved":      "🎉 %d/%d approved - Review complete!",
 }

@@ -75,6 +75,9 @@ func runTaskChecker(db *gorm.DB) {
 			// Check tasks waiting for business hours
 			services.CheckBusinessHoursTasks(db)
 
+			// Send deferred re-review notifications when business hours begin
+			services.CheckPendingReReviewNotifications(db)
+
 			// Check in-review tasks (reviewer already assigned)
 			services.CheckInReviewTasks(db)
 
