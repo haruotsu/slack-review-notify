@@ -109,7 +109,7 @@ func CheckPendingReReviewNotifications(db *gorm.DB) {
 		if err := db.Where("slack_channel_id = ? AND label_name = ?", task.SlackChannel, labelName).First(&config).Error; err != nil {
 			// Config deleted or not found: clear pending flag to avoid infinite retry
 			log.Printf("channel config not found for pending re-review task: %s, clearing pending flag: %v", task.ID, err)
-			if err := clearPendingReReviewFlags(db, task.ID, now); err != nil {
+			if err := clearPendingReReviewFlags(db, task.ID, task.UpdatedAt, now); err != nil {
 				log.Printf("failed to clear pending re-review flags for orphan task: %s: %v", task.ID, err)
 			}
 			continue
@@ -132,7 +132,7 @@ func CheckPendingReReviewNotifications(db *gorm.DB) {
 		}
 
 		// Clear the pending flag
-		if err := clearPendingReReviewFlags(db, task.ID, now); err != nil {
+		if err := clearPendingReReviewFlags(db, task.ID, task.UpdatedAt, now); err != nil {
 			log.Printf("failed to clear pending re-review flags (task: %s): %v", task.ID, err)
 		} else {
 			log.Printf("deferred re-review notification sent: task=%s", task.ID)
@@ -140,14 +140,23 @@ func CheckPendingReReviewNotifications(db *gorm.DB) {
 	}
 }
 
-// clearPendingReReviewFlags resets the pending re-review fields on a task
-func clearPendingReReviewFlags(db *gorm.DB, taskID string, now time.Time) error {
-	return db.Model(&models.ReviewTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
-		"pending_re_review_notify":   false,
-		"pending_re_review_sender":   "",
-		"pending_re_review_reviewer": "",
-		"updated_at":                 now,
-	}).Error
+// clearPendingReReviewFlags resets the pending re-review fields on a task using CAS pattern
+func clearPendingReReviewFlags(db *gorm.DB, taskID string, expectedUpdatedAt time.Time, now time.Time) error {
+	result := db.Model(&models.ReviewTask{}).
+		Where("id = ? AND updated_at = ?", taskID, expectedUpdatedAt).
+		Updates(map[string]interface{}{
+			"pending_re_review_notify":   false,
+			"pending_re_review_sender":   "",
+			"pending_re_review_reviewer": "",
+			"updated_at":                 now,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		log.Printf("clearPendingReReviewFlags CAS miss (concurrent update): task=%s", taskID)
+	}
+	return nil
 }
 
 // CheckInReviewTasks checks tasks that are in review and sends reminders as needed

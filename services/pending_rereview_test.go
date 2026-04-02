@@ -277,3 +277,72 @@ func TestCheckPendingReReviewNotifications_MultipleNotifications(t *testing.T) {
 	assert.False(t, updatedTask.PendingReReviewNotify, "Pending flag should be cleared")
 	assert.True(t, gock.IsDone(), "Both Slack notifications should have been sent")
 }
+
+func TestClearPendingReReviewFlags_CASMiss(t *testing.T) {
+	db := setupTestDB(t)
+	IsTestMode = true
+
+	now := time.Now()
+	task := models.ReviewTask{
+		ID:                      "cas-miss-task",
+		PRURL:                   "https://github.com/owner/repo/pull/700",
+		Repo:                    "owner/repo",
+		PRNumber:                700,
+		Title:                   "Test PR",
+		SlackTS:                 "1234.0000",
+		SlackChannel:            "C_CAS_MISS",
+		Status:                  "in_review",
+		LabelName:               "needs-review",
+		PendingReReviewNotify:   true,
+		PendingReReviewSender:   "<@USENDER>",
+		PendingReReviewReviewer: "<@UREVIEWER>",
+		CreatedAt:               now,
+		UpdatedAt:               now,
+	}
+	db.Create(&task)
+
+	// Use a stale updated_at (1 hour ago) to simulate concurrent modification
+	staleUpdatedAt := now.Add(-1 * time.Hour)
+	err := clearPendingReReviewFlags(db, task.ID, staleUpdatedAt, time.Now())
+	assert.NoError(t, err, "CAS miss should not return an error")
+
+	// Pending flag should remain because CAS missed
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "cas-miss-task").First(&updatedTask)
+	assert.True(t, updatedTask.PendingReReviewNotify, "Pending flag should remain after CAS miss")
+	assert.Equal(t, "<@USENDER>", updatedTask.PendingReReviewSender)
+}
+
+func TestClearPendingReReviewFlags_CASHit(t *testing.T) {
+	db := setupTestDB(t)
+	IsTestMode = true
+
+	now := time.Now()
+	task := models.ReviewTask{
+		ID:                      "cas-hit-task",
+		PRURL:                   "https://github.com/owner/repo/pull/701",
+		Repo:                    "owner/repo",
+		PRNumber:                701,
+		Title:                   "Test PR",
+		SlackTS:                 "1234.9999",
+		SlackChannel:            "C_CAS_HIT",
+		Status:                  "in_review",
+		LabelName:               "needs-review",
+		PendingReReviewNotify:   true,
+		PendingReReviewSender:   "<@USENDER>",
+		PendingReReviewReviewer: "<@UREVIEWER>",
+		CreatedAt:               now,
+		UpdatedAt:               now,
+	}
+	db.Create(&task)
+
+	// Use correct updated_at to simulate successful CAS
+	err := clearPendingReReviewFlags(db, task.ID, now, time.Now())
+	assert.NoError(t, err)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "cas-hit-task").First(&updatedTask)
+	assert.False(t, updatedTask.PendingReReviewNotify, "Pending flag should be cleared on CAS hit")
+	assert.Empty(t, updatedTask.PendingReReviewSender)
+	assert.Empty(t, updatedTask.PendingReReviewReviewer)
+}

@@ -2022,7 +2022,11 @@ func TestHandleReviewRequestedEvent_OutsideBusinessHours_DefersNotification(t *t
 	services.IsTestMode = true
 
 	defer gock.Off()
-	// No Slack mock — notification should NOT be sent
+	// Feedback message (without mention) should be sent even outside business hours
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
 
 	// Set business hours to 03:00-03:01 so we're almost always outside
 	loc, _ := time.LoadLocation("Asia/Tokyo")
@@ -2084,6 +2088,7 @@ func TestHandleReviewRequestedEvent_OutsideBusinessHours_DefersNotification(t *t
 	assert.True(t, updatedTask.PendingReReviewNotify, "Re-review notification should be deferred outside business hours")
 	assert.NotEmpty(t, updatedTask.PendingReReviewSender, "Sender should be stored")
 	assert.NotEmpty(t, updatedTask.PendingReReviewReviewer, "Reviewer should be stored")
+	assert.True(t, gock.IsDone(), "Deferred feedback message should have been sent to Slack")
 }
 
 func TestHandleReviewRequestedEvent_WithinBusinessHours_SendsImmediately(t *testing.T) {

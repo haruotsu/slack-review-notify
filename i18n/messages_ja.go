@@ -269,5 +269,6 @@ var messagesJa = map[string]string{
 	"notify.pr_closed": "🔒 PRがクローズされました。",
 
 	"notify.re_review_requested": "🔄 %s さんが %s に再レビューを依頼しました。対応をお願いします！",
+	"notify.re_review_deferred":  "🔄 %s が再レビューをリクエストしました。営業時間外のため、翌営業日の朝に通知します。",
 	"notify.fully_approved":      "🎉 %d/%d approved - レビュー完了！",
 }

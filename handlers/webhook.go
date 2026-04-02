@@ -567,6 +567,12 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					continue
 				}
 				log.Printf("re-review notification deferred until business hours: task=%s", latestTask.ID)
+				// Send immediate feedback without mention so sender knows the request was received
+				t := i18n.L(latestTask.Language)
+				deferMsg := t("notify.re_review_deferred", senderLogin)
+				if err := services.PostToThread(latestTask.SlackChannel, latestTask.SlackTS, deferMsg); err != nil {
+					log.Printf("deferred re-review feedback message error: %v", err)
+				}
 				continue
 			}
 		}
