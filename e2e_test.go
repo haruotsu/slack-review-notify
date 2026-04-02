@@ -285,9 +285,11 @@ func TestE2E_ReReview_OutsideBusinessHours_DefersAndSendsLater(t *testing.T) {
 	resp.Body.Close()
 	time.Sleep(500 * time.Millisecond)
 
-	// Step 2: Verify NO thread reply in slackhog
+	// Step 2: Verify only the deferred feedback message is sent (no mention, no re-review assignment)
 	replies := getSlackhogReplies(t, parentID)
-	assert.Empty(t, replies, "No notification should be sent outside business hours")
+	require.Len(t, replies, 1, "Only deferred feedback message should be sent outside business hours")
+	assert.Contains(t, replies[0].Text, "営業時間外", "Feedback message should mention outside business hours")
+	assert.NotContains(t, replies[0].Text, "<@", "Feedback message should not contain mentions")
 
 	// Step 3: Verify pending flag is set
 	var deferredTask models.ReviewTask
@@ -306,16 +308,15 @@ func TestE2E_ReReview_OutsideBusinessHours_DefersAndSendsLater(t *testing.T) {
 	services.CheckPendingReReviewNotifications(db)
 	time.Sleep(500 * time.Millisecond)
 
-	// Step 6: Verify thread reply NOW appears in slackhog
+	// Step 6: Verify deferred notification NOW appears (total: 1 feedback + 1 deferred = 2 replies)
 	replies = getSlackhogReplies(t, parentID)
-	found := false
+	reReviewCount := 0
 	for _, r := range replies {
 		if strings.Contains(r.Text, "再レビュー") || strings.Contains(r.Text, "re-review") {
-			found = true
-			break
+			reReviewCount++
 		}
 	}
-	assert.True(t, found, "Deferred re-review notification should appear as thread reply after business hours start")
+	assert.Equal(t, 2, reReviewCount, "1 feedback message + 1 deferred re-review notification should appear")
 
 	// Step 7: Verify pending flag is cleared
 	db.Where("id = ?", "e2e-rereview-offhours").First(&deferredTask)
@@ -403,6 +404,16 @@ func TestE2E_MultipleReReviews_OutsideBusinessHours_AllSendLater(t *testing.T) {
 	assert.Contains(t, deferredTask.PendingReReviewSender, "author1")
 	assert.Contains(t, deferredTask.PendingReReviewSender, "author2")
 
+	// Verify 2 deferred feedback messages were sent (one per re-review request)
+	feedbackReplies := getSlackhogReplies(t, parentID)
+	feedbackCount := 0
+	for _, r := range feedbackReplies {
+		if strings.Contains(r.Text, "営業時間外") {
+			feedbackCount++
+		}
+	}
+	assert.Equal(t, 2, feedbackCount, "Each re-review should produce a deferred feedback message")
+
 	// Simulate business hours start
 	db.Model(&models.ChannelConfig{}).Where("id = ?", "e2e-multi-config").Updates(map[string]interface{}{
 		"business_hours_start": "00:00",
@@ -412,7 +423,7 @@ func TestE2E_MultipleReReviews_OutsideBusinessHours_AllSendLater(t *testing.T) {
 	services.CheckPendingReReviewNotifications(db)
 	time.Sleep(500 * time.Millisecond)
 
-	// Verify both notifications appear as thread replies
+	// Verify both deferred re-review notifications also appear (total: 2 feedback + 2 re-review = 4)
 	replies := getSlackhogReplies(t, parentID)
 	reReviewCount := 0
 	for _, r := range replies {
@@ -420,7 +431,10 @@ func TestE2E_MultipleReReviews_OutsideBusinessHours_AllSendLater(t *testing.T) {
 			reReviewCount++
 		}
 	}
-	assert.Equal(t, 2, reReviewCount, "Both deferred re-review notifications should appear as thread replies")
+	// 2 feedback messages + 2 deferred notifications = 4 messages containing re-review text
+	// But feedback messages use "再レビューをリクエストしました" and deferred notifications use "再レビューを依頼しました"
+	// Both match "再レビュー", so count should be 4
+	assert.Equal(t, 4, reReviewCount, "2 feedback + 2 deferred re-review notifications should appear as thread replies")
 
 	// Pending flag cleared
 	db.Where("id = ?", "e2e-multi-rereview").First(&deferredTask)
