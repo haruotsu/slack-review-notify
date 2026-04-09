@@ -69,9 +69,10 @@ var messagesJa = map[string]string{
 • /slack-review-notify remove-user-mapping <github-username> - ユーザーマッピングを削除
 
 *休暇管理:*
-• /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由] - ユーザーを休暇に設定
+• /slack-review-notify set-away @user from [YYYY-MM-DD] until [YYYY-MM-DD] reason [理由] - ユーザーを休暇に設定
+• /slack-review-notify set-away @user on [YYYY-MM-DD] reason [理由] - 単一日の休暇を設定
 • /slack-review-notify unset-away @user - ユーザーの休暇を解除
-• /slack-review-notify show-availability - 休暇中のユーザー一覧を表示
+• /slack-review-notify show-availability - 休暇中・予約中のユーザー一覧を表示
 
 [ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します`,
 
@@ -190,7 +191,10 @@ var messagesJa = map[string]string{
 	"cmd.remove_user_mapping.success":   "GitHubユーザー `%s` のマッピングを削除しました。",
 
 	// ==================== Command: set-away ====================
-	"cmd.set_away.usage":        "休暇に設定するユーザーを指定してください。例: /slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由]",
+	"cmd.set_away.usage":        "休暇に設定するユーザーを指定してください。\n例:\n  set-away @user\n  set-away @user until 2025-06-01\n  set-away @user from 2025-05-28 until 2025-06-01\n  set-away @user on 2025-06-01\n  set-away @user on 2025-06-01 reason 有給休暇",
+	"cmd.set_away.from_after_until":  "開始日（from）は終了日（until）より前に指定してください。",
+	"cmd.set_away.missing_date":     "キーワードの後に日付を指定してください。例: from 2025-06-01",
+	"cmd.set_away.conflicting_keywords": "`on` と `from`/`until` は同時に使えません。`on YYYY-MM-DD` または `from YYYY-MM-DD until YYYY-MM-DD` のどちらかを使用してください。",
 	"cmd.set_away.no_user":      "休暇に設定するユーザーを指定してください。",
 	"cmd.set_away.invalid_date": "日付形式が無効です。YYYY-MM-DD形式で指定してください（例: 2025-06-01）",
 	"cmd.set_away.past_date":    "過去の日付は指定できません。今日以降の日付を指定してください。",
@@ -204,8 +208,10 @@ var messagesJa = map[string]string{
 	"cmd.unset_away.success": "<@%s> の休暇を解除しました",
 
 	// ==================== Command: show-availability ====================
-	"cmd.show_availability.empty":  "現在休暇中のユーザーはいません",
-	"cmd.show_availability.header": "*現在休暇中のユーザー*\n",
+	"cmd.show_availability.empty":           "現在休暇中・予約中のユーザーはいません",
+	"cmd.show_availability.header":          "*休暇中・予約中のユーザー*\n",
+	"cmd.show_availability.status_away":     "休暇中",
+	"cmd.show_availability.status_scheduled": "予約中",
 
 	// ==================== Common ====================
 	"common.active":             "有効",
@@ -214,6 +220,8 @@ var messagesJa = map[string]string{
 	"common.invalid_user_id":    "有効なユーザーIDを指定してください。",
 	"common.select_placeholder": "選択してください",
 	"common.until":              "%s まで",
+	"common.from_until":         "%s ~ %s",
+	"common.on_date":            "%s",
 	"common.indefinite":         "無期限",
 	"common.reason":             "、理由: %s",
 	"common.reason_paren":       "（%s）",

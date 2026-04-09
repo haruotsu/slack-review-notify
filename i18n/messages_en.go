@@ -69,9 +69,10 @@ Specify multiple labels separated by commas to notify only when all labels are p
 • /slack-review-notify remove-user-mapping <github-username> - Remove user mapping
 
 *Leave Management:*
-• /slack-review-notify set-away @user [until YYYY-MM-DD] [reason description] - Set user as away
+• /slack-review-notify set-away @user from [YYYY-MM-DD] until [YYYY-MM-DD] reason [description] - Set user as away
+• /slack-review-notify set-away @user on [YYYY-MM-DD] reason [description] - Set away for a single day
 • /slack-review-notify unset-away @user - Remove user's away status
-• /slack-review-notify show-availability - Show users currently on leave
+• /slack-review-notify show-availability - Show users on leave or scheduled
 
 Omitting [label-name] uses the default label "needs-review"`,
 
@@ -190,7 +191,10 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"cmd.remove_user_mapping.success":   "Deleted mapping for GitHub user `%s`.",
 
 	// ==================== Command: set-away ====================
-	"cmd.set_away.usage":        "Please specify a user to set as away. Example: /slack-review-notify set-away @user [until YYYY-MM-DD] [reason description]",
+	"cmd.set_away.usage":        "Please specify a user to set as away.\nExamples:\n  set-away @user\n  set-away @user until 2025-06-01\n  set-away @user from 2025-05-28 until 2025-06-01\n  set-away @user on 2025-06-01\n  set-away @user on 2025-06-01 reason Day off",
+	"cmd.set_away.from_after_until":  "The start date (from) must be before the end date (until).",
+	"cmd.set_away.missing_date":     "Please specify a date after the keyword. Example: from 2025-06-01",
+	"cmd.set_away.conflicting_keywords": "Cannot combine `on` with `from`/`until`. Use either `on YYYY-MM-DD` or `from YYYY-MM-DD until YYYY-MM-DD`.",
 	"cmd.set_away.no_user":      "Please specify a user to set as away.",
 	"cmd.set_away.invalid_date": "Invalid date format. Please use YYYY-MM-DD format (e.g., 2025-06-01).",
 	"cmd.set_away.past_date":    "Cannot specify a past date. Please specify today or a future date.",
@@ -204,8 +208,10 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"cmd.unset_away.success": "Removed away status for <@%s>",
 
 	// ==================== Command: show-availability ====================
-	"cmd.show_availability.empty":  "No users are currently on leave.",
-	"cmd.show_availability.header": "*Users Currently on Leave*\n",
+	"cmd.show_availability.empty":           "No users are currently on leave or scheduled.",
+	"cmd.show_availability.header":          "*Users on Leave / Scheduled*\n",
+	"cmd.show_availability.status_away":     "Away",
+	"cmd.show_availability.status_scheduled": "Scheduled",
 
 	// ==================== Common ====================
 	"common.active":             "Active",
@@ -214,6 +220,8 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"common.invalid_user_id":    "Please specify a valid user ID.",
 	"common.select_placeholder": "Select an option",
 	"common.until":              "until %s",
+	"common.from_until":         "%s ~ %s",
+	"common.on_date":            "on %s",
 	"common.indefinite":         "Indefinite",
 	"common.reason":             ", reason: %s",
 	"common.reason_paren":       " (%s)",
