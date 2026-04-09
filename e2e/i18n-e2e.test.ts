@@ -372,15 +372,57 @@ test.describe("18. set-away", () => {
     const res = await slackCmd(request, "set-away");
     expect(res).toContain("休暇に設定するユーザー");
   });
+
+  test("18-5. set away with from and until (scheduled)", async ({
+    request,
+  }) => {
+    const res = await slackCmd(
+      request,
+      "set-away <@UAWAY4> from 2099-06-01 until 2099-06-15 reason 予定休暇"
+    );
+    expect(res).toContain("休暇に設定しました");
+    expect(res).toContain("2099-06-01 ~ 2099-06-15");
+    expect(res).toContain("予定休暇");
+  });
+
+  test("18-6. set away with on (single day)", async ({ request }) => {
+    const res = await slackCmd(
+      request,
+      "set-away <@UAWAY5> on 2099-07-01 reason 有給休暇"
+    );
+    expect(res).toContain("休暇に設定しました");
+    expect(res).toContain("2099-07-01");
+    expect(res).toContain("有給休暇");
+  });
+
+  test("18-7. from after until is rejected", async ({ request }) => {
+    const res = await slackCmd(
+      request,
+      "set-away <@UAWAY6> from 2099-12-31 until 2099-01-01"
+    );
+    expect(res).toContain("開始日（from）は終了日（until）より前に");
+  });
+
+  test("18-8. past from date is rejected", async ({ request }) => {
+    const res = await slackCmd(
+      request,
+      "set-away <@UAWAY7> from 2020-01-01 until 2099-12-31"
+    );
+    expect(res).toContain("過去の日付");
+  });
 });
 
 // ── 19. show-availability ────────────────────────────────────────
 
 test.describe("19. show-availability", () => {
-  test("19-1. show users on leave", async ({ request }) => {
+  test("19-1. show users on leave with status labels", async ({ request }) => {
     const res = await slackCmd(request, "show-availability");
-    expect(res).toContain("休暇中のユーザー");
+    expect(res).toContain("休暇中・予約中のユーザー");
     expect(res).toContain("<@UAWAY1>");
+    expect(res).toContain("休暇中");
+    // UAWAY4 has a future from date, so it should show as scheduled
+    expect(res).toContain("予約中");
+    expect(res).toContain("<@UAWAY4>");
   });
 });
 
@@ -495,7 +537,7 @@ test.describe("22. set-language & i18n switching", () => {
     await slackCmd(request, "set-mention <@UI18N>", CH);
     await slackCmd(request, "set-language en", CH);
     const res = await slackCmd(request, "show-availability", CH);
-    expect(res).toContain("Currently on Leave");
+    expect(res).toContain("on Leave / Scheduled");
   });
 
   test("22-12. unset-away in English", async ({ request }) => {

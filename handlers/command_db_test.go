@@ -296,11 +296,39 @@ func TestSetAway_Integration(t *testing.T) {
 			expectedBody:   "育児休業",
 		},
 		{
+			name:           "Leave setting with from and until",
+			text:           "set-away <@U22222> from 2099-11-01 until 2099-12-31 reason 長期休暇",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectedBody:   "2099-11-01 ~ 2099-12-31",
+		},
+		{
+			name:           "Leave setting with on (single day)",
+			text:           "set-away <@U33333> on 2099-06-15 reason 有給休暇",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectedBody:   "2099-06-15",
+		},
+		{
 			name:           "Past date is rejected",
 			text:           "set-away <@U99999> until 2020-01-01",
 			channelID:      "C12345",
 			expectedStatus: 200,
 			expectedBody:   "過去の日付は指定できません",
+		},
+		{
+			name:           "Past from date is rejected",
+			text:           "set-away <@U99999> from 2020-01-01 until 2099-12-31",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectedBody:   "過去の日付は指定できません",
+		},
+		{
+			name:           "from after until is rejected",
+			text:           "set-away <@U99999> from 2099-12-31 until 2099-01-01",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectedBody:   "開始日（from）は終了日（until）より前に指定してください",
 		},
 		{
 			name:           "No user specified",
@@ -386,7 +414,7 @@ func TestShowAvailability_Integration(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "休暇中のユーザーはいません")
+	assert.Contains(t, w.Body.String(), "休暇中・予約中のユーザーはいません")
 
 	// Add users on leave
 	req2 := setupHTTPRequest(t, "set-away <@USHOW1> reason 休暇", "C12345")
@@ -399,15 +427,23 @@ func TestShowAvailability_Integration(t *testing.T) {
 	router.ServeHTTP(w3, req3)
 	assert.Equal(t, 200, w3.Code)
 
+	// Add a scheduled (future) leave
+	req3b := setupHTTPRequest(t, "set-away <@USHOW3> from 2099-06-01 until 2099-06-15 reason 予定休暇", "C12345")
+	w3b := httptest.NewRecorder()
+	router.ServeHTTP(w3b, req3b)
+	assert.Equal(t, 200, w3b.Code)
+
 	// Verify the leave list
 	req4 := setupHTTPRequest(t, "show-availability", "C12345")
 	w4 := httptest.NewRecorder()
 	router.ServeHTTP(w4, req4)
 	assert.Equal(t, 200, w4.Code)
 	body := w4.Body.String()
-	assert.Contains(t, body, "現在休暇中のユーザー")
+	assert.Contains(t, body, "休暇中・予約中のユーザー")
 	assert.Contains(t, body, "USHOW1")
 	assert.Contains(t, body, "USHOW2")
-	assert.Contains(t, body, "休暇")
-	assert.Contains(t, body, "育児休業")
+	assert.Contains(t, body, "休暇中")   // status label for currently away
+	assert.Contains(t, body, "予約中")   // status label for scheduled
+	assert.Contains(t, body, "USHOW3")
+	assert.Contains(t, body, "予定休暇")
 }

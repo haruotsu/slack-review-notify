@@ -1120,12 +1120,41 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 		return
 	}
 
+	var awayFrom *time.Time
 	var awayUntil *time.Time
 	var reason string
 
-	// Parse parameters: "until" and "reason" keywords
+	// Get timezone from channel config
+	timezone := "Asia/Tokyo"
+	var tzConfig models.ChannelConfig
+	if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&tzConfig).Error; err == nil {
+		if tzConfig.Timezone != "" {
+			timezone = tzConfig.Timezone
+		}
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+
+	// Parse parameters: "from", "until", "on", and "reason" keywords
 	for i := 1; i < len(parts); i++ {
 		switch parts[i] {
+		case "from":
+			if i+1 < len(parts) {
+				i++
+				parsed, err := time.Parse("2006-01-02", parts[i])
+				if err != nil {
+					c.String(200, t("cmd.set_away.invalid_date"))
+					return
+				}
+				startOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
+				if startOfDay.Before(time.Date(time.Now().In(loc).Year(), time.Now().In(loc).Month(), time.Now().In(loc).Day(), 0, 0, 0, 0, loc)) {
+					c.String(200, t("cmd.set_away.past_date"))
+					return
+				}
+				awayFrom = &startOfDay
+			}
 		case "until":
 			if i+1 < len(parts) {
 				i++
@@ -1134,24 +1163,28 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 					c.String(200, t("cmd.set_away.invalid_date"))
 					return
 				}
-				// Set to end of the specified day (23:59:59)
-				// Get timezone from channel config
-				timezone := "Asia/Tokyo"
-				var tzConfig models.ChannelConfig
-				if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&tzConfig).Error; err == nil {
-					if tzConfig.Timezone != "" {
-						timezone = tzConfig.Timezone
-					}
-				}
-				loc, err := time.LoadLocation(timezone)
-				if err != nil {
-					loc = time.UTC
-				}
 				endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
 				if endOfDay.Before(time.Now().In(loc)) {
 					c.String(200, t("cmd.set_away.past_date"))
 					return
 				}
+				awayUntil = &endOfDay
+			}
+		case "on":
+			if i+1 < len(parts) {
+				i++
+				parsed, err := time.Parse("2006-01-02", parts[i])
+				if err != nil {
+					c.String(200, t("cmd.set_away.invalid_date"))
+					return
+				}
+				startOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
+				endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
+				if endOfDay.Before(time.Now().In(loc)) {
+					c.String(200, t("cmd.set_away.past_date"))
+					return
+				}
+				awayFrom = &startOfDay
 				awayUntil = &endOfDay
 			}
 		case "reason":
@@ -1162,10 +1195,17 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 		}
 	}
 
+	// Validate from < until when both are specified
+	if awayFrom != nil && awayUntil != nil && !awayFrom.Before(*awayUntil) {
+		c.String(200, t("cmd.set_away.from_after_until"))
+		return
+	}
+
 	// Update if existing record exists, otherwise create new (upsert)
 	var existing models.ReviewerAvailability
 	result := db.Where("slack_user_id = ?", slackUserID).First(&existing)
 	if result.Error == nil {
+		existing.AwayFrom = awayFrom
 		existing.AwayUntil = awayUntil
 		existing.Reason = reason
 		existing.UpdatedAt = time.Now()
@@ -1178,6 +1218,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 		record := models.ReviewerAvailability{
 			ID:          uuid.NewString(),
 			SlackUserID: slackUserID,
+			AwayFrom:    awayFrom,
 			AwayUntil:   awayUntil,
 			Reason:      reason,
 			CreatedAt:   time.Now(),
@@ -1196,11 +1237,21 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 		openParen, closeParen = " (", ")"
 	}
 	response := t("cmd.set_away.success", slackUserID)
-	if awayUntil != nil {
+
+	// Build date range description
+	switch {
+	case awayFrom != nil && awayUntil != nil && awayFrom.Format("2006-01-02") == awayUntil.Format("2006-01-02"):
+		response += openParen + t("common.on_date", awayFrom.Format("2006-01-02"))
+	case awayFrom != nil && awayUntil != nil:
+		response += openParen + t("common.from_until", awayFrom.Format("2006-01-02"), awayUntil.Format("2006-01-02"))
+	case awayFrom != nil:
+		response += openParen + t("common.from_until", awayFrom.Format("2006-01-02"), t("common.indefinite"))
+	case awayUntil != nil:
 		response += openParen + t("common.until", awayUntil.Format("2006-01-02"))
-	} else {
+	default:
 		response += openParen + t("common.indefinite")
 	}
+
 	if reason != "" {
 		response += t("common.reason", reason) + closeParen
 	} else {
@@ -1249,12 +1300,31 @@ func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
 
 	response := t("cmd.show_availability.header")
 	for _, r := range records {
-		line := fmt.Sprintf("• <@%s> - ", r.SlackUserID)
-		if r.AwayUntil != nil {
-			line += t("common.until", r.AwayUntil.Format("2006-01-02"))
+		// Determine status: scheduled (AwayFrom is in the future) or currently away
+		isScheduled := r.AwayFrom != nil && r.AwayFrom.After(now)
+		var statusLabel string
+		if isScheduled {
+			statusLabel = t("cmd.show_availability.status_scheduled")
 		} else {
+			statusLabel = t("cmd.show_availability.status_away")
+		}
+
+		line := fmt.Sprintf("• <@%s> [%s] ", r.SlackUserID, statusLabel)
+
+		// Build date range
+		switch {
+		case r.AwayFrom != nil && r.AwayUntil != nil && r.AwayFrom.Format("2006-01-02") == r.AwayUntil.Format("2006-01-02"):
+			line += t("common.on_date", r.AwayFrom.Format("2006-01-02"))
+		case r.AwayFrom != nil && r.AwayUntil != nil:
+			line += t("common.from_until", r.AwayFrom.Format("2006-01-02"), r.AwayUntil.Format("2006-01-02"))
+		case r.AwayFrom != nil:
+			line += t("common.from_until", r.AwayFrom.Format("2006-01-02"), t("common.indefinite"))
+		case r.AwayUntil != nil:
+			line += t("common.until", r.AwayUntil.Format("2006-01-02"))
+		default:
 			line += t("common.indefinite")
 		}
+
 		if r.Reason != "" {
 			line += t("common.reason_paren", r.Reason)
 		}

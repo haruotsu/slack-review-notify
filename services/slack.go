@@ -117,12 +117,18 @@ func buildMentionText(mentionID string) string {
 }
 
 // GetAwayUserIDs returns the user IDs of users currently on leave
+// (excludes scheduled future leaves where AwayFrom > now)
 func GetAwayUserIDs(db *gorm.DB) []string {
 	var records []models.ReviewerAvailability
 	now := time.Now()
 
-	// Retrieve records where AwayUntil is nil (indefinite) or in the future
-	db.Where("away_until IS NULL OR away_until > ?", now).Find(&records)
+	// Retrieve records that are currently active:
+	// 1. AwayFrom is nil (immediate) or in the past/present AND
+	// 2. AwayUntil is nil (indefinite) or in the future
+	db.Where(
+		"(away_from IS NULL OR away_from <= ?) AND (away_until IS NULL OR away_until > ?)",
+		now, now,
+	).Find(&records)
 
 	ids := make([]string, 0, len(records))
 	for _, r := range records {

@@ -440,3 +440,110 @@ func TestE2E_MultipleReReviews_OutsideBusinessHours_AllSendLater(t *testing.T) {
 	db.Where("id = ?", "e2e-multi-rereview").First(&deferredTask)
 	assert.False(t, deferredTask.PendingReReviewNotify)
 }
+
+// Test: Immediate away user is excluded from reviewer assignment, but scheduled (future) away is still eligible
+func TestE2E_ScheduledAway_NotExcludedFromReviewerAssignment(t *testing.T) {
+	originalURL := os.Getenv("SLACK_API_BASE_URL")
+	os.Setenv("SLACK_API_BASE_URL", slackhogBaseURL+"/api")
+	defer os.Setenv("SLACK_API_BASE_URL", originalURL)
+
+	services.IsTestMode = true
+	db, ts := setupE2EApp(t)
+	defer ts.Close()
+	clearSlackhogMessages(t)
+
+	// Setup channel config with 3 reviewers: U_R1, U_R2, U_R3
+	config := models.ChannelConfig{
+		ID:                 "e2e-away-config",
+		SlackChannelID:     "C_E2E_BH",
+		LabelName:          "needs-review",
+		DefaultMentionID:   "U_E2E_DEFAULT",
+		RepositoryList:    "e2e-owner/e2e-repo",
+		ReviewerList:      "U_R1,U_R2,U_R3",
+		RequiredApprovals: 2,
+		IsActive:           true,
+		BusinessHoursStart: "00:00",
+		BusinessHoursEnd:   "23:59",
+		Timezone:           "Asia/Tokyo",
+	}
+	db.Create(&config)
+
+	now := time.Now()
+	future := now.Add(7 * 24 * time.Hour) // 1 week from now
+
+	// U_R1: immediately away (no AwayFrom, indefinite)
+	db.Create(&models.ReviewerAvailability{
+		ID:          "e2e-away-immediate",
+		SlackUserID: "U_R1",
+		AwayFrom:    nil,
+		AwayUntil:   nil,
+		Reason:      "育児休業",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// U_R2: scheduled away (future AwayFrom)
+	db.Create(&models.ReviewerAvailability{
+		ID:          "e2e-away-scheduled",
+		SlackUserID: "U_R2",
+		AwayFrom:    &future,
+		AwayUntil:   nil,
+		Reason:      "来週から休暇",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// Send labeled webhook
+	payload := `{
+		"action": "labeled",
+		"label": {"name": "needs-review"},
+		"pull_request": {
+			"number": 100,
+			"html_url": "https://github.com/e2e-owner/e2e-repo/pull/100",
+			"title": "E2E Scheduled Away Test PR",
+			"user": {"login": "e2e-author"},
+			"labels": [{"name": "needs-review"}]
+		},
+		"repository": {"full_name": "e2e-owner/e2e-repo", "owner": {"login": "e2e-owner"}, "name": "e2e-repo"},
+		"sender": {"login": "e2e-author"}
+	}`
+	resp := sendWebhook(t, ts.URL, payload)
+	resp.Body.Close()
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify: slackhog received a message in C_E2E_BH
+	msgs := getSlackhogMessages(t, "C_E2E_BH")
+	require.NotEmpty(t, msgs, "Should have at least one message in slackhog")
+
+	// Find the PR notification message
+	var prMsg *slackhogMessage
+	for i, m := range msgs {
+		if strings.Contains(m.Text, "pull/100") || strings.Contains(m.Text, "E2E Scheduled Away Test PR") {
+			prMsg = &msgs[i]
+			break
+		}
+	}
+
+	// Get thread replies for reviewer assignment
+	if prMsg != nil {
+		replies := getSlackhogReplies(t, prMsg.ID)
+		allText := prMsg.Text
+		for _, r := range replies {
+			allText += " " + r.Text
+		}
+
+		// U_R1 (immediate away) should NOT be assigned
+		assert.NotContains(t, allText, "<@U_R1>", "Immediately away user should not be assigned as reviewer")
+
+		// U_R2 (scheduled future away) should still be eligible
+		// U_R3 is always eligible
+		// With 2 reviewers needed and U_R1 excluded, U_R2 and U_R3 should both be assigned
+		assert.Contains(t, allText, "<@U_R2>", "Scheduled (future) away user should still be eligible for review")
+		assert.Contains(t, allText, "<@U_R3>", "Available user should be assigned as reviewer")
+	}
+
+	// Verify the review task was created
+	var task models.ReviewTask
+	err := db.Where("pr_number = ? AND slack_channel = ?", 100, "C_E2E_BH").First(&task).Error
+	assert.NoError(t, err, "Review task should be created")
+}

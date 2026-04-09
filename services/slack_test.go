@@ -933,10 +933,34 @@ func TestGetAwayUserIDs(t *testing.T) {
 		UpdatedAt:   now,
 	})
 
+	// Scheduled future leave (AwayFrom is in the future, should not be returned)
+	db.Create(&models.ReviewerAvailability{
+		ID:          "away-4",
+		SlackUserID: "U_SCHEDULED",
+		AwayFrom:    &future,
+		AwayUntil:   nil,
+		Reason:      "来週の休暇",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// Scheduled leave that has started (AwayFrom is in the past)
+	db.Create(&models.ReviewerAvailability{
+		ID:          "away-5",
+		SlackUserID: "U_STARTED",
+		AwayFrom:    &past,
+		AwayUntil:   &future,
+		Reason:      "休暇中",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
 	ids := GetAwayUserIDs(db)
 	assert.Contains(t, ids, "U_AWAY1")
 	assert.Contains(t, ids, "U_AWAY2")
 	assert.NotContains(t, ids, "U_EXPIRED")
+	assert.NotContains(t, ids, "U_SCHEDULED", "Scheduled future leave should not be active yet")
+	assert.Contains(t, ids, "U_STARTED", "Leave with past AwayFrom should be active")
 }
 
 func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
