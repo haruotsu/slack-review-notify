@@ -125,10 +125,13 @@ func GetAwayUserIDs(db *gorm.DB) []string {
 	// Retrieve records that are currently active:
 	// 1. AwayFrom is nil (immediate) or in the past/present AND
 	// 2. AwayUntil is nil (indefinite) or in the future
-	db.Where(
+	result := db.Where(
 		"(away_from IS NULL OR away_from <= ?) AND (away_until IS NULL OR away_until > ?)",
 		now, now,
 	).Find(&records)
+	if result.Error != nil {
+		log.Printf("failed to query away users: %v", result.Error)
+	}
 
 	ids := make([]string, 0, len(records))
 	for _, r := range records {

@@ -192,7 +192,9 @@ Omitting [label-name] uses the default label "needs-review"`,
 
 	// ==================== Command: set-away ====================
 	"cmd.set_away.usage":        "Please specify a user to set as away.\nExamples:\n  set-away @user\n  set-away @user until 2025-06-01\n  set-away @user from 2025-05-28 until 2025-06-01\n  set-away @user on 2025-06-01\n  set-away @user on 2025-06-01 reason Day off",
-	"cmd.set_away.from_after_until": "The start date (from) must be before the end date (until).",
+	"cmd.set_away.from_after_until":  "The start date (from) must be before the end date (until).",
+	"cmd.set_away.missing_date":     "Please specify a date after the keyword. Example: from 2025-06-01",
+	"cmd.set_away.conflicting_keywords": "Cannot combine `on` with `from`/`until`. Use either `on YYYY-MM-DD` or `from YYYY-MM-DD until YYYY-MM-DD`.",
 	"cmd.set_away.no_user":      "Please specify a user to set as away.",
 	"cmd.set_away.invalid_date": "Invalid date format. Please use YYYY-MM-DD format (e.g., 2025-06-01).",
 	"cmd.set_away.past_date":    "Cannot specify a past date. Please specify today or a future date.",

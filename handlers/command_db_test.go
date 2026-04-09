@@ -331,6 +331,20 @@ func TestSetAway_Integration(t *testing.T) {
 			expectedBody:   "開始日（from）は終了日（until）より前に指定してください",
 		},
 		{
+			name:           "on combined with from is rejected",
+			text:           "set-away <@U99999> on 2099-06-01 from 2099-05-01",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectedBody:   "同時に使えません",
+		},
+		{
+			name:           "from without date value is rejected",
+			text:           "set-away <@U99999> from",
+			channelID:      "C12345",
+			expectedStatus: 200,
+			expectedBody:   "キーワードの後に日付を指定してください",
+		},
+		{
 			name:           "No user specified",
 			text:           "set-away",
 			channelID:      "C12345",

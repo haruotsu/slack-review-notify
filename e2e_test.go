@@ -525,22 +525,22 @@ func TestE2E_ScheduledAway_NotExcludedFromReviewerAssignment(t *testing.T) {
 	}
 
 	// Get thread replies for reviewer assignment
-	if prMsg != nil {
-		replies := getSlackhogReplies(t, prMsg.ID)
-		allText := prMsg.Text
-		for _, r := range replies {
-			allText += " " + r.Text
-		}
+	require.NotNil(t, prMsg, "PR notification message should be found in slackhog")
 
-		// U_R1 (immediate away) should NOT be assigned
-		assert.NotContains(t, allText, "<@U_R1>", "Immediately away user should not be assigned as reviewer")
-
-		// U_R2 (scheduled future away) should still be eligible
-		// U_R3 is always eligible
-		// With 2 reviewers needed and U_R1 excluded, U_R2 and U_R3 should both be assigned
-		assert.Contains(t, allText, "<@U_R2>", "Scheduled (future) away user should still be eligible for review")
-		assert.Contains(t, allText, "<@U_R3>", "Available user should be assigned as reviewer")
+	replies := getSlackhogReplies(t, prMsg.ID)
+	allText := prMsg.Text
+	for _, r := range replies {
+		allText += " " + r.Text
 	}
+
+	// U_R1 (immediate away) should NOT be assigned
+	assert.NotContains(t, allText, "<@U_R1>", "Immediately away user should not be assigned as reviewer")
+
+	// U_R2 (scheduled future away) should still be eligible
+	// U_R3 is always eligible
+	// With 2 reviewers needed and U_R1 excluded, U_R2 and U_R3 should both be assigned
+	assert.Contains(t, allText, "<@U_R2>", "Scheduled (future) away user should still be eligible for review")
+	assert.Contains(t, allText, "<@U_R3>", "Available user should be assigned as reviewer")
 
 	// Verify the review task was created
 	var task models.ReviewTask

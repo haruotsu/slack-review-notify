@@ -192,7 +192,9 @@ var messagesJa = map[string]string{
 
 	// ==================== Command: set-away ====================
 	"cmd.set_away.usage":        "休暇に設定するユーザーを指定してください。\n例:\n  set-away @user\n  set-away @user until 2025-06-01\n  set-away @user from 2025-05-28 until 2025-06-01\n  set-away @user on 2025-06-01\n  set-away @user on 2025-06-01 reason 有給休暇",
-	"cmd.set_away.from_after_until": "開始日（from）は終了日（until）より前に指定してください。",
+	"cmd.set_away.from_after_until":  "開始日（from）は終了日（until）より前に指定してください。",
+	"cmd.set_away.missing_date":     "キーワードの後に日付を指定してください。例: from 2025-06-01",
+	"cmd.set_away.conflicting_keywords": "`on` と `from`/`until` は同時に使えません。`on YYYY-MM-DD` または `from YYYY-MM-DD until YYYY-MM-DD` のどちらかを使用してください。",
 	"cmd.set_away.no_user":      "休暇に設定するユーザーを指定してください。",
 	"cmd.set_away.invalid_date": "日付形式が無効です。YYYY-MM-DD形式で指定してください（例: 2025-06-01）",
 	"cmd.set_away.past_date":    "過去の日付は指定できません。今日以降の日付を指定してください。",
