@@ -704,7 +704,11 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					log.Printf("failed to post review complete message: %v", err)
 				}
 
-				// All approvals met -> mark all tasks as completed
+				// All approvals met -> mark all tasks as completed.
+				// waiting_business_hours IS included here intentionally: full approval
+				// short-circuits the scheduled next-business-day reviewer mention because
+				// no further review is needed. (This is the intentional asymmetry with the
+				// commented/changes_requested branch below, which preserves waiting_business_hours.)
 				var channelTasks []models.ReviewTask
 				db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
 					repoFullName, pr.GetNumber(), channel,
@@ -771,8 +775,9 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			// Update tasks for the same channel and PR to completed (to prevent reminders).
 			// waiting_business_hours is intentionally excluded: those tasks have not yet had a
 			// reviewer assigned, so a single comment/changes_requested should not cancel the
-			// next-business-day reviewer mention. (CheckInReviewTasks only reminds in_review
-			// tasks, so leaving waiting_business_hours alone does not cause reminder spam.)
+			// next-business-day reviewer mention. waiting_business_hours tasks are not subject
+			// to the in-review reminder loop today (see services/tasks.go CheckInReviewTasks),
+			// so preserving them here does not produce reminder spam.
 			var channelTasks []models.ReviewTask
 			db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
 				repoFullName, pr.GetNumber(), channel,
