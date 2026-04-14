@@ -2144,3 +2144,461 @@ func TestHandleReviewRequestedEvent_WithinBusinessHours_SendsImmediately(t *test
 	assert.False(t, updatedTask.PendingReReviewNotify, "Notification should be sent immediately without business hours config")
 	assert.True(t, gock.IsDone(), "Slack notification should have been sent")
 }
+
+// --- Tests for pre-assigning pool commenters on waiting_business_hours tasks ---
+// プール所属メンバーが翌朝メンション前にコメントレビューを残した場合、
+// そのユーザーを翌朝の指名対象に事前アサインする挙動のテスト。
+
+// setupPreAssignTest は事前アサインテスト用の DB と共通 fixture を構築する。
+// channelID / label / pool のレビュワー ID / PR 番号などを指定できる。
+func setupPreAssignTestEnv(t *testing.T) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+}
+
+func TestHandleReviewSubmittedEvent_PoolMemberCommentPreAssignsToWaitingBusinessHours(t *testing.T) {
+	db := setupTestDB(t)
+	setupPreAssignTestEnv(t)
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// プールに reviewer1 (Slack=U_R1) と reviewer2 (Slack=U_R2) を登録。
+	config := models.ChannelConfig{
+		ID:                "config-preassign-1",
+		SlackChannelID:    "C_PREASSIGN1",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		ReviewerList:      "U_R1,U_R2",
+		RequiredApprovals: 2,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{ID: "m1", GithubUsername: "reviewer1", SlackUserID: "U_R1"})
+	db.Create(&models.UserMapping{ID: "m2", GithubUsername: "reviewer2", SlackUserID: "U_R2"})
+
+	task := models.ReviewTask{
+		ID:           "preassign-task-1",
+		PRURL:        "https://github.com/owner/repo/pull/600",
+		Repo:         "owner/repo",
+		PRNumber:     600,
+		Title:        "Waiting BH PR",
+		SlackTS:      "1234.6000",
+		SlackChannel: "C_PREASSIGN1",
+		Status:       "waiting_business_hours",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		UpdatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 600, "html_url": "https://github.com/owner/repo/pull/600"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "commented", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "preassign-task-1").First(&updated)
+	assert.Contains(t, updated.Reviewers, "U_R1",
+		"プールメンバー (reviewer1=U_R1) が翌朝前に commented した場合、task.Reviewers に事前アサインされるべき")
+	assert.Equal(t, "U_R1", updated.Reviewer,
+		"task.Reviewer が空だった場合、事前アサイン時に埋める")
+}
+
+func TestHandleReviewSubmittedEvent_NonPoolMemberCommentDoesNotPreAssign(t *testing.T) {
+	db := setupTestDB(t)
+	setupPreAssignTestEnv(t)
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// プールに U_R1 のみ登録。コメント者 outsider (U_OUT) は含まれない。
+	config := models.ChannelConfig{
+		ID:                "config-preassign-2",
+		SlackChannelID:    "C_PREASSIGN2",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		ReviewerList:      "U_R1",
+		RequiredApprovals: 1,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{ID: "m-out", GithubUsername: "outsider", SlackUserID: "U_OUT"})
+
+	task := models.ReviewTask{
+		ID:           "preassign-task-2",
+		PRURL:        "https://github.com/owner/repo/pull/601",
+		Repo:         "owner/repo",
+		PRNumber:     601,
+		Title:        "Waiting BH PR",
+		SlackTS:      "1234.6001",
+		SlackChannel: "C_PREASSIGN2",
+		Status:       "waiting_business_hours",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		UpdatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 601, "html_url": "https://github.com/owner/repo/pull/601"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "commented", "user": {"login": "outsider"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "preassign-task-2").First(&updated)
+	assert.NotContains(t, updated.Reviewers, "U_OUT",
+		"プール外メンバーのコメントで Reviewers が更新されてはいけない")
+	assert.Empty(t, updated.Reviewers, "初期値のまま Reviewers は空であるべき")
+}
+
+func TestHandleReviewSubmittedEvent_PRAuthorCommentDoesNotPreAssign(t *testing.T) {
+	db := setupTestDB(t)
+	setupPreAssignTestEnv(t)
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// 著者自身 (U_AUTHOR) がプールに含まれていても事前アサインしない。
+	config := models.ChannelConfig{
+		ID:                "config-preassign-3",
+		SlackChannelID:    "C_PREASSIGN3",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		ReviewerList:      "U_AUTHOR,U_R2",
+		RequiredApprovals: 1,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{ID: "m-author", GithubUsername: "author", SlackUserID: "U_AUTHOR"})
+
+	task := models.ReviewTask{
+		ID:              "preassign-task-3",
+		PRURL:           "https://github.com/owner/repo/pull/602",
+		Repo:            "owner/repo",
+		PRNumber:        602,
+		Title:           "Waiting BH PR",
+		SlackTS:         "1234.6002",
+		SlackChannel:    "C_PREASSIGN3",
+		Status:          "waiting_business_hours",
+		LabelName:       "needs-review",
+		PRAuthorSlackID: "U_AUTHOR",
+		CreatedAt:       time.Now().Add(-2 * time.Hour),
+		UpdatedAt:       time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 602, "html_url": "https://github.com/owner/repo/pull/602"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "commented", "user": {"login": "author"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "preassign-task-3").First(&updated)
+	assert.NotContains(t, updated.Reviewers, "U_AUTHOR",
+		"PR 著者自身のコメントでは事前アサインしない")
+	assert.Empty(t, updated.Reviewers, "Reviewers は空のままであるべき")
+}
+
+func TestHandleReviewSubmittedEvent_DuplicateCommentDoesNotDoubleAssign(t *testing.T) {
+	db := setupTestDB(t)
+	setupPreAssignTestEnv(t)
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	config := models.ChannelConfig{
+		ID:                "config-preassign-4",
+		SlackChannelID:    "C_PREASSIGN4",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		ReviewerList:      "U_R1,U_R2",
+		RequiredApprovals: 2,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{ID: "m1", GithubUsername: "reviewer1", SlackUserID: "U_R1"})
+
+	task := models.ReviewTask{
+		ID:           "preassign-task-4",
+		PRURL:        "https://github.com/owner/repo/pull/603",
+		Repo:         "owner/repo",
+		PRNumber:     603,
+		Title:        "Waiting BH PR",
+		SlackTS:      "1234.6003",
+		SlackChannel: "C_PREASSIGN4",
+		Status:       "waiting_business_hours",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		UpdatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 603, "html_url": "https://github.com/owner/repo/pull/603"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "commented", "user": {"login": "reviewer1"}}
+	}`
+
+	// 1回目のコメント
+	{
+		req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-GitHub-Event", "pull_request_review")
+		w := httptest.NewRecorder()
+		router := gin.Default()
+		router.POST("/webhook", HandleGitHubWebhook(db))
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	}
+
+	// status を waiting_business_hours に戻す (PR1 マージ後の挙動を想定)
+	db.Model(&models.ReviewTask{}).Where("id = ?", "preassign-task-4").
+		Update("status", "waiting_business_hours")
+
+	// 2回目のコメント (同じ人から)
+	{
+		req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-GitHub-Event", "pull_request_review")
+		w := httptest.NewRecorder()
+		router := gin.Default()
+		router.POST("/webhook", HandleGitHubWebhook(db))
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	}
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "preassign-task-4").First(&updated)
+	// Reviewers が "U_R1,U_R1" のような重複にならないこと
+	ids := strings.Split(updated.Reviewers, ",")
+	count := 0
+	for _, id := range ids {
+		if strings.TrimSpace(id) == "U_R1" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "同じプールメンバーが2回コメントしても Reviewers に1回しか含まれない")
+}
+
+func TestHandleReviewSubmittedEvent_PreAssignCappedAtRequiredApprovals(t *testing.T) {
+	db := setupTestDB(t)
+	setupPreAssignTestEnv(t)
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// RequiredApprovals=1。既に U_R1 が事前アサイン済みの状態で U_R2 がコメントしても追加しない。
+	config := models.ChannelConfig{
+		ID:                "config-preassign-5",
+		SlackChannelID:    "C_PREASSIGN5",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		ReviewerList:      "U_R1,U_R2",
+		RequiredApprovals: 1,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{ID: "m2", GithubUsername: "reviewer2", SlackUserID: "U_R2"})
+
+	task := models.ReviewTask{
+		ID:           "preassign-task-5",
+		PRURL:        "https://github.com/owner/repo/pull/604",
+		Repo:         "owner/repo",
+		PRNumber:     604,
+		Title:        "Waiting BH PR",
+		SlackTS:      "1234.6004",
+		SlackChannel: "C_PREASSIGN5",
+		Status:       "waiting_business_hours",
+		LabelName:    "needs-review",
+		Reviewer:     "U_R1",
+		Reviewers:    "U_R1",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		UpdatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 604, "html_url": "https://github.com/owner/repo/pull/604"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "commented", "user": {"login": "reviewer2"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "preassign-task-5").First(&updated)
+	assert.NotContains(t, updated.Reviewers, "U_R2",
+		"requiredApprovals を超える事前アサインは行わない")
+	assert.Equal(t, "U_R1", updated.Reviewers, "Reviewers は元の U_R1 のままであるべき")
+}
+
+func TestHandleReviewSubmittedEvent_AwayPoolMemberStillPreAssigned(t *testing.T) {
+	db := setupTestDB(t)
+	setupPreAssignTestEnv(t)
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	config := models.ChannelConfig{
+		ID:                "config-preassign-6",
+		SlackChannelID:    "C_PREASSIGN6",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		ReviewerList:      "U_R1,U_R2",
+		RequiredApprovals: 1,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{ID: "m1", GithubUsername: "reviewer1", SlackUserID: "U_R1"})
+
+	// U_R1 を Away に設定
+	db.Create(&models.ReviewerAvailability{
+		ID:          "avail-1",
+		SlackUserID: "U_R1",
+	})
+
+	task := models.ReviewTask{
+		ID:           "preassign-task-6",
+		PRURL:        "https://github.com/owner/repo/pull/605",
+		Repo:         "owner/repo",
+		PRNumber:     605,
+		Title:        "Waiting BH PR",
+		SlackTS:      "1234.6005",
+		SlackChannel: "C_PREASSIGN6",
+		Status:       "waiting_business_hours",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		UpdatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 605, "html_url": "https://github.com/owner/repo/pull/605"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "commented", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "preassign-task-6").First(&updated)
+	assert.Contains(t, updated.Reviewers, "U_R1",
+		"Away ステータスでもコメントしてる = 本人が動いてるため事前アサイン対象に含める")
+}

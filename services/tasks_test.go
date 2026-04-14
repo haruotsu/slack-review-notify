@@ -3,6 +3,7 @@ package services
 import (
 	"os"
 	"slack-review-notify/models"
+	"strings"
 	"testing"
 	"time"
 
@@ -423,4 +424,145 @@ func TestCleanupExpiredAvailability(t *testing.T) {
 	// Expired record should be deleted
 	db.Unscoped().Model(&models.ReviewerAvailability{}).Where("id = ?", "expired-away").Count(&count)
 	assert.Equal(t, int64(0), count)
+}
+
+// TestCheckBusinessHoursTasks_HonorsExistingReviewers は、
+// waiting_business_hours の task に既にレビュワーが事前アサインされている場合、
+// SelectRandomReviewers はその人を除外し、不足分のみ選出することを確認する。
+func TestCheckBusinessHoursTasks_HonorsExistingReviewers(t *testing.T) {
+	db := setupTestDB(t)
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	// chat.postMessage は複数回呼ばれるので Persist
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// RequiredApprovals=2, プールに 3人
+	config := models.ChannelConfig{
+		ID:                "cfg-honors",
+		SlackChannelID:    "C_HONORS",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		ReviewerList:      "U_R1,U_R2,U_R3",
+		RequiredApprovals: 2,
+		IsActive:          true,
+		// BusinessHours 未設定 → 常に within business hours
+	}
+	db.Create(&config)
+
+	// U_R1 だけ事前アサイン済み
+	task := models.ReviewTask{
+		ID:           "honors-task",
+		PRURL:        "https://github.com/owner/repo/pull/700",
+		Repo:         "owner/repo",
+		PRNumber:     700,
+		Title:        "Test PR",
+		SlackTS:      "1234.7000",
+		SlackChannel: "C_HONORS",
+		Reviewer:     "U_R1",
+		Reviewers:    "U_R1",
+		Status:       "waiting_business_hours",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	CheckBusinessHoursTasks(db)
+
+	var updated models.ReviewTask
+	db.First(&updated, "id = ?", "honors-task")
+
+	assert.Equal(t, "in_review", updated.Status, "business hours に入ったので in_review へ遷移")
+	// Reviewers は "U_R1,X" の形式で、X は U_R2 か U_R3 のどちらか
+	ids := splitNonEmptyForTest(updated.Reviewers)
+	assert.Len(t, ids, 2, "RequiredApprovals=2 分のレビュワーが設定されるべき")
+	assert.Contains(t, ids, "U_R1", "事前アサイン済みの U_R1 は維持されるべき")
+	assert.Equal(t, "U_R1", ids[0], "先頭は事前アサインの U_R1")
+	// 2人目は U_R2 か U_R3
+	second := ids[1]
+	assert.Contains(t, []string{"U_R2", "U_R3"}, second, "不足分はプールから選出される")
+	assert.NotEqual(t, "U_R1", second, "SelectRandomReviewers は事前アサイン済み U_R1 を除外する")
+}
+
+// TestCheckBusinessHoursTasks_FullyPreAssignedSkipsRandomSelect は、
+// RequiredApprovals を既に満たす数の事前アサインがあれば SelectRandomReviewers を呼ばず、
+// 事前アサイン分だけでメンション対象とすることを確認する。
+func TestCheckBusinessHoursTasks_FullyPreAssignedSkipsRandomSelect(t *testing.T) {
+	db := setupTestDB(t)
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// RequiredApprovals=1, プールに 2人
+	config := models.ChannelConfig{
+		ID:                "cfg-fully",
+		SlackChannelID:    "C_FULLY",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		ReviewerList:      "U_R1,U_R2",
+		RequiredApprovals: 1,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	// U_R1 が事前アサイン済み、RequiredApprovals=1 を満たしている
+	task := models.ReviewTask{
+		ID:           "fully-task",
+		PRURL:        "https://github.com/owner/repo/pull/701",
+		Repo:         "owner/repo",
+		PRNumber:     701,
+		Title:        "Test PR",
+		SlackTS:      "1234.7001",
+		SlackChannel: "C_FULLY",
+		Reviewer:     "U_R1",
+		Reviewers:    "U_R1",
+		Status:       "waiting_business_hours",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	CheckBusinessHoursTasks(db)
+
+	var updated models.ReviewTask
+	db.First(&updated, "id = ?", "fully-task")
+
+	assert.Equal(t, "in_review", updated.Status, "business hours に入ったので in_review へ遷移")
+	assert.Equal(t, "U_R1", updated.Reviewers, "既に RequiredApprovals を満たしているため U_R1 のみ")
+	assert.Equal(t, "U_R1", updated.Reviewer, "Reviewer も U_R1 で固定")
+}
+
+// splitNonEmptyForTest はテスト用のカンマ区切りユーティリティ。空要素は除外する。
+func splitNonEmptyForTest(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var result []string
+	for _, p := range strings.Split(s, ",") {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }

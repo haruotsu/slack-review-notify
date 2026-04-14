@@ -42,16 +42,37 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 			continue // Outside business hours, skip processing
 		}
 
-		// Randomly select reviewers (excluding PR author)
+		// 既に事前アサイン済みのレビュワー (プールメンバーが翌朝前にコメントしたケース) を尊重する。
+		existingReviewerIDs := []string{}
+		for _, id := range strings.Split(task.Reviewers, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				existingReviewerIDs = append(existingReviewerIDs, trimmed)
+			}
+		}
+
+		// Randomly select reviewers (excluding PR author and already pre-assigned reviewers)
 		excludeIDs := []string{}
 		if task.PRAuthorSlackID != "" {
 			excludeIDs = append(excludeIDs, task.PRAuthorSlackID)
 		}
+		excludeIDs = append(excludeIDs, existingReviewerIDs...)
+
 		requiredApprovals := config.RequiredApprovals
 		if requiredApprovals <= 0 {
 			requiredApprovals = 1
 		}
-		reviewerIDs := SelectRandomReviewers(db, task.SlackChannel, labelName, requiredApprovals, excludeIDs)
+
+		needed := requiredApprovals - len(existingReviewerIDs)
+		var reviewerIDs []string
+		if needed > 0 {
+			selected := SelectRandomReviewers(db, task.SlackChannel, labelName, needed, excludeIDs)
+			reviewerIDs = append(reviewerIDs, existingReviewerIDs...)
+			reviewerIDs = append(reviewerIDs, selected...)
+		} else {
+			// 事前アサインだけで requiredApprovals を満たしているのでランダム選出はスキップ。
+			reviewerIDs = existingReviewerIDs
+		}
+
 		reviewerID := ""
 		if len(reviewerIDs) > 0 {
 			reviewerID = reviewerIDs[0]
