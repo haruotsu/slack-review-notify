@@ -547,3 +547,107 @@ func TestE2E_ScheduledAway_NotExcludedFromReviewerAssignment(t *testing.T) {
 	err := db.Where("pr_number = ? AND slack_channel = ?", 100, "C_E2E_BH").First(&task).Error
 	assert.NoError(t, err, "Review task should be created")
 }
+
+// Test: Pool-member commented review on a waiting_business_hours task should be pre-assigned
+// (PR #95). Verifies that:
+//   1. task.Reviewers contains the pool member's Slack ID after the comment webhook fires
+//   2. The thread receives the "review commented" notification
+//   3. The task status is preserved as waiting_business_hours (PR #94 behavior)
+func TestE2E_PoolMemberCommentOnWaitingBusinessHours_PreAssignsReviewer(t *testing.T) {
+	originalURL := os.Getenv("SLACK_API_BASE_URL")
+	os.Setenv("SLACK_API_BASE_URL", slackhogBaseURL+"/api")
+	defer os.Setenv("SLACK_API_BASE_URL", originalURL)
+
+	services.IsTestMode = true
+	db, ts := setupE2EApp(t)
+	defer ts.Close()
+	clearSlackhogMessages(t)
+
+	const (
+		channelID    = "C_E2E_BH"
+		poolMember   = "U_E2E_POOL"
+		nonPool      = "U_E2E_NONPOOL"
+		ghPoolUser   = "e2e-pool-reviewer"
+		taskID       = "e2e-preassign-pool-task"
+		prNumber     = 200
+	)
+
+	// Channel pool contains the pool member
+	config := models.ChannelConfig{
+		ID:                "e2e-preassign-config",
+		SlackChannelID:    channelID,
+		LabelName:         "needs-review",
+		DefaultMentionID:  "U_E2E_DEFAULT",
+		ReviewerList:      poolMember + "," + nonPool,
+		IsActive:          true,
+		RequiredApprovals: 2,
+		Timezone:          "Asia/Tokyo",
+	}
+	require.NoError(t, db.Create(&config).Error)
+
+	// GitHub username -> Slack ID mapping for the pool member
+	mapping := models.UserMapping{
+		ID:             "e2e-mapping-pool",
+		GithubUsername: ghPoolUser,
+		SlackUserID:    poolMember,
+	}
+	require.NoError(t, db.Create(&mapping).Error)
+
+	// Root Slack message + waiting_business_hours review task awaiting next-morning mention
+	rootTS, parentID := postRootMessage(t, channelID, "PR notification for pull/200")
+
+	task := models.ReviewTask{
+		ID:              taskID,
+		PRURL:           "https://github.com/e2e-owner/e2e-repo/pull/200",
+		Repo:            "e2e-owner/e2e-repo",
+		PRNumber:        prNumber,
+		Title:           "E2E Pre-assign PR",
+		SlackTS:         rootTS,
+		SlackChannel:    channelID,
+		Status:          "waiting_business_hours",
+		LabelName:       "needs-review",
+		PRAuthorSlackID: "U_E2E_AUTHOR",
+		CreatedAt:       time.Now().Add(-12 * time.Hour),
+		UpdatedAt:       time.Now().Add(-12 * time.Hour),
+	}
+	require.NoError(t, db.Create(&task).Error)
+
+	// Pool member leaves a comment review on GitHub before the next-morning mention
+	payload := fmt.Sprintf(`{
+		"action": "submitted",
+		"pull_request": {"number": %d, "html_url": "https://github.com/e2e-owner/e2e-repo/pull/%d"},
+		"repository": {"full_name": "e2e-owner/e2e-repo", "owner": {"login": "e2e-owner"}, "name": "e2e-repo"},
+		"review": {"state": "commented", "user": {"login": "%s"}}
+	}`, prNumber, prNumber, ghPoolUser)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	time.Sleep(500 * time.Millisecond)
+
+	// (1) DB: task.Reviewers should now contain the pool member's Slack ID
+	var updatedTask models.ReviewTask
+	require.NoError(t, db.Where("id = ?", taskID).First(&updatedTask).Error)
+	assert.Equal(t, "waiting_business_hours", updatedTask.Status,
+		"status must be preserved (PR #94 behavior)")
+	assert.Equal(t, poolMember, updatedTask.Reviewer,
+		"single reviewer slot should be filled with the pool commenter")
+	assert.Contains(t, updatedTask.Reviewers, poolMember,
+		"reviewers list should include the pool commenter so the morning mention picks them")
+
+	// (2) Slack thread: review-commented notification should be delivered via slackhog
+	replies := getSlackhogReplies(t, parentID)
+	require.NotEmpty(t, replies, "review-commented notification should appear in thread")
+	commentNotificationFound := false
+	for _, r := range replies {
+		if strings.Contains(r.Text, "レビューコメントを残しました") || strings.Contains(r.Text, "left a review comment") {
+			commentNotificationFound = true
+			break
+		}
+	}
+	assert.True(t, commentNotificationFound,
+		"thread should contain the review-commented notification, got: %v", replies)
+}

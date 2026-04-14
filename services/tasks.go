@@ -42,38 +42,76 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 			continue // Outside business hours, skip processing
 		}
 
-		// Randomly select reviewers (excluding PR author)
+		// 既に事前アサイン済みのレビュワー (プールメンバーが翌朝前にコメントしたケース) を尊重する。
+		existingReviewerIDs := []string{}
+		for _, id := range strings.Split(task.Reviewers, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				existingReviewerIDs = append(existingReviewerIDs, trimmed)
+			}
+		}
+
+		// Randomly select reviewers (excluding PR author and already pre-assigned reviewers)
 		excludeIDs := []string{}
 		if task.PRAuthorSlackID != "" {
 			excludeIDs = append(excludeIDs, task.PRAuthorSlackID)
 		}
+		excludeIDs = append(excludeIDs, existingReviewerIDs...)
+
 		requiredApprovals := config.RequiredApprovals
 		if requiredApprovals <= 0 {
 			requiredApprovals = 1
 		}
-		reviewerIDs := SelectRandomReviewers(db, task.SlackChannel, labelName, requiredApprovals, excludeIDs)
+
+		needed := requiredApprovals - len(existingReviewerIDs)
+		var reviewerIDs []string
+		if needed > 0 {
+			selected := SelectRandomReviewers(db, task.SlackChannel, labelName, needed, excludeIDs)
+			reviewerIDs = append(reviewerIDs, existingReviewerIDs...)
+			reviewerIDs = append(reviewerIDs, selected...)
+		} else {
+			// 事前アサインだけで requiredApprovals を満たしているのでランダム選出はスキップ。
+			reviewerIDs = existingReviewerIDs
+		}
+
 		reviewerID := ""
 		if len(reviewerIDs) > 0 {
 			reviewerID = reviewerIDs[0]
 		}
 		reviewersStr := strings.Join(reviewerIDs, ",")
 
-		// Send business hours notification to thread
+		// CAS-like update: skip if preAssignPoolCommenter (or any other writer) updated this
+		// task since we read it. The next ticker pass will re-read the latest reviewers and
+		// fill in the remaining slots. Without this guard, the in-memory `task.Reviewers`
+		// can clobber a freshly pre-assigned reviewer.
+		oldUpdatedAt := task.UpdatedAt
+		updateResult := db.Model(&models.ReviewTask{}).
+			Where("id = ? AND status = ? AND updated_at = ?", task.ID, "waiting_business_hours", oldUpdatedAt).
+			Updates(map[string]interface{}{
+				"status":     "in_review",
+				"reviewer":   reviewerID,
+				"reviewers":  reviewersStr,
+				"updated_at": time.Now(),
+			})
+		if updateResult.Error != nil {
+			log.Printf("task status update error (task: %s): %v", task.ID, updateResult.Error)
+			continue
+		}
+		if updateResult.RowsAffected == 0 {
+			log.Printf("CAS conflict on business hours activation, will retry next tick: id=%s", task.ID)
+			continue
+		}
+
+		// Send business hours notification to thread (only after the DB CAS succeeded so we
+		// don't notify for a task that another writer has already activated).
 		if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
 			log.Printf("business hours notification error (task: %s): %v", task.ID, err)
 			continue
 		}
 
-		// Update task status
+		// Reflect the committed values in the in-memory copy used for downstream notifications.
 		task.Status = "in_review"
 		task.Reviewer = reviewerID
 		task.Reviewers = reviewersStr
-		task.UpdatedAt = time.Now()
-
-		if err := db.Save(&task).Error; err != nil {
-			log.Printf("task status update error (task: %s): %v", task.ID, err)
-			continue
-		}
 
 		log.Printf("waiting_business_hours task activated: %s", task.ID)
 

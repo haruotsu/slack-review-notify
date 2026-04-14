@@ -704,7 +704,11 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					log.Printf("failed to post review complete message: %v", err)
 				}
 
-				// All approvals met -> mark all tasks as completed
+				// All approvals met -> mark all tasks as completed.
+				// waiting_business_hours IS included here intentionally: full approval
+				// short-circuits the scheduled next-business-day reviewer mention because
+				// no further review is needed. (This is the intentional asymmetry with the
+				// commented/changes_requested branch below, which preserves waiting_business_hours.)
 				var channelTasks []models.ReviewTask
 				db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
 					repoFullName, pr.GetNumber(), channel,
@@ -768,11 +772,22 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 				}
 			}
 
-			// Update all tasks for the same channel and PR to completed (to prevent reminders)
+			// waiting_business_hours のタスクにプール所属メンバーがコメントした場合、
+			// 翌朝メンション前に事前アサインしておく（PR #95）。
+			if latestTask.Status == "waiting_business_hours" {
+				preAssignPoolCommenter(db, &latestTask, reviewerSlackID, requiredApprovals)
+			}
+
+			// Update tasks for the same channel and PR to completed (to prevent reminders).
+			// waiting_business_hours is intentionally excluded: those tasks have not yet had a
+			// reviewer assigned, so a single comment/changes_requested should not cancel the
+			// next-business-day reviewer mention. waiting_business_hours tasks are not subject
+			// to the in-review reminder loop today (see services/tasks.go CheckInReviewTasks),
+			// so preserving them here does not produce reminder spam.
 			var channelTasks []models.ReviewTask
 			db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
 				repoFullName, pr.GetNumber(), channel,
-				[]string{"in_review", "pending", "snoozed", "waiting_business_hours"}).Find(&channelTasks)
+				[]string{"in_review", "pending", "snoozed"}).Find(&channelTasks)
 
 			for _, task := range channelTasks {
 				task.Status = "completed"
@@ -786,4 +801,112 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			}
 		}
 	}
+}
+
+// preAssignPoolCommenter は waiting_business_hours 状態のタスクに対し、
+// プール所属メンバーが翌朝メンション前にコメントレビューを残した場合、
+// そのユーザーを翌朝の指名対象に事前アサインする。
+//
+// 以下のいずれかに該当する場合はスキップする:
+//   - reviewerSlackID が空（マッピング未登録、またはプール外）
+//   - reviewerSlackID が PR 著者と一致する
+//   - ChannelConfig が取得できない、または ReviewerList が空
+//   - reviewerSlackID が ReviewerList に含まれない
+//   - 既に task.Reviewers に含まれている（重複排除）
+//   - 既存 reviewers 数が requiredApprovals 以上（上限打ち切り）
+//
+// Away ステータスのプール所属メンバーでもコメントしている = 本人が動いているため対象に含める。
+func preAssignPoolCommenter(db *gorm.DB, task *models.ReviewTask, reviewerSlackID string, requiredApprovals int) {
+	if reviewerSlackID == "" {
+		return
+	}
+	if reviewerSlackID == task.PRAuthorSlackID {
+		return
+	}
+
+	labelName := task.LabelName
+	if labelName == "" {
+		labelName = "needs-review"
+	}
+
+	var config models.ChannelConfig
+	if err := db.Where("slack_channel_id = ? AND label_name = ?", task.SlackChannel, labelName).First(&config).Error; err != nil {
+		log.Printf("pre-assign: channel config not found: task=%s, err=%v", task.ID, err)
+		return
+	}
+
+	if strings.TrimSpace(config.ReviewerList) == "" {
+		return
+	}
+
+	pool := make(map[string]bool)
+	for _, r := range strings.Split(config.ReviewerList, ",") {
+		if trimmed := strings.TrimSpace(r); trimmed != "" {
+			pool[trimmed] = true
+		}
+	}
+	if !pool[reviewerSlackID] {
+		return
+	}
+
+	existing := splitNonEmpty(task.Reviewers)
+	for _, id := range existing {
+		if id == reviewerSlackID {
+			return
+		}
+	}
+
+	if len(existing) >= requiredApprovals {
+		log.Printf("pre-assign skipped: already at required approvals: task=%s, existing=%d, required=%d",
+			task.ID, len(existing), requiredApprovals)
+		return
+	}
+
+	oldReviewers := task.Reviewers
+	newReviewers := append([]string{}, existing...)
+	newReviewers = append(newReviewers, reviewerSlackID)
+	newReviewersStr := strings.Join(newReviewers, ",")
+
+	updates := map[string]interface{}{
+		"reviewers":  newReviewersStr,
+		"updated_at": time.Now(),
+	}
+	if task.Reviewer == "" {
+		updates["reviewer"] = reviewerSlackID
+	}
+
+	result := db.Model(&models.ReviewTask{}).
+		Where("id = ? AND reviewers = ? AND status = ?", task.ID, oldReviewers, "waiting_business_hours").
+		Updates(updates)
+	if result.Error != nil {
+		log.Printf("pre-assign update failed: task=%s, err=%v", task.ID, result.Error)
+		return
+	}
+	if result.RowsAffected == 0 {
+		log.Printf("pre-assign CAS conflict, skipping: task=%s", task.ID)
+		return
+	}
+
+	task.Reviewers = newReviewersStr
+	if task.Reviewer == "" {
+		task.Reviewer = reviewerSlackID
+	}
+
+	log.Printf("pre-assigned reviewer to waiting_business_hours task: id=%s, reviewer=%s",
+		task.ID, reviewerSlackID)
+}
+
+// splitNonEmpty はカンマ区切り文字列を分割し、空文字列を除外したスライスを返す。
+func splitNonEmpty(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
