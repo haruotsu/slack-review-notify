@@ -1512,6 +1512,124 @@ func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnChangesRequested(t *te
 	assert.Equal(t, "completed", updatedTask.Status, "Snoozed task should also be completed after changes_requested review")
 }
 
+// --- Tests ensuring waiting_business_hours tasks are NOT completed by comment / changes_requested ---
+// Regression: previously a single comment from anyone before the next business morning would
+// flip waiting_business_hours -> completed and cancel the scheduled reviewer mention.
+
+func TestHandleReviewSubmittedEvent_WaitingBusinessHoursTaskPreservedOnComment(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	task := models.ReviewTask{
+		ID:           "waiting-bh-comment-task",
+		PRURL:        "https://github.com/owner/repo/pull/500",
+		Repo:         "owner/repo",
+		PRNumber:     500,
+		Title:        "Waiting Business Hours PR",
+		SlackTS:      "1234.5500",
+		SlackChannel: "C_WAITING_BH",
+		Status:       "waiting_business_hours",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		UpdatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 500, "html_url": "https://github.com/owner/repo/pull/500"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "commented", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "waiting-bh-comment-task").First(&updatedTask)
+	assert.Equal(t, "waiting_business_hours", updatedTask.Status,
+		"waiting_business_hours task must NOT be completed by a comment review; the next-morning mention must still fire")
+}
+
+func TestHandleReviewSubmittedEvent_WaitingBusinessHoursTaskPreservedOnChangesRequested(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	task := models.ReviewTask{
+		ID:           "waiting-bh-changes-task",
+		PRURL:        "https://github.com/owner/repo/pull/501",
+		Repo:         "owner/repo",
+		PRNumber:     501,
+		Title:        "Waiting Business Hours PR",
+		SlackTS:      "1234.5501",
+		SlackChannel: "C_WAITING_BH2",
+		Status:       "waiting_business_hours",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now().Add(-2 * time.Hour),
+		UpdatedAt:    time.Now().Add(-2 * time.Hour),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 501, "html_url": "https://github.com/owner/repo/pull/501"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "changes_requested", "user": {"login": "reviewer1"}}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "waiting-bh-changes-task").First(&updatedTask)
+	assert.Equal(t, "waiting_business_hours", updatedTask.Status,
+		"waiting_business_hours task must NOT be completed by a changes_requested review; the next-morning mention must still fire")
+}
+
 // --- Tests for snoozed tasks becoming completed when fully approved ---
 
 func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnFullApproval(t *testing.T) {

@@ -768,11 +768,15 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 				}
 			}
 
-			// Update all tasks for the same channel and PR to completed (to prevent reminders)
+			// Update tasks for the same channel and PR to completed (to prevent reminders).
+			// waiting_business_hours is intentionally excluded: those tasks have not yet had a
+			// reviewer assigned, so a single comment/changes_requested should not cancel the
+			// next-business-day reviewer mention. (CheckInReviewTasks only reminds in_review
+			// tasks, so leaving waiting_business_hours alone does not cause reminder spam.)
 			var channelTasks []models.ReviewTask
 			db.Where("repo = ? AND pr_number = ? AND slack_channel = ? AND status IN ?",
 				repoFullName, pr.GetNumber(), channel,
-				[]string{"in_review", "pending", "snoozed", "waiting_business_hours"}).Find(&channelTasks)
+				[]string{"in_review", "pending", "snoozed"}).Find(&channelTasks)
 
 			for _, task := range channelTasks {
 				task.Status = "completed"
