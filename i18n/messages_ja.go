@@ -203,7 +203,7 @@ var messagesJa = map[string]string{
 	"cmd.set_away.success":      "<@%s> を休暇に設定しました",
 
 	// ==================== Command: unset-away ====================
-	"cmd.unset_away.usage":   "休暇を解除するユーザーを指定してください。例: /slack-review-notify unset-away @user",
+	"cmd.unset_away.usage":   "休暇を解除するユーザーを指定してください。\n例:\n  unset-away @user （すべての休暇を解除）\n  unset-away @user on 2025-06-01 （指定日の休暇のみ解除）\n  unset-away @user from 2025-05-28 until 2025-06-01 （指定期間の休暇のみ解除）",
 	"cmd.unset_away.not_set": "<@%s> は休暇に設定されていません。",
 	"cmd.unset_away.success": "<@%s> の休暇を解除しました",
 

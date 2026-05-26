@@ -133,8 +133,14 @@ func GetAwayUserIDs(db *gorm.DB) []string {
 		log.Printf("failed to query away users: %v", result.Error)
 	}
 
+	// A user may have several active periods at once, so de-duplicate the IDs.
+	seen := make(map[string]struct{}, len(records))
 	ids := make([]string, 0, len(records))
 	for _, r := range records {
+		if _, ok := seen[r.SlackUserID]; ok {
+			continue
+		}
+		seen[r.SlackUserID] = struct{}{}
 		ids = append(ids, r.SlackUserID)
 	}
 	return ids

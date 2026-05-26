@@ -368,10 +368,171 @@ func TestSetAway_Integration(t *testing.T) {
 		})
 	}
 
-	// Upsert test: setting the same user again should result in 1 record
+	// A single set-away creates exactly 1 record
 	var count int64
 	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "U12345").Count(&count)
 	assert.Equal(t, int64(1), count)
+}
+
+// TestSetAway_MultiplePeriods verifies that a user can hold multiple distinct leave
+// periods at once (e.g. a pre-booked vacation plus a sudden sick day), and that
+// re-registering an identical period stays idempotent instead of adding a duplicate.
+func TestSetAway_MultiplePeriods(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	// Register two separate scheduled leaves for the same user.
+	assert.Equal(t, 200, send("set-away <@UMULTI> on 2099-06-01").Code)
+	assert.Equal(t, 200, send("set-away <@UMULTI> on 2099-06-10").Code)
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UMULTI").Count(&count)
+	assert.Equal(t, int64(2), count, "two distinct periods should be stored separately")
+
+	// Registering an identical period again only updates the reason; no new row.
+	assert.Equal(t, 200, send("set-away <@UMULTI> on 2099-06-10 reason 再登録").Code)
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UMULTI").Count(&count)
+	assert.Equal(t, int64(2), count, "re-registering the same period must not add a row")
+}
+
+// TestUnsetAway_SpecificPeriod verifies that unset-away with a date removes only the
+// matching period, while unset-away without a date removes all of the user's leaves.
+func TestUnsetAway_SpecificPeriod(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	send("set-away <@UPART> on 2099-06-01")
+	send("set-away <@UPART> on 2099-06-10")
+
+	// Remove only the 2099-06-01 leave.
+	w := send("unset-away <@UPART> on 2099-06-01")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇を解除しました")
+
+	var records []models.ReviewerAvailability
+	db.Where("slack_user_id = ?", "UPART").Find(&records)
+	assert.Len(t, records, 1, "only the matching period should be removed")
+	if len(records) == 1 && assert.NotNil(t, records[0].AwayFrom) {
+		assert.Equal(t, "2099-06-10", records[0].AwayFrom.Format("2006-01-02"), "the other period must remain")
+	}
+
+	// unset-away without a date removes all remaining leaves.
+	w2 := send("unset-away <@UPART>")
+	assert.Equal(t, 200, w2.Code)
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UPART").Count(&count)
+	assert.Equal(t, int64(0), count)
+}
+
+// TestUnsetAway_FromUntilPeriod verifies individual removal of a range period
+// registered with "from/until", which produces different timestamps than "on".
+func TestUnsetAway_FromUntilPeriod(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	// Two range periods plus an open-ended "from"-only period for the same user.
+	send("set-away <@URANGE> from 2099-06-01 until 2099-06-05")
+	send("set-away <@URANGE> from 2099-07-01 until 2099-07-05")
+	send("set-away <@URANGE> from 2099-08-01")
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "URANGE").Count(&count)
+	assert.Equal(t, int64(3), count)
+
+	// Remove only the first range.
+	w := send("unset-away <@URANGE> from 2099-06-01 until 2099-06-05")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇を解除しました")
+
+	var remaining []models.ReviewerAvailability
+	db.Where("slack_user_id = ?", "URANGE").Order("away_from").Find(&remaining)
+	assert.Len(t, remaining, 2, "only the matching range should be removed")
+
+	// Remove only the open-ended "from"-only period.
+	w2 := send("unset-away <@URANGE> from 2099-08-01")
+	assert.Equal(t, 200, w2.Code)
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "URANGE").Count(&count)
+	assert.Equal(t, int64(1), count, "the from-only period should be removable individually")
+}
+
+// TestUnsetAway_NoMatchKeepsPeriods verifies that a date that does not exactly
+// match any stored period removes nothing and reports "not set", leaving the
+// existing periods intact.
+func TestUnsetAway_NoMatchKeepsPeriods(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	send("set-away <@UNOMATCH> from 2099-06-01 until 2099-06-05")
+
+	// "on 2099-06-01" sets until=end-of-day, which does not match the stored
+	// until=2099-06-05, so nothing should be deleted.
+	w := send("unset-away <@UNOMATCH> on 2099-06-01")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇に設定されていません")
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UNOMATCH").Count(&count)
+	assert.Equal(t, int64(1), count, "a non-matching date must not delete any period")
 }
 
 func TestUnsetAway_Integration(t *testing.T) {

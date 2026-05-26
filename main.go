@@ -35,6 +35,12 @@ func main() {
 		log.Fatal("fail to migrate db:", err)
 	}
 
+	// Relax the legacy UNIQUE index on slack_user_id so a reviewer can hold
+	// multiple away periods. AutoMigrate cannot change index uniqueness.
+	if err := models.MigrateReviewerAvailabilityIndex(db); err != nil {
+		log.Fatal("fail to migrate reviewer availability index:", err)
+	}
+
 	// Background periodic task to check watching tasks
 	go runTaskChecker(db)
 
