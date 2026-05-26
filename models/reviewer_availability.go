@@ -46,10 +46,14 @@ func MigrateReviewerAvailabilityIndex(db *gorm.DB) error {
 
 	for _, idx := range indexes {
 		if idx.Name == reviewerAvailabilitySlackUserIndex && idx.Unique == 1 {
-			if err := db.Migrator().DropIndex(&ReviewerAvailability{}, "SlackUserID"); err != nil {
-				return err
-			}
-			return db.Migrator().CreateIndex(&ReviewerAvailability{}, "SlackUserID")
+			// Drop and recreate in one transaction so a failure cannot leave
+			// the table without any slack_user_id index.
+			return db.Transaction(func(tx *gorm.DB) error {
+				if err := tx.Migrator().DropIndex(&ReviewerAvailability{}, "SlackUserID"); err != nil {
+					return err
+				}
+				return tx.Migrator().CreateIndex(&ReviewerAvailability{}, "SlackUserID")
+			})
 		}
 	}
 	return nil

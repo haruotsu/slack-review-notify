@@ -119,30 +119,25 @@ func buildMentionText(mentionID string) string {
 // GetAwayUserIDs returns the user IDs of users currently on leave
 // (excludes scheduled future leaves where AwayFrom > now)
 func GetAwayUserIDs(db *gorm.DB) []string {
-	var records []models.ReviewerAvailability
 	now := time.Now()
 
-	// Retrieve records that are currently active:
+	// Retrieve the IDs of users with a currently active period:
 	// 1. AwayFrom is nil (immediate) or in the past/present AND
 	// 2. AwayUntil is nil (indefinite) or in the future
-	result := db.Where(
-		"(away_from IS NULL OR away_from <= ?) AND (away_until IS NULL OR away_until > ?)",
-		now, now,
-	).Find(&records)
+	// A user may have several active periods at once, so SELECT DISTINCT to
+	// return each ID once and avoid fetching unneeded columns.
+	var ids []string
+	result := db.Model(&models.ReviewerAvailability{}).
+		Where(
+			"(away_from IS NULL OR away_from <= ?) AND (away_until IS NULL OR away_until > ?)",
+			now, now,
+		).
+		Distinct().
+		Pluck("slack_user_id", &ids)
 	if result.Error != nil {
 		log.Printf("failed to query away users: %v", result.Error)
 	}
 
-	// A user may have several active periods at once, so de-duplicate the IDs.
-	seen := make(map[string]struct{}, len(records))
-	ids := make([]string, 0, len(records))
-	for _, r := range records {
-		if _, ok := seen[r.SlackUserID]; ok {
-			continue
-		}
-		seen[r.SlackUserID] = struct{}{}
-		ids = append(ids, r.SlackUserID)
-	}
 	return ids
 }
 

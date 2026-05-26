@@ -492,12 +492,22 @@ func TestUnsetAway_FromUntilPeriod(t *testing.T) {
 	var remaining []models.ReviewerAvailability
 	db.Where("slack_user_id = ?", "URANGE").Order("away_from").Find(&remaining)
 	assert.Len(t, remaining, 2, "only the matching range should be removed")
+	if assert.Len(t, remaining, 2) {
+		assert.NotNil(t, remaining[0].AwayFrom)
+		assert.Equal(t, "2099-07-01", remaining[0].AwayFrom.Format("2006-01-02"), "the 07 range must remain")
+		assert.NotNil(t, remaining[1].AwayFrom)
+		assert.Equal(t, "2099-08-01", remaining[1].AwayFrom.Format("2006-01-02"), "the from-only period must remain")
+	}
 
 	// Remove only the open-ended "from"-only period.
 	w2 := send("unset-away <@URANGE> from 2099-08-01")
 	assert.Equal(t, 200, w2.Code)
-	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "URANGE").Count(&count)
-	assert.Equal(t, int64(1), count, "the from-only period should be removable individually")
+	var survivors []models.ReviewerAvailability
+	db.Where("slack_user_id = ?", "URANGE").Find(&survivors)
+	assert.Len(t, survivors, 1, "the from-only period should be removable individually")
+	if assert.Len(t, survivors, 1) && assert.NotNil(t, survivors[0].AwayFrom) {
+		assert.Equal(t, "2099-07-01", survivors[0].AwayFrom.Format("2006-01-02"), "the 07 range must be the survivor")
+	}
 }
 
 // TestUnsetAway_NoMatchKeepsPeriods verifies that a date that does not exactly

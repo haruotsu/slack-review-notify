@@ -963,6 +963,36 @@ func TestGetAwayUserIDs(t *testing.T) {
 	assert.Contains(t, ids, "U_STARTED", "Leave with past AwayFrom should be active")
 }
 
+// TestGetAwayUserIDs_DeduplicatesMultiplePeriods verifies that a user with
+// several active periods at once is returned only once.
+func TestGetAwayUserIDs_DeduplicatesMultiplePeriods(t *testing.T) {
+	db := setupTestDB(t)
+
+	now := time.Now()
+	future := now.Add(24 * time.Hour)
+	farFuture := now.Add(72 * time.Hour)
+
+	// Same user with two simultaneously active periods.
+	db.Create(&models.ReviewerAvailability{
+		ID: "multi-1", SlackUserID: "U_MULTI", AwayUntil: &future,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	db.Create(&models.ReviewerAvailability{
+		ID: "multi-2", SlackUserID: "U_MULTI", AwayUntil: &farFuture,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	ids := GetAwayUserIDs(db)
+
+	count := 0
+	for _, id := range ids {
+		if id == "U_MULTI" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "a user with multiple active periods must appear exactly once")
+}
+
 func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
 	db := setupTestDB(t)
 

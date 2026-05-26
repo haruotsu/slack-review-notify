@@ -100,4 +100,10 @@ func TestMigrateReviewerAvailabilityIndex_Idempotent(t *testing.T) {
 	if err := db.Create(&r2).Error; err != nil {
 		t.Fatalf("create r2: %v", err)
 	}
+
+	var count int64
+	db.Model(&ReviewerAvailability{}).Where("slack_user_id = ?", "U999").Count(&count)
+	if count != 2 {
+		t.Fatalf("expected 2 rows after idempotent migration, got %d", count)
+	}
 }

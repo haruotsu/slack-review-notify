@@ -1108,6 +1108,13 @@ type awayPeriod struct {
 	reason string
 }
 
+// Named values for parseAwayPeriod's rejectPast argument, so call sites read
+// clearly instead of passing a bare true/false.
+const (
+	rejectPastDates = true  // set-away: a leave cannot start in the past
+	allowPastDates  = false // unset-away: a past period may still be removed
+)
+
 // resolveTimezone returns the location configured for the channel/label, falling back to Asia/Tokyo.
 func resolveTimezone(db *gorm.DB, channelID, labelName string) *time.Location {
 	timezone := "Asia/Tokyo"
@@ -1239,7 +1246,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 	loc := resolveTimezone(db, channelID, labelName)
 	nowLocal := time.Now().In(loc)
 
-	period, errKey := parseAwayPeriod(parts, loc, nowLocal, true)
+	period, errKey := parseAwayPeriod(parts, loc, nowLocal, rejectPastDates)
 	if errKey != "" {
 		c.String(200, t(errKey))
 		return
@@ -1335,7 +1342,7 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 	if len(parts) > 1 {
 		loc := resolveTimezone(db, channelID, labelName)
 		nowLocal := time.Now().In(loc)
-		period, errKey := parseAwayPeriod(parts, loc, nowLocal, false)
+		period, errKey := parseAwayPeriod(parts, loc, nowLocal, allowPastDates)
 		if errKey != "" {
 			c.String(200, t(errKey))
 			return
@@ -1382,8 +1389,11 @@ func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
 	var records []models.ReviewerAvailability
 	now := time.Now()
 
-	// Get non-expired records (currently away or scheduled for the future)
-	db.Where("away_until IS NULL OR away_until > ?", now).Find(&records)
+	// Get non-expired records (currently away or scheduled for the future).
+	// Order by user then start date so a user's multiple periods stay grouped.
+	db.Where("away_until IS NULL OR away_until > ?", now).
+		Order("slack_user_id, away_from").
+		Find(&records)
 
 	if len(records) == 0 {
 		c.String(200, t("cmd.show_availability.empty"))
