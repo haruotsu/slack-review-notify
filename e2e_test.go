@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,12 +29,34 @@ import (
 const slackhogBaseURL = "http://localhost:14112"
 
 type slackhogMessage struct {
-	ID         string `json:"id"`
-	Channel    string `json:"channel"`
-	Text       string `json:"text"`
-	ThreadTS   string `json:"thread_ts"`
-	ReplyCount int    `json:"reply_count"`
-	RawPayload any    `json:"raw_payload"`
+	ID         string          `json:"id"`
+	Channel    string          `json:"channel"`
+	Text       string          `json:"text"`
+	ThreadTS   string          `json:"thread_ts"`
+	ReplyCount int             `json:"reply_count"`
+	Blocks     json.RawMessage `json:"blocks"`
+	RawPayload any             `json:"raw_payload"`
+}
+
+// messageContent returns the searchable text of a slackhog message. The app posts
+// notifications as Block Kit payloads with no top-level text, so the visible
+// content (PR links, reviewer mentions) lives inside blocks. slackhog returns the
+// blocks with HTML-escaped angle brackets (Go's JSON encoder escapes <, >, &), so
+// the raw bytes spell mentions as <@U123>. Re-encoding with HTML escaping
+// disabled restores <@U123>, letting tests assert on that content with
+// strings.Contains.
+func messageContent(m slackhogMessage) string {
+	blocks := string(m.Blocks)
+	var decoded any
+	if err := json.Unmarshal(m.Blocks, &decoded); err == nil {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if enc.Encode(decoded) == nil {
+			blocks = buf.String()
+		}
+	}
+	return m.Text + " " + blocks
 }
 
 type slackhogMessagesResponse struct {
@@ -458,9 +481,9 @@ func TestE2E_ScheduledAway_NotExcludedFromReviewerAssignment(t *testing.T) {
 		SlackChannelID:     "C_E2E_BH",
 		LabelName:          "needs-review",
 		DefaultMentionID:   "U_E2E_DEFAULT",
-		RepositoryList:    "e2e-owner/e2e-repo",
-		ReviewerList:      "U_R1,U_R2,U_R3",
-		RequiredApprovals: 2,
+		RepositoryList:     "e2e-owner/e2e-repo",
+		ReviewerList:       "U_R1,U_R2,U_R3",
+		RequiredApprovals:  2,
 		IsActive:           true,
 		BusinessHoursStart: "00:00",
 		BusinessHoursEnd:   "23:59",
@@ -518,7 +541,7 @@ func TestE2E_ScheduledAway_NotExcludedFromReviewerAssignment(t *testing.T) {
 	// Find the PR notification message
 	var prMsg *slackhogMessage
 	for i, m := range msgs {
-		if strings.Contains(m.Text, "pull/100") || strings.Contains(m.Text, "E2E Scheduled Away Test PR") {
+		if strings.Contains(messageContent(m), "pull/100") || strings.Contains(messageContent(m), "E2E Scheduled Away Test PR") {
 			prMsg = &msgs[i]
 			break
 		}
@@ -528,9 +551,9 @@ func TestE2E_ScheduledAway_NotExcludedFromReviewerAssignment(t *testing.T) {
 	require.NotNil(t, prMsg, "PR notification message should be found in slackhog")
 
 	replies := getSlackhogReplies(t, prMsg.ID)
-	allText := prMsg.Text
+	allText := messageContent(*prMsg)
 	for _, r := range replies {
-		allText += " " + r.Text
+		allText += " " + messageContent(r)
 	}
 
 	// U_R1 (immediate away) should NOT be assigned
@@ -545,5 +568,113 @@ func TestE2E_ScheduledAway_NotExcludedFromReviewerAssignment(t *testing.T) {
 	// Verify the review task was created
 	var task models.ReviewTask
 	err := db.Where("pr_number = ? AND slack_channel = ?", 100, "C_E2E_BH").First(&task).Error
+	assert.NoError(t, err, "Review task should be created")
+}
+
+// Test: A reviewer with multiple simultaneous away periods is excluded exactly once.
+// This guards the multiple-away-periods fix end to end: the two records must
+// coexist (the upsert no longer overwrites the first), and GetAwayUserIDs must
+// deduplicate so the user is excluded from reviewer assignment without breaking
+// the remaining assignment count.
+func TestE2E_MultipleAwayPeriods_ExcludedFromReviewerAssignment(t *testing.T) {
+	originalURL := os.Getenv("SLACK_API_BASE_URL")
+	os.Setenv("SLACK_API_BASE_URL", slackhogBaseURL+"/api")
+	defer os.Setenv("SLACK_API_BASE_URL", originalURL)
+
+	services.IsTestMode = true
+	db, ts := setupE2EApp(t)
+	defer ts.Close()
+	clearSlackhogMessages(t)
+
+	config := models.ChannelConfig{
+		ID:                 "e2e-multi-away-config",
+		SlackChannelID:     "C_E2E_BH",
+		LabelName:          "needs-review",
+		DefaultMentionID:   "U_E2E_DEFAULT",
+		RepositoryList:     "e2e-owner/e2e-repo",
+		ReviewerList:       "U_M1,U_M2,U_M3",
+		RequiredApprovals:  2,
+		IsActive:           true,
+		BusinessHoursStart: "00:00",
+		BusinessHoursEnd:   "23:59",
+		Timezone:           "Asia/Tokyo",
+	}
+	db.Create(&config)
+
+	now := time.Now()
+	past := now.Add(-24 * time.Hour)
+	future := now.Add(7 * 24 * time.Hour)
+
+	// U_M1 holds two away periods that are both active right now: an open-ended
+	// sick day plus a bounded period covering today. Before the fix the second
+	// registration overwrote the first; now both must coexist.
+	db.Create(&models.ReviewerAvailability{
+		ID:          "e2e-multi-away-1",
+		SlackUserID: "U_M1",
+		AwayFrom:    nil,
+		AwayUntil:   nil,
+		Reason:      "急な体調不良",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	db.Create(&models.ReviewerAvailability{
+		ID:          "e2e-multi-away-2",
+		SlackUserID: "U_M1",
+		AwayFrom:    &past,
+		AwayUntil:   &future,
+		Reason:      "予約済みの休暇",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// Sanity check: both records are persisted (no overwrite).
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "U_M1").Count(&count)
+	require.Equal(t, int64(2), count, "Both away periods for the same user should coexist")
+
+	payload := `{
+		"action": "labeled",
+		"label": {"name": "needs-review"},
+		"pull_request": {
+			"number": 101,
+			"html_url": "https://github.com/e2e-owner/e2e-repo/pull/101",
+			"title": "E2E Multiple Away Periods Test PR",
+			"user": {"login": "e2e-author"},
+			"labels": [{"name": "needs-review"}]
+		},
+		"repository": {"full_name": "e2e-owner/e2e-repo", "owner": {"login": "e2e-owner"}, "name": "e2e-repo"},
+		"sender": {"login": "e2e-author"}
+	}`
+	resp := sendWebhook(t, ts.URL, payload)
+	resp.Body.Close()
+	time.Sleep(500 * time.Millisecond)
+
+	msgs := getSlackhogMessages(t, "C_E2E_BH")
+	require.NotEmpty(t, msgs, "Should have at least one message in slackhog")
+
+	var prMsg *slackhogMessage
+	for i, m := range msgs {
+		if strings.Contains(messageContent(m), "pull/101") || strings.Contains(messageContent(m), "E2E Multiple Away Periods Test PR") {
+			prMsg = &msgs[i]
+			break
+		}
+	}
+	require.NotNil(t, prMsg, "PR notification message should be found in slackhog")
+
+	replies := getSlackhogReplies(t, prMsg.ID)
+	allText := messageContent(*prMsg)
+	for _, r := range replies {
+		allText += " " + messageContent(r)
+	}
+
+	// U_M1 has two active periods and must be excluded (deduplicated).
+	assert.NotContains(t, allText, "<@U_M1>", "User with multiple active away periods should not be assigned")
+
+	// The remaining two reviewers fill the two required slots.
+	assert.Contains(t, allText, "<@U_M2>", "Available user should be assigned as reviewer")
+	assert.Contains(t, allText, "<@U_M3>", "Available user should be assigned as reviewer")
+
+	var task models.ReviewTask
+	err := db.Where("pr_number = ? AND slack_channel = ?", 101, "C_E2E_BH").First(&task).Error
 	assert.NoError(t, err, "Review task should be created")
 }
