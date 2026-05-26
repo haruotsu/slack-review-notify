@@ -454,6 +454,45 @@ func TestUnsetAway_SpecificPeriod(t *testing.T) {
 	assert.Equal(t, int64(0), count)
 }
 
+// TestShowAvailability_AfterUnsetOneOfTwo verifies the display output of
+// show-availability for the core bug scenario: register two leave periods for
+// the same user, remove one, and confirm the other still appears in the list.
+func TestShowAvailability_AfterUnsetOneOfTwo(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) string {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w.Body.String()
+	}
+
+	send("set-away <@UKEEP> on 2099-06-01")
+	send("set-away <@UKEEP> on 2099-06-10")
+
+	// Before removal both periods must be listed.
+	before := send("show-availability")
+	assert.Contains(t, before, "2099-06-01", "the first period must be listed before unset")
+	assert.Contains(t, before, "2099-06-10", "the second period must be listed before unset")
+
+	send("unset-away <@UKEEP> on 2099-06-01")
+
+	// After removing only 2099-06-01 the 2099-06-10 period must remain visible.
+	after := send("show-availability")
+	assert.NotContains(t, after, "2099-06-01", "the removed period must disappear from the list")
+	assert.Contains(t, after, "2099-06-10", "the surviving period must still be listed")
+	assert.Contains(t, after, "UKEEP", "the user must still appear for the surviving period")
+}
+
 // TestUnsetAway_FromUntilPeriod verifies individual removal of a range period
 // registered with "from/until", which produces different timestamps than "on".
 func TestUnsetAway_FromUntilPeriod(t *testing.T) {
