@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -273,7 +274,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				setAway(c, db, channelID, labelName, params, lang)
 
 			case "unset-away":
-				unsetAway(c, db, params, lang)
+				unsetAway(c, db, channelID, labelName, params, lang)
 
 			case "show-availability":
 				showAvailability(c, db, lang)
@@ -1164,6 +1165,128 @@ func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername, lang string)
 	c.String(200, t("cmd.remove_user_mapping.success", githubUsername))
 }
 
+// awayPeriod holds the parsed leave period and reason from a set-away/unset-away command.
+type awayPeriod struct {
+	from   *time.Time
+	until  *time.Time
+	reason string
+}
+
+// Named values for parseAwayPeriod's rejectPast argument, so call sites read
+// clearly instead of passing a bare true/false.
+const (
+	rejectPastDates = true  // set-away: a leave cannot start in the past
+	allowPastDates  = false // unset-away: a past period may still be removed
+)
+
+// resolveTimezone returns the location configured for the channel/label, falling back to Asia/Tokyo.
+func resolveTimezone(db *gorm.DB, channelID, labelName string) *time.Location {
+	timezone := "Asia/Tokyo"
+	var tzConfig models.ChannelConfig
+	if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&tzConfig).Error; err == nil {
+		if tzConfig.Timezone != "" {
+			timezone = tzConfig.Timezone
+		}
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		log.Printf("invalid timezone %q, falling back to UTC: %v", timezone, err)
+		return time.UTC
+	}
+	return loc
+}
+
+// parseAwayPeriod parses the "from"/"until"/"on"/"reason" keywords from parts.
+// parts[0] is treated as the user token, so parsing starts at index 1.
+// now must be the current time in loc. When rejectPast is true, past dates are rejected.
+// The returned string is an i18n message key, or "" on success.
+func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPast bool) (awayPeriod, string) {
+	var p awayPeriod
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	hasOn := false
+
+	for i := 1; i < len(parts); i++ {
+		switch parts[i] {
+		case "from":
+			if hasOn {
+				return p, "cmd.set_away.conflicting_keywords"
+			}
+			if i+1 >= len(parts) {
+				return p, "cmd.set_away.missing_date"
+			}
+			i++
+			parsed, err := time.Parse("2006-01-02", parts[i])
+			if err != nil {
+				return p, "cmd.set_away.invalid_date"
+			}
+			startOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
+			if rejectPast && startOfDay.Before(todayStart) {
+				return p, "cmd.set_away.past_date"
+			}
+			p.from = &startOfDay
+		case "until":
+			if hasOn {
+				return p, "cmd.set_away.conflicting_keywords"
+			}
+			if i+1 >= len(parts) {
+				return p, "cmd.set_away.missing_date"
+			}
+			i++
+			parsed, err := time.Parse("2006-01-02", parts[i])
+			if err != nil {
+				return p, "cmd.set_away.invalid_date"
+			}
+			endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
+			if rejectPast && endOfDay.Before(now) {
+				return p, "cmd.set_away.past_date"
+			}
+			p.until = &endOfDay
+		case "on":
+			if p.from != nil || p.until != nil {
+				return p, "cmd.set_away.conflicting_keywords"
+			}
+			if i+1 >= len(parts) {
+				return p, "cmd.set_away.missing_date"
+			}
+			i++
+			parsed, err := time.Parse("2006-01-02", parts[i])
+			if err != nil {
+				return p, "cmd.set_away.invalid_date"
+			}
+			startOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
+			endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
+			if rejectPast && endOfDay.Before(now) {
+				return p, "cmd.set_away.past_date"
+			}
+			p.from = &startOfDay
+			p.until = &endOfDay
+			hasOn = true
+		case "reason":
+			if i+1 < len(parts) {
+				p.reason = strings.Join(parts[i+1:], " ")
+				i = len(parts) // End loop
+			}
+		}
+	}
+	return p, ""
+}
+
+// applyPeriodMatch narrows a query to records whose away_from/away_until exactly match the period.
+// nil bounds match NULL columns, so an indefinite period matches only indefinite records.
+func applyPeriodMatch(q *gorm.DB, from, until *time.Time) *gorm.DB {
+	if from == nil {
+		q = q.Where("away_from IS NULL")
+	} else {
+		q = q.Where("away_from = ?", from)
+	}
+	if until == nil {
+		q = q.Where("away_until IS NULL")
+	} else {
+		q = q.Where("away_until = ?", until)
+	}
+	return q
+}
+
 // setAway marks a user as away/on leave
 func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang string) {
 	t := i18n.L(lang)
@@ -1184,104 +1307,15 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 		return
 	}
 
-	var awayFrom *time.Time
-	var awayUntil *time.Time
-	var reason string
-
-	// Get timezone from channel config
-	timezone := "Asia/Tokyo"
-	var tzConfig models.ChannelConfig
-	if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&tzConfig).Error; err == nil {
-		if tzConfig.Timezone != "" {
-			timezone = tzConfig.Timezone
-		}
-	}
-	loc, err := time.LoadLocation(timezone)
-	if err != nil {
-		log.Printf("invalid timezone %q, falling back to UTC: %v", timezone, err)
-		loc = time.UTC
-	}
-
+	loc := resolveTimezone(db, channelID, labelName)
 	nowLocal := time.Now().In(loc)
-	todayStart := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
-	hasOn := false
 
-	// Parse parameters: "from", "until", "on", and "reason" keywords
-	for i := 1; i < len(parts); i++ {
-		switch parts[i] {
-		case "from":
-			if hasOn {
-				c.String(200, t("cmd.set_away.conflicting_keywords"))
-				return
-			}
-			if i+1 >= len(parts) {
-				c.String(200, t("cmd.set_away.missing_date"))
-				return
-			}
-			i++
-			parsed, err := time.Parse("2006-01-02", parts[i])
-			if err != nil {
-				c.String(200, t("cmd.set_away.invalid_date"))
-				return
-			}
-			startOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
-			if startOfDay.Before(todayStart) {
-				c.String(200, t("cmd.set_away.past_date"))
-				return
-			}
-			awayFrom = &startOfDay
-		case "until":
-			if hasOn {
-				c.String(200, t("cmd.set_away.conflicting_keywords"))
-				return
-			}
-			if i+1 >= len(parts) {
-				c.String(200, t("cmd.set_away.missing_date"))
-				return
-			}
-			i++
-			parsed, err := time.Parse("2006-01-02", parts[i])
-			if err != nil {
-				c.String(200, t("cmd.set_away.invalid_date"))
-				return
-			}
-			endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
-			if endOfDay.Before(nowLocal) {
-				c.String(200, t("cmd.set_away.past_date"))
-				return
-			}
-			awayUntil = &endOfDay
-		case "on":
-			if awayFrom != nil || awayUntil != nil {
-				c.String(200, t("cmd.set_away.conflicting_keywords"))
-				return
-			}
-			if i+1 >= len(parts) {
-				c.String(200, t("cmd.set_away.missing_date"))
-				return
-			}
-			i++
-			parsed, err := time.Parse("2006-01-02", parts[i])
-			if err != nil {
-				c.String(200, t("cmd.set_away.invalid_date"))
-				return
-			}
-			startOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
-			endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
-			if endOfDay.Before(nowLocal) {
-				c.String(200, t("cmd.set_away.past_date"))
-				return
-			}
-			awayFrom = &startOfDay
-			awayUntil = &endOfDay
-			hasOn = true
-		case "reason":
-			if i+1 < len(parts) {
-				reason = strings.Join(parts[i+1:], " ")
-				i = len(parts) // End loop
-			}
-		}
+	period, errKey := parseAwayPeriod(parts, loc, nowLocal, rejectPastDates)
+	if errKey != "" {
+		c.String(200, t(errKey))
+		return
 	}
+	awayFrom, awayUntil, reason := period.from, period.until, period.reason
 
 	// Validate from < until when both are specified
 	if awayFrom != nil && awayUntil != nil && !awayFrom.Before(*awayUntil) {
@@ -1289,12 +1323,14 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 		return
 	}
 
-	// Update if existing record exists, otherwise create new (upsert)
+	// A user may hold multiple leave periods at once (e.g. a pre-booked vacation
+	// plus a sudden sick day), so each distinct period is stored as its own record.
+	// To stay idempotent, update the reason when an identical period already exists.
 	var existing models.ReviewerAvailability
-	result := db.Where("slack_user_id = ?", slackUserID).First(&existing)
-	if result.Error == nil {
-		existing.AwayFrom = awayFrom
-		existing.AwayUntil = awayUntil
+	matched := applyPeriodMatch(db.Where("slack_user_id = ?", slackUserID), awayFrom, awayUntil)
+	err := matched.First(&existing).Error
+	switch {
+	case err == nil:
 		existing.Reason = reason
 		existing.UpdatedAt = time.Now()
 		if err := db.Save(&existing).Error; err != nil {
@@ -1302,7 +1338,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 			c.String(200, t("cmd.set_away.update_error"))
 			return
 		}
-	} else {
+	case errors.Is(err, gorm.ErrRecordNotFound):
 		record := models.ReviewerAvailability{
 			ID:          uuid.NewString(),
 			SlackUserID: slackUserID,
@@ -1317,6 +1353,12 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 			c.String(200, t("cmd.set_away.create_error"))
 			return
 		}
+	default:
+		// Any other error (e.g. a DB failure) must not be treated as
+		// "no existing record" and silently fall through to Create.
+		log.Printf("failed to look up reviewer availability: slackUserID=%s channelID=%s err=%v", slackUserID, channelID, err)
+		c.String(200, t("cmd.set_away.update_error"))
+		return
 	}
 
 	// Build response message
@@ -1336,21 +1378,48 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 	c.String(200, response)
 }
 
-// unsetAway removes a user's away/leave status
-func unsetAway(c *gin.Context, db *gorm.DB, params, lang string) {
+// unsetAway removes a user's away/leave status.
+// Without a date, all leave periods for the user are removed.
+// With "on"/"from"/"until", only the period that exactly matches is removed.
+func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang string) {
 	t := i18n.L(lang)
 	if params == "" {
 		c.String(200, t("cmd.unset_away.usage"))
 		return
 	}
 
-	slackUserID := cleanUserID(strings.TrimSpace(params))
+	parts := strings.Fields(params)
+	if len(parts) == 0 {
+		c.String(200, t("cmd.unset_away.usage"))
+		return
+	}
+
+	slackUserID := cleanUserID(parts[0])
 	if slackUserID == "" {
 		c.String(200, t("common.invalid_user_id"))
 		return
 	}
 
-	result := db.Unscoped().Where("slack_user_id = ?", slackUserID).Delete(&models.ReviewerAvailability{})
+	query := db.Unscoped().Where("slack_user_id = ?", slackUserID)
+
+	// If a date is specified, delete only the matching period; otherwise delete all.
+	if len(parts) > 1 {
+		loc := resolveTimezone(db, channelID, labelName)
+		nowLocal := time.Now().In(loc)
+		period, errKey := parseAwayPeriod(parts, loc, nowLocal, allowPastDates)
+		if errKey != "" {
+			c.String(200, t(errKey))
+			return
+		}
+		// Only narrow to a specific period when a date was actually parsed.
+		// Extra tokens without a date keyword (e.g. a stray "reason") must not
+		// silently restrict the match to indefinite records.
+		if period.from != nil || period.until != nil {
+			query = applyPeriodMatch(query, period.from, period.until)
+		}
+	}
+
+	result := query.Delete(&models.ReviewerAvailability{})
 	if result.RowsAffected == 0 {
 		c.String(200, t("cmd.unset_away.not_set", slackUserID))
 		return
@@ -1384,8 +1453,11 @@ func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
 	var records []models.ReviewerAvailability
 	now := time.Now()
 
-	// Get non-expired records (currently away or scheduled for the future)
-	db.Where("away_until IS NULL OR away_until > ?", now).Find(&records)
+	// Get non-expired records (currently away or scheduled for the future).
+	// Order by user then start date so a user's multiple periods stay grouped.
+	db.Where("away_until IS NULL OR away_until > ?", now).
+		Order("slack_user_id, away_from").
+		Find(&records)
 
 	if len(records) == 0 {
 		c.String(200, t("cmd.show_availability.empty"))
