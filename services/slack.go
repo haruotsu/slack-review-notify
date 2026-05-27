@@ -530,6 +530,48 @@ func PostToThread(channel, ts, message string) error {
 	return nil
 }
 
+// PostEphemeral sends an ephemeral message visible only to the given user in the
+// given channel. Returns nil immediately in test mode.
+func PostEphemeral(channel, user, message string) error {
+	if IsTestMode {
+		log.Printf("test mode: would post ephemeral to channel=%s user=%s", channel, user)
+		return nil
+	}
+
+	body := map[string]any{
+		"channel": channel,
+		"user":    user,
+		"text":    message,
+	}
+
+	jsonData, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.postEphemeral", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBytes, _ := io.ReadAll(resp.Body)
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(respBytes, &result); err != nil {
+		return fmt.Errorf("slack API response parse error: %v (body: %s)", err, string(respBytes))
+	}
+	if !result.OK {
+		return fmt.Errorf("slack chat.postEphemeral error: %s", result.Error)
+	}
+	return nil
+}
+
 // PostToThreadWithButtons posts a message with buttons to a thread
 func PostToThreadWithButtons(channel, ts, message string, taskID, lang string) error {
 	t := i18n.L(lang)
