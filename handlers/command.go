@@ -374,10 +374,14 @@ func showHelp(c *gin.Context, db *gorm.DB, channelID, lang string) {
 		})
 		row = make([]map[string]interface{}, 0, buttonsPerRow)
 	}
-	for _, cfg := range configs {
+	// action_id must be unique within a single actions block (Slack rejects
+	// duplicates with invalid_command_response). All buttons share the
+	// open_settings route prefix; the handler matches on HasPrefix and reads
+	// the target label from the button's value.
+	for i, cfg := range configs {
 		row = append(row, services.CreateButton(
 			fmt.Sprintf(t("modal.open_button.edit"), cfg.LabelName),
-			"open_settings",
+			fmt.Sprintf("%s:%d", actionOpenSettings, i),
 			cfg.LabelName,
 			"",
 		))
@@ -388,7 +392,7 @@ func showHelp(c *gin.Context, db *gorm.DB, channelID, lang string) {
 	// Always include a "create new" button so users with no existing config can still get in.
 	row = append(row, services.CreateButton(
 		t("modal.open_button.new"),
-		"open_settings",
+		actionOpenSettings+":new",
 		services.CreateNewLabelSentinel,
 		"primary",
 	))

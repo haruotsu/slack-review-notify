@@ -17,6 +17,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// actionOpenSettings is the action_id route prefix for the "Open Settings"
+// button family rendered by the help command. Each button instance gets a
+// unique suffix (":<index>" or ":new") so Slack's per-block action_id
+// uniqueness rule isn't violated.
+const actionOpenSettings = "open_settings"
+
 type SlackActionPayload struct {
 	Type      string `json:"type"`
 	TriggerID string `json:"trigger_id,omitempty"`
@@ -104,7 +110,11 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 		actionID := payload.Actions[0].ActionID
 
 		// Handle "Open Settings" button: opens the settings modal via views.open.
-		if actionID == "open_settings" {
+		// The help command renders one button per label, each with a unique
+		// action_id like "open_settings:<index>" (Slack requires action_id
+		// uniqueness within an actions block). Route on prefix; the target
+		// label is carried in the button's value field, not the action_id.
+		if actionID == actionOpenSettings || strings.HasPrefix(actionID, actionOpenSettings+":") {
 			handleOpenSettings(c, db, payload)
 			return
 		}
