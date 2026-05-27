@@ -127,7 +127,7 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 		log.Printf("view_submission has invalid private_metadata: %q (err=%v)", payload.View.PrivateMetadata, err)
 		c.JSON(http.StatusOK, gin.H{
 			"response_action": "errors",
-			"errors":          gin.H{"default_mention_id": "internal error: modal context lost. Please reopen the settings."},
+			"errors":          gin.H{"label_select": "internal error: modal context lost. Please reopen the settings."},
 		})
 		return
 	}
@@ -144,7 +144,7 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 		log.Printf("settings modal parse error: %v", err)
 		c.JSON(http.StatusOK, gin.H{
 			"response_action": "errors",
-			"errors":          gin.H{"default_mention_id": err.Error()},
+			"errors":          gin.H{"label_select": err.Error()},
 		})
 		return
 	}
@@ -225,7 +225,7 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 			log.Printf("failed to create config from modal: %v", err)
 			c.JSON(http.StatusOK, gin.H{
 				"response_action": "errors",
-				"errors":          gin.H{"default_mention_id": "save failed"},
+				"errors":          gin.H{"label_select": "save failed"},
 			})
 			return
 		}
@@ -234,7 +234,7 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 			log.Printf("failed to update config from modal: %v", err)
 			c.JSON(http.StatusOK, gin.H{
 				"response_action": "errors",
-				"errors":          gin.H{"default_mention_id": "save failed"},
+				"errors":          gin.H{"label_select": "save failed"},
 			})
 			return
 		}

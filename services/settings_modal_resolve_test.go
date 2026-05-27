@@ -7,22 +7,16 @@ import (
 	"testing"
 )
 
-// TestParseSettingsModalSubmission_ResolvesAtHandles confirms that @display_name
-// entries in the mention and reviewer fields are resolved to U-prefixed IDs
-// before storage. Mention also accepts subteam handles.
-func TestParseSettingsModalSubmission_ResolvesAtHandles(t *testing.T) {
+// TestParseSettingsModalSubmission_ResolvesSubteamHandle confirms that an
+// @team-handle entered in the subteam field is resolved to an S-prefixed
+// subteam ID via usergroups.list. Individual users come pre-resolved from the
+// users_select Block Kit picker so no users.list call is needed.
+func TestParseSettingsModalSubmission_ResolvesSubteamHandle(t *testing.T) {
 	prev := IsTestMode
 	IsTestMode = false
 	defer func() { IsTestMode = prev }()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/users.list", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"ok":true,"members":[
-			{"id":"UHARU","name":"haruotsu","profile":{"display_name":"haruotsu"}},
-			{"id":"UALICE","name":"alice","profile":{"display_name":"alice"}},
-			{"id":"UBOB","name":"bob","profile":{"display_name":"bob"}}
-		],"response_metadata":{"next_cursor":""}}`))
-	})
 	mux.HandleFunc("/usergroups.list", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":true,"usergroups":[
 			{"id":"SDEVS","handle":"devs","name":"Devs"}
@@ -35,8 +29,17 @@ func TestParseSettingsModalSubmission_ResolvesAtHandles(t *testing.T) {
 	ResetSlackLookupCache()
 
 	values := minimalValidParseValues()
-	values["default_mention_id"] = map[string]ViewStateValue{"default_mention_id": {Value: "@devs"}}
-	values["reviewer_list"] = map[string]ViewStateValue{"reviewer_list": {Value: "@haruotsu, @alice ,UBOB"}}
+	// Clear the user picker so the subteam field is the only mention source.
+	values["default_mention_user"] = map[string]ViewStateValue{
+		"default_mention_user": {SelectedUser: ""},
+	}
+	values["default_mention_subteam"] = map[string]ViewStateValue{
+		"default_mention_subteam": {Value: "@devs"},
+	}
+	// Reviewer pool comes from multi_users_select → already-resolved IDs.
+	values["reviewer_list"] = map[string]ViewStateValue{
+		"reviewer_list": {SelectedUsers: []string{"UHARU", "UALICE", "UBOB"}},
+	}
 
 	form, err := ParseSettingsModalSubmission(values)
 	if err != nil {
@@ -50,17 +53,41 @@ func TestParseSettingsModalSubmission_ResolvesAtHandles(t *testing.T) {
 	}
 }
 
-// TestParseSettingsModalSubmission_UnknownHandleFails surfaces a per-field
-// validation error pointing at the field that couldn't be resolved.
-func TestParseSettingsModalSubmission_UnknownHandleFails(t *testing.T) {
+// TestParseSettingsModalSubmission_UserBeatsSubteam: when both the users_select
+// (individual) and the subteam plain_text are filled, the individual wins.
+// This makes the precedence predictable when a user keeps the subteam field
+// pre-filled but later adds a user to the picker.
+func TestParseSettingsModalSubmission_UserBeatsSubteam(t *testing.T) {
+	prev := IsTestMode
+	IsTestMode = true // bypass usergroups.list resolution
+	defer func() { IsTestMode = prev }()
+
+	values := minimalValidParseValues()
+	values["default_mention_user"] = map[string]ViewStateValue{
+		"default_mention_user": {SelectedUser: "UPICKER"},
+	}
+	values["default_mention_subteam"] = map[string]ViewStateValue{
+		"default_mention_subteam": {Value: "SLEFTOVER"},
+	}
+
+	form, err := ParseSettingsModalSubmission(values)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if form.DefaultMentionID != "UPICKER" {
+		t.Errorf("DefaultMentionID = %q, want UPICKER (user must win over subteam)", form.DefaultMentionID)
+	}
+}
+
+// TestParseSettingsModalSubmission_UnknownSubteamHandleFails surfaces a
+// per-field validation error pointing at default_mention_subteam when the
+// entered @handle does not exist.
+func TestParseSettingsModalSubmission_UnknownSubteamHandleFails(t *testing.T) {
 	prev := IsTestMode
 	IsTestMode = false
 	defer func() { IsTestMode = prev }()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/users.list", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"ok":true,"members":[],"response_metadata":{"next_cursor":""}}`))
-	})
 	mux.HandleFunc("/usergroups.list", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":true,"usergroups":[]}`))
 	})
@@ -71,7 +98,12 @@ func TestParseSettingsModalSubmission_UnknownHandleFails(t *testing.T) {
 	ResetSlackLookupCache()
 
 	values := minimalValidParseValues()
-	values["reviewer_list"] = map[string]ViewStateValue{"reviewer_list": {Value: "@ghost"}}
+	values["default_mention_user"] = map[string]ViewStateValue{
+		"default_mention_user": {SelectedUser: ""},
+	}
+	values["default_mention_subteam"] = map[string]ViewStateValue{
+		"default_mention_subteam": {Value: "@ghost"},
+	}
 
 	_, err := ParseSettingsModalSubmission(values)
 	if err == nil {
@@ -81,16 +113,20 @@ func TestParseSettingsModalSubmission_UnknownHandleFails(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ModalValidationError, got %T", err)
 	}
-	if msg, has := ve.Errors["reviewer_list"]; !has || !strings.Contains(msg, "ghost") {
-		t.Errorf("expected reviewer_list error mentioning ghost, got %+v", ve.Errors)
+	if msg, has := ve.Errors["default_mention_subteam"]; !has || !strings.Contains(msg, "ghost") {
+		t.Errorf("expected default_mention_subteam error mentioning ghost, got %+v", ve.Errors)
 	}
 }
 
+// minimalValidParseValues returns a payload representing the new Block Kit
+// shape: users_select for default_mention_user, multi_users_select for
+// reviewer_list, plain_text for default_mention_subteam.
 func minimalValidParseValues() map[string]map[string]ViewStateValue {
 	return map[string]map[string]ViewStateValue{
 		"label_select":               {"label_select": {SelectedOption: &ViewSelectedOption{Value: "needs-review"}}},
-		"default_mention_id":         {"default_mention_id": {Value: "U99999"}},
-		"reviewer_list":              {"reviewer_list": {Value: ""}},
+		"default_mention_user":       {"default_mention_user": {SelectedUser: "U99999"}},
+		"default_mention_subteam":    {"default_mention_subteam": {Value: ""}},
+		"reviewer_list":              {"reviewer_list": {SelectedUsers: nil}},
 		"repository_list":            {"repository_list": {Value: ""}},
 		"reminder_interval":          {"reminder_interval": {Value: "30"}},
 		"reviewer_reminder_interval": {"reviewer_reminder_interval": {Value: "30"}},

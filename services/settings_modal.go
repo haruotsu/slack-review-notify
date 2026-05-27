@@ -59,13 +59,19 @@ type ViewSelectedOption struct {
 }
 
 // ViewStateValue mirrors a single field's state in a Slack view_submission payload.
-// SelectedOptions (plural) is populated for checkboxes / multi_static_select; the
-// singular SelectedOption is populated for static_select / radio_buttons.
+//
+//   - Value           plain_text_input / number_input
+//   - SelectedOption  static_select / radio_buttons
+//   - SelectedOptions checkboxes / multi_static_select
+//   - SelectedUser    users_select       (resolved user ID, e.g. "U123")
+//   - SelectedUsers   multi_users_select (slice of user IDs)
 type ViewStateValue struct {
 	Type            string               `json:"type"`
 	Value           string               `json:"value"`
 	SelectedOption  *ViewSelectedOption  `json:"selected_option,omitempty"`
 	SelectedOptions []ViewSelectedOption `json:"selected_options,omitempty"`
+	SelectedUser    string               `json:"selected_user,omitempty"`
+	SelectedUsers   []string             `json:"selected_users,omitempty"`
 }
 
 // ModalValidationError carries per-field error messages for views.update / response_action: errors.
@@ -129,8 +135,9 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		}
 	}
 
-	mentionID := ""
-	reviewerList := ""
+	mentionUser := ""
+	mentionSubteam := ""
+	reviewerIDs := []string{}
 	repoList := ""
 	reminderInterval := 30
 	reviewerReminderInterval := 30
@@ -145,8 +152,20 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 	isActive := true
 
 	if cfg != nil {
-		mentionID = cfg.DefaultMentionID
-		reviewerList = cfg.ReviewerList
+		// DefaultMentionID is one column but can be either a user (U…/W…) or a
+		// subteam (S…); pre-fill the appropriate field based on the prefix.
+		switch {
+		case looksLikeUserID(cfg.DefaultMentionID):
+			mentionUser = cfg.DefaultMentionID
+		case looksLikeSubteamID(cfg.DefaultMentionID):
+			mentionSubteam = cfg.DefaultMentionID
+		}
+		for _, r := range strings.Split(cfg.ReviewerList, ",") {
+			r = strings.TrimSpace(r)
+			if looksLikeUserID(r) {
+				reviewerIDs = append(reviewerIDs, r)
+			}
+		}
 		repoList = cfg.RepositoryList
 		if cfg.ReminderInterval > 0 {
 			reminderInterval = cfg.ReminderInterval
@@ -297,9 +316,57 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		))
 	}
 
+	// Individual mention target → users_select. Native picker means we don't
+	// need users:read scope just to render the field, and the bot receives a
+	// pre-resolved U… ID in the submission payload.
+	mentionUserElement := map[string]any{
+		"type":      "users_select",
+		"action_id": "default_mention_user",
+	}
+	if mentionUser != "" {
+		mentionUserElement["initial_user"] = mentionUser
+	}
+	mentionUserBlock := map[string]any{
+		"type":     "input",
+		"block_id": "default_mention_user",
+		"optional": true,
+		"label":    plainText(t("modal.default_mention_user")),
+		"hint":     plainText(t("modal.default_mention_user.hint")),
+		"element":  mentionUserElement,
+	}
+
+	// Subteam mention target → plain_text_input. Slack does not provide a
+	// usergroups_select element, so this field accepts either a raw S… ID or
+	// an @team-handle (resolved via usergroups.list at submit time).
+	mentionSubteamBlock := plainInput(
+		"default_mention_subteam",
+		t("modal.default_mention_subteam"),
+		t("modal.default_mention_subteam.hint"),
+		mentionSubteam,
+		true,
+	)
+
+	// Reviewer pool → multi_users_select. Same scope/UX benefits as above.
+	reviewerElement := map[string]any{
+		"type":      "multi_users_select",
+		"action_id": "reviewer_list",
+	}
+	if len(reviewerIDs) > 0 {
+		reviewerElement["initial_users"] = reviewerIDs
+	}
+	reviewerBlock := map[string]any{
+		"type":     "input",
+		"block_id": "reviewer_list",
+		"optional": true,
+		"label":    plainText(t("modal.reviewer_list")),
+		"hint":     plainText(t("modal.reviewer_list.hint")),
+		"element":  reviewerElement,
+	}
+
 	blocks = append(blocks,
-		plainInput("default_mention_id", t("modal.default_mention_id"), t("modal.default_mention_id.hint"), mentionID, true),
-		plainInput("reviewer_list", t("modal.reviewer_list"), t("modal.reviewer_list.hint"), reviewerList, true),
+		mentionUserBlock,
+		mentionSubteamBlock,
+		reviewerBlock,
 		plainInput("repository_list", t("modal.repository_list"), t("modal.repository_list.hint"), repoList, true),
 		plainInput("reminder_interval", t("modal.reminder_interval"), t("modal.reminder_interval.hint"), strconv.Itoa(reminderInterval), false),
 		plainInput("reviewer_reminder_interval", t("modal.reviewer_reminder_interval"), t("modal.reviewer_reminder_interval.hint"), strconv.Itoa(reviewerReminderInterval), false),
@@ -375,6 +442,32 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 		}
 		return ""
 	}
+	selectedUser := func(blockID string) string {
+		actions, ok := values[blockID]
+		if !ok {
+			return ""
+		}
+		if v, ok := actions[blockID]; ok {
+			return v.SelectedUser
+		}
+		for _, v := range actions {
+			return v.SelectedUser
+		}
+		return ""
+	}
+	selectedUsers := func(blockID string) []string {
+		actions, ok := values[blockID]
+		if !ok {
+			return nil
+		}
+		if v, ok := actions[blockID]; ok {
+			return v.SelectedUsers
+		}
+		for _, v := range actions {
+			return v.SelectedUsers
+		}
+		return nil
+	}
 	checkboxChecked := func(blockID, optionValue string) bool {
 		actions, ok := values[blockID]
 		if !ok {
@@ -425,29 +518,30 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 		return form, nil
 	}
 
-	// DefaultMentionID accepts a U-ID, S-ID, @username, or @subteam-handle.
-	rawMention := strings.TrimPrefix(strings.TrimSpace(field("default_mention_id")), "@")
-	if rawMention == "" {
-		form.DefaultMentionID = ""
-	} else {
-		resolved, err := ResolveMentionTarget(rawMention)
+	// Mention target: prefer the users_select (individual) over the subteam
+	// plain_text_input. Both empty → DefaultMentionID stays "". The subteam
+	// field still accepts either a raw S… ID or an @handle (resolved via
+	// usergroups.list), because Block Kit has no usergroups_select element.
+	if user := selectedUser("default_mention_user"); user != "" {
+		form.DefaultMentionID = user
+	} else if raw := strings.TrimPrefix(strings.TrimSpace(field("default_mention_subteam")), "@"); raw != "" {
+		resolved, err := LookupSlackSubteamID(raw)
 		if err != nil {
 			if _, ok := err.(*SlackLookupNotFoundError); ok {
-				errs["default_mention_id"] = fmt.Sprintf("could not find Slack user or subteam %q", rawMention)
+				errs["default_mention_subteam"] = fmt.Sprintf("could not find Slack subteam %q", raw)
 			} else {
-				errs["default_mention_id"] = "Slack lookup failed: " + err.Error()
+				errs["default_mention_subteam"] = "Slack lookup failed: " + err.Error()
 			}
 		} else {
 			form.DefaultMentionID = resolved
 		}
 	}
 
-	resolvedReviewers, reviewerErr := resolveReviewerCSV(field("reviewer_list"))
-	if reviewerErr != "" {
-		errs["reviewer_list"] = reviewerErr
-	} else {
-		form.ReviewerList = resolvedReviewers
-	}
+	// Reviewer pool: multi_users_select gives us a slice of pre-resolved U…
+	// IDs. We canonicalize to a comma-separated string for the existing
+	// ChannelConfig column.
+	reviewers := selectedUsers("reviewer_list")
+	form.ReviewerList = strings.Join(reviewers, ",")
 	form.RepositoryList = normalizeCSV(field("repository_list"))
 
 	if interval, err := strconv.Atoi(field("reminder_interval")); err != nil || interval <= 0 {
@@ -503,31 +597,6 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 		return nil, &ModalValidationError{Errors: errs}
 	}
 	return form, nil
-}
-
-// resolveReviewerCSV resolves each CSV entry (U-ID or @username) to a U-ID via
-// Slack users.list. Returns ("", "") for an empty list, the canonical CSV on
-// success, or ("", message) on the first unresolved entry. Reviewers must be
-// individual users, not subteams (the assignment code distributes among them).
-func resolveReviewerCSV(s string) (string, string) {
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		trimmed := strings.TrimSpace(p)
-		if trimmed == "" {
-			continue
-		}
-		trimmed = strings.TrimPrefix(trimmed, "@")
-		id, err := LookupSlackUserID(trimmed)
-		if err != nil {
-			if _, ok := err.(*SlackLookupNotFoundError); ok {
-				return "", fmt.Sprintf("could not find Slack user %q", trimmed)
-			}
-			return "", "Slack lookup failed: " + err.Error()
-		}
-		out = append(out, id)
-	}
-	return strings.Join(out, ","), ""
 }
 
 // normalizeCSV trims whitespace around each comma-separated entry and drops empty items.

@@ -80,10 +80,9 @@ Configure the following bot scopes in *OAuth & Permissions*:
 | `chat:write` | Post notifications and reminders |
 | `chat:write.public` | Post into channels the bot is not yet a member of |
 | `commands` | Handle the `/slack-review-notify` slash command |
-| `users:read` | Resolve `@display-name` to a user ID inside the settings modal |
-| `usergroups:read` | Resolve `@team-handle` (subteam) inside the settings modal |
+| `usergroups:read` | (Optional) Resolve `@team-handle` typed into the subteam field of the settings modal. Not needed if you only mention individuals or always paste the raw `S…` ID. |
 
-Without `users:read` / `usergroups:read`, saving the settings modal with an `@name` entry will surface an inline Slack API error.
+The settings modal uses Slack's native `users_select` / `multi_users_select` Block Kit elements for the individual mention target and reviewer pool, so **`users:read` is not required**: the bot receives pre-resolved user IDs from Slack.
 
 ## Testing Locally
 See [/docs/example_usage.md](./docs/example_usage.md) for instructions on setting up a local server with ngrok.

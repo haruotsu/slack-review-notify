@@ -76,12 +76,13 @@ func TestBuildSettingsModalView_HasAllFields(t *testing.T) {
 		t.Fatalf("blocks is not a slice: %T", view["blocks"])
 	}
 
-	// label_select replaces the old label_name_display section: it is now a
-	// static_select including the existing labels plus a "create new" option.
-	// All other configuration fields remain as editable inputs.
+	// label_select is a static_select; default_mention_user is a users_select
+	// (no Slack scope needed); default_mention_subteam is a plain_text_input
+	// for subteams; reviewer_list is a multi_users_select.
 	requiredBlockIDs := []string{
 		"label_select",
-		"default_mention_id",
+		"default_mention_user",
+		"default_mention_subteam",
 		"reviewer_list",
 		"repository_list",
 		"reminder_interval",
@@ -156,8 +157,8 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 		key     string
 		want    string
 	}{
-		{"default_mention_id", "initial_value", "U99999"},
-		{"reviewer_list", "initial_value", "U1,U2"},
+		// users_select uses initial_user (singular, just an ID string)
+		{"default_mention_user", "initial_user", "U99999"},
 		{"repository_list", "initial_value", "owner/repo1"},
 		{"reminder_interval", "initial_value", "20"},
 		{"reviewer_reminder_interval", "initial_value", "45"},
@@ -176,6 +177,17 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 		got, _ := el[tt.key].(string)
 		if got != tt.want {
 			t.Errorf("%s.%s = %q, want %q", tt.blockID, tt.key, got, tt.want)
+		}
+	}
+
+	// multi_users_select pre-fill: initial_users is a []string of resolved IDs.
+	if el := getElement("reviewer_list"); el == nil {
+		t.Errorf("reviewer_list element not found")
+	} else {
+		got, _ := el["initial_users"].([]string)
+		want := []string{"U1", "U2"}
+		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Errorf("reviewer_list.initial_users = %v, want %v", got, want)
 		}
 	}
 
@@ -320,11 +332,14 @@ func TestParseSettingsModalSubmission(t *testing.T) {
 		"label_select": {
 			"label_select": {Type: "static_select", SelectedOption: &ViewSelectedOption{Value: "needs-review"}},
 		},
-		"default_mention_id": {
-			"default_mention_id": {Type: "plain_text_input", Value: "U99999"},
+		"default_mention_user": {
+			"default_mention_user": {Type: "users_select", SelectedUser: "U99999"},
+		},
+		"default_mention_subteam": {
+			"default_mention_subteam": {Type: "plain_text_input", Value: ""},
 		},
 		"reviewer_list": {
-			"reviewer_list": {Type: "plain_text_input", Value: "U1,U2,U3"},
+			"reviewer_list": {Type: "multi_users_select", SelectedUsers: []string{"U1", "U2", "U3"}},
 		},
 		"repository_list": {
 			"repository_list": {Type: "plain_text_input", Value: "owner/repo1, owner/repo2"},
@@ -495,9 +510,10 @@ func TestParseSettingsModalSubmission_DeleteConfigCheckbox(t *testing.T) {
 }
 
 func TestParseSettingsModalSubmission_ValidationErrors(t *testing.T) {
-	mk := func(mention, interval, approvals, bhStart, bhEnd, tz, lang, active string) map[string]map[string]ViewStateValue {
+	// mention is unused in the new design (users_select can't fail validation);
+	// we keep the signature to minimize diff in the table below.
+	mk := func(_ /* mention */, interval, approvals, bhStart, bhEnd, tz, lang, active string) map[string]map[string]ViewStateValue {
 		v := minimalValidParseValues()
-		v["default_mention_id"] = map[string]ViewStateValue{"default_mention_id": {Value: mention}}
 		v["reviewer_reminder_interval"] = map[string]ViewStateValue{"reviewer_reminder_interval": {Value: interval}}
 		v["required_approvals"] = map[string]ViewStateValue{"required_approvals": {Value: approvals}}
 		v["business_hours_start"] = map[string]ViewStateValue{"business_hours_start": {Value: bhStart}}

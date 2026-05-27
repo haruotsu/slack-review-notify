@@ -134,8 +134,9 @@ func TestHandleSlackAction_ViewSubmission_CreatesConfig(t *testing.T) {
 				"values": {
 					"label_select": {"label_select": {"type": "static_select", "selected_option": {"value": "__create_new__"}}},
 					"new_label_name": {"new_label_name": {"type": "plain_text_input", "value": "new-label"}},
-					"default_mention_id": {"default_mention_id": {"type": "plain_text_input", "value": "U777"}},
-					"reviewer_list": {"reviewer_list": {"type": "plain_text_input", "value": "U1, U2"}},
+					"default_mention_user": {"default_mention_user": {"type": "users_select", "selected_user": "U777"}},
+					"default_mention_subteam": {"default_mention_subteam": {"type": "plain_text_input", "value": ""}},
+					"reviewer_list": {"reviewer_list": {"type": "multi_users_select", "selected_users": ["U1", "U2"]}},
 					"repository_list": {"repository_list": {"type": "plain_text_input", "value": "owner/repo"}},
 					"reminder_interval": {"reminder_interval": {"type": "plain_text_input", "value": "20"}},
 					"reviewer_reminder_interval": {"reviewer_reminder_interval": {"type": "plain_text_input", "value": "60"}},
@@ -198,8 +199,9 @@ func TestHandleSlackAction_ViewSubmission_UpdatesConfig(t *testing.T) {
 			"state": {
 				"values": {
 					"label_select": {"label_select": {"selected_option": {"value": "needs-review"}}},
-					"default_mention_id": {"default_mention_id": {"value": "Unew"}},
-					"reviewer_list": {"reviewer_list": {"value": ""}},
+					"default_mention_user": {"default_mention_user": {"selected_user": "Unew"}},
+					"default_mention_subteam": {"default_mention_subteam": {"value": ""}},
+					"reviewer_list": {"reviewer_list": {"selected_users": []}},
 					"repository_list": {"repository_list": {"value": ""}},
 					"reminder_interval": {"reminder_interval": {"value": "30"}},
 					"reviewer_reminder_interval": {"reviewer_reminder_interval": {"value": "45"}},
@@ -249,8 +251,9 @@ func TestHandleSlackAction_ViewSubmission_ValidationError(t *testing.T) {
 			"state": {
 				"values": {
 					"label_select": {"label_select": {"selected_option": {"value": "needs-review"}}},
-					"default_mention_id": {"default_mention_id": {"value": ""}},
-					"reviewer_list": {"reviewer_list": {"value": ""}},
+					"default_mention_user": {"default_mention_user": {"selected_user": ""}},
+					"default_mention_subteam": {"default_mention_subteam": {"value": ""}},
+					"reviewer_list": {"reviewer_list": {"selected_users": []}},
 					"repository_list": {"repository_list": {"value": ""}},
 					"reminder_interval": {"reminder_interval": {"value": "30"}},
 					"reviewer_reminder_interval": {"reviewer_reminder_interval": {"value": "abc"}},
@@ -373,8 +376,9 @@ func TestHandleSlackAction_ViewSubmission_CreateNewDuplicateRejected(t *testing.
 				"values": {
 					"label_select": {"label_select": {"selected_option": {"value": "__create_new__"}}},
 					"new_label_name": {"new_label_name": {"value": "needs-review"}},
-					"default_mention_id": {"default_mention_id": {"value": "U1"}},
-					"reviewer_list": {"reviewer_list": {"value": ""}},
+					"default_mention_user": {"default_mention_user": {"selected_user": "U1"}},
+					"default_mention_subteam": {"default_mention_subteam": {"value": ""}},
+					"reviewer_list": {"reviewer_list": {"selected_users": []}},
 					"repository_list": {"repository_list": {"value": ""}},
 					"reminder_interval": {"reminder_interval": {"value": "30"}},
 					"reviewer_reminder_interval": {"reviewer_reminder_interval": {"value": "30"}},
@@ -478,8 +482,9 @@ func TestHandleSlackAction_ViewSubmission_DeleteThenRecreate(t *testing.T) {
 				"values": {
 					"label_select": {"label_select": {"selected_option": {"value": "__create_new__"}}},
 					"new_label_name": {"new_label_name": {"value": "needs-review"}},
-					"default_mention_id": {"default_mention_id": {"value": "Unew"}},
-					"reviewer_list": {"reviewer_list": {"value": ""}},
+					"default_mention_user": {"default_mention_user": {"selected_user": "Unew"}},
+					"default_mention_subteam": {"default_mention_subteam": {"value": ""}},
+					"reviewer_list": {"reviewer_list": {"selected_users": []}},
 					"repository_list": {"repository_list": {"value": ""}},
 					"reminder_interval": {"reminder_interval": {"value": "30"}},
 					"reviewer_reminder_interval": {"reviewer_reminder_interval": {"value": "30"}},
