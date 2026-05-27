@@ -13,14 +13,21 @@ import (
 // SettingsModalCallbackID is the callback_id used by the settings modal view.
 const SettingsModalCallbackID = "settings_modal"
 
-// SettingsModalMetadata is the JSON shape we stash in `view.private_metadata` when
-// opening the settings modal. The label name is captured at open time and is NOT
-// editable in the modal — this prevents users from accidentally overwriting another
-// label's config by renaming. UserID is carried so the submission handler can post
-// an ephemeral confirmation back to the submitter only.
+// LabelSelectActionID is the action_id of the label dropdown. block_actions
+// payloads with this action_id trigger a views.update so the modal can re-render
+// with the newly-selected label's values pre-filled.
+const LabelSelectActionID = "label_select"
+
+// CreateNewLabelSentinel is the special dropdown value indicating the user
+// wants to create a new label configuration. When this value is selected,
+// BuildSettingsModalView renders a new_label_name input below the dropdown.
+const CreateNewLabelSentinel = "__create_new__"
+
+// SettingsModalMetadata is what we stash in `view.private_metadata`. Channel ID
+// and user ID are stable across re-renders of the modal; the currently-selected
+// label is NOT here because it is the form's source of truth (a dropdown).
 type SettingsModalMetadata struct {
 	ChannelID string `json:"c"`
-	LabelName string `json:"l"`
 	UserID    string `json:"u"`
 }
 
@@ -52,10 +59,19 @@ type ViewSelectedOption struct {
 }
 
 // ViewStateValue mirrors a single field's state in a Slack view_submission payload.
+//
+//   - Value           plain_text_input / number_input
+//   - SelectedOption  static_select / radio_buttons
+//   - SelectedOptions checkboxes / multi_static_select
+//   - SelectedUser    users_select       (resolved user ID, e.g. "U123")
+//   - SelectedUsers   multi_users_select (slice of user IDs)
 type ViewStateValue struct {
-	Type           string              `json:"type"`
-	Value          string              `json:"value"`
-	SelectedOption *ViewSelectedOption `json:"selected_option,omitempty"`
+	Type            string               `json:"type"`
+	Value           string               `json:"value"`
+	SelectedOption  *ViewSelectedOption  `json:"selected_option,omitempty"`
+	SelectedOptions []ViewSelectedOption `json:"selected_options,omitempty"`
+	SelectedUser    string               `json:"selected_user,omitempty"`
+	SelectedUsers   []string             `json:"selected_users,omitempty"`
 }
 
 // ModalValidationError carries per-field error messages for views.update / response_action: errors.
@@ -72,12 +88,14 @@ func (e *ModalValidationError) Error() string {
 }
 
 // SettingsForm is the parsed view_submission payload, ready to upsert into ChannelConfig.
-// LabelName is intentionally omitted: it is captured at modal-open time and carried
-// in private_metadata, not as an editable field.
 type SettingsForm struct {
+	LabelName                string
+	CreateNew                bool // true when the user picked the create-new sentinel
+	DeleteConfig             bool // true when the delete checkbox was checked
 	DefaultMentionID         string
 	ReviewerList             string
 	RepositoryList           string
+	ReminderInterval         int
 	ReviewerReminderInterval int
 	BusinessHoursStart       string
 	BusinessHoursEnd         string
@@ -87,45 +105,73 @@ type SettingsForm struct {
 	IsActive                 bool
 }
 
-// BuildSettingsModalView returns the Slack Block Kit `view` payload for the settings modal.
-//
-// `labelName` identifies the (channelID, labelName) row being edited. It is rendered
-// as a non-editable section block and round-tripped through private_metadata so the
-// submission handler updates exactly that row — eliminating the "rename via modal
-// silently overwrites another label" footgun. To add a new label config, use the
-// slash command.
-//
-// `cfg` is the existing ChannelConfig for (channelID, labelName) if any; nil
-// renders a blank-defaults modal for a fresh label.
-//
-// `userID` is carried through private_metadata so the submission handler can
-// ephemeral-respond to the submitter only.
-func BuildSettingsModalView(channelID, labelName, userID string, cfg *models.ChannelConfig, lang string) map[string]any {
-	t := i18n.L(lang)
+// SettingsModalInputs is the parameter struct for BuildSettingsModalView. Using
+// a struct keeps the call sites readable as we add more options (selected label,
+// known labels, language…) without ballooning the positional argument list.
+type SettingsModalInputs struct {
+	ChannelID     string
+	UserID        string
+	SelectedLabel string                  // currently-displayed label, or CreateNewLabelSentinel
+	Configs       []*models.ChannelConfig // all known label configs in this channel
+	Lang          string
+}
 
-	if labelName == "" {
-		labelName = "needs-review"
+// BuildSettingsModalView returns the Slack Block Kit `view` payload for the
+// settings modal. The first block is a label dropdown listing every existing
+// label configuration in the channel plus a "+ new label" sentinel option;
+// changing the dropdown triggers a views.update via dispatch_action so the rest
+// of the form re-renders pre-filled for the newly selected label.
+func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
+	t := i18n.L(in.Lang)
+
+	creatingNew := in.SelectedLabel == CreateNewLabelSentinel
+	var cfg *models.ChannelConfig
+	if !creatingNew {
+		for _, c := range in.Configs {
+			if c != nil && c.LabelName == in.SelectedLabel {
+				cfg = c
+				break
+			}
+		}
 	}
-	mentionID := ""
-	reviewerList := ""
+
+	mentionUser := ""
+	mentionSubteam := ""
+	reviewerIDs := []string{}
 	repoList := ""
 	reminderInterval := 30
+	reviewerReminderInterval := 30
 	bhStart := "09:00"
 	bhEnd := "18:00"
 	tz := "Asia/Tokyo"
 	requiredApprovals := 1
-	cfgLang := lang
+	cfgLang := in.Lang
 	if cfgLang == "" {
 		cfgLang = "ja"
 	}
 	isActive := true
 
 	if cfg != nil {
-		mentionID = cfg.DefaultMentionID
-		reviewerList = cfg.ReviewerList
+		// DefaultMentionID is one column but can be either a user (U…/W…) or a
+		// subteam (S…); pre-fill the appropriate field based on the prefix.
+		switch {
+		case looksLikeUserID(cfg.DefaultMentionID):
+			mentionUser = cfg.DefaultMentionID
+		case looksLikeSubteamID(cfg.DefaultMentionID):
+			mentionSubteam = cfg.DefaultMentionID
+		}
+		for _, r := range strings.Split(cfg.ReviewerList, ",") {
+			r = strings.TrimSpace(r)
+			if looksLikeUserID(r) {
+				reviewerIDs = append(reviewerIDs, r)
+			}
+		}
 		repoList = cfg.RepositoryList
+		if cfg.ReminderInterval > 0 {
+			reminderInterval = cfg.ReminderInterval
+		}
 		if cfg.ReviewerReminderInterval > 0 {
-			reminderInterval = cfg.ReviewerReminderInterval
+			reviewerReminderInterval = cfg.ReviewerReminderInterval
 		}
 		if cfg.BusinessHoursStart != "" {
 			bhStart = cfg.BusinessHoursStart
@@ -176,7 +222,7 @@ func BuildSettingsModalView(channelID, labelName, userID string, cfg *models.Cha
 			"value": value,
 		}
 	}
-	staticSelect := func(blockID, label string, options []map[string]any, initialValue string) map[string]any {
+	staticSelect := func(blockID, label string, options []map[string]any, initialValue string, dispatchAction bool) map[string]any {
 		element := map[string]any{
 			"type":      "static_select",
 			"action_id": blockID,
@@ -188,11 +234,49 @@ func BuildSettingsModalView(channelID, labelName, userID string, cfg *models.Cha
 				break
 			}
 		}
-		return map[string]any{
+		block := map[string]any{
 			"type":     "input",
 			"block_id": blockID,
 			"label":    plainText(label),
 			"element":  element,
+		}
+		if dispatchAction {
+			// dispatch_action tells Slack to fire a block_actions callback
+			// when the value changes, which lets us rebuild the modal with
+			// fresh defaults for the newly-chosen label.
+			block["dispatch_action"] = true
+		}
+		return block
+	}
+
+	// Label dropdown: existing labels + the create-new sentinel.
+	labelOptions := make([]map[string]any, 0, len(in.Configs)+1)
+	seen := map[string]bool{}
+	for _, c := range in.Configs {
+		if c == nil || c.LabelName == "" || seen[c.LabelName] {
+			continue
+		}
+		seen[c.LabelName] = true
+		labelOptions = append(labelOptions, option(c.LabelName, c.LabelName))
+	}
+	labelOptions = append(labelOptions, option(t("modal.label_select.create_new"), CreateNewLabelSentinel))
+
+	// If the requested SelectedLabel isn't in the channel's configs (e.g. the
+	// help button passes "needs-review" before any config exists), force the
+	// dropdown to start on the create-new option so the user isn't presented
+	// with an unmatched initial selection.
+	initialLabel := in.SelectedLabel
+	if !creatingNew {
+		hasMatch := false
+		for _, c := range in.Configs {
+			if c != nil && c.LabelName == initialLabel {
+				hasMatch = true
+				break
+			}
+		}
+		if !hasMatch {
+			initialLabel = CreateNewLabelSentinel
+			creatingNew = true
 		}
 	}
 
@@ -217,35 +301,106 @@ func BuildSettingsModalView(channelID, labelName, userID string, cfg *models.Cha
 				"text": t("modal.header"),
 			},
 		},
-		// label_name is read-only: rendered as a section block so the user cannot
-		// accidentally point this modal at another label and overwrite its config.
-		{
-			"type":     "section",
-			"block_id": "label_name_display",
-			"text": map[string]any{
-				"type": "mrkdwn",
-				"text": fmt.Sprintf("%s *`%s`*", t("modal.label_name"), labelName),
-			},
-		},
-		plainInput("default_mention_id", t("modal.default_mention_id"), t("modal.default_mention_id.hint"), mentionID, true),
-		plainInput("reviewer_list", t("modal.reviewer_list"), t("modal.reviewer_list.hint"), reviewerList, true),
+		staticSelect("label_select", t("modal.label_select"), labelOptions, initialLabel, true),
+	}
+
+	if creatingNew {
+		// new_label_name is only rendered in create-new mode so editing an
+		// existing label never silently triggers a rename.
+		blocks = append(blocks, plainInput(
+			"new_label_name",
+			t("modal.new_label_name"),
+			t("modal.new_label_name.hint"),
+			"",
+			false,
+		))
+	}
+
+	// Individual mention target → users_select. Native picker means we don't
+	// need users:read scope just to render the field, and the bot receives a
+	// pre-resolved U… ID in the submission payload.
+	mentionUserElement := map[string]any{
+		"type":      "users_select",
+		"action_id": "default_mention_user",
+	}
+	if mentionUser != "" {
+		mentionUserElement["initial_user"] = mentionUser
+	}
+	mentionUserBlock := map[string]any{
+		"type":     "input",
+		"block_id": "default_mention_user",
+		"optional": true,
+		"label":    plainText(t("modal.default_mention_user")),
+		"hint":     plainText(t("modal.default_mention_user.hint")),
+		"element":  mentionUserElement,
+	}
+
+	// Subteam mention target → plain_text_input. Slack does not provide a
+	// usergroups_select element, so this field accepts either a raw S… ID or
+	// an @team-handle (resolved via usergroups.list at submit time).
+	mentionSubteamBlock := plainInput(
+		"default_mention_subteam",
+		t("modal.default_mention_subteam"),
+		t("modal.default_mention_subteam.hint"),
+		mentionSubteam,
+		true,
+	)
+
+	// Reviewer pool → multi_users_select. Same scope/UX benefits as above.
+	reviewerElement := map[string]any{
+		"type":      "multi_users_select",
+		"action_id": "reviewer_list",
+	}
+	if len(reviewerIDs) > 0 {
+		reviewerElement["initial_users"] = reviewerIDs
+	}
+	reviewerBlock := map[string]any{
+		"type":     "input",
+		"block_id": "reviewer_list",
+		"optional": true,
+		"label":    plainText(t("modal.reviewer_list")),
+		"hint":     plainText(t("modal.reviewer_list.hint")),
+		"element":  reviewerElement,
+	}
+
+	blocks = append(blocks,
+		mentionUserBlock,
+		mentionSubteamBlock,
+		reviewerBlock,
 		plainInput("repository_list", t("modal.repository_list"), t("modal.repository_list.hint"), repoList, true),
-		plainInput("reviewer_reminder_interval", t("modal.reviewer_reminder_interval"), t("modal.reviewer_reminder_interval.hint"), strconv.Itoa(reminderInterval), false),
+		plainInput("reminder_interval", t("modal.reminder_interval"), t("modal.reminder_interval.hint"), strconv.Itoa(reminderInterval), false),
+		plainInput("reviewer_reminder_interval", t("modal.reviewer_reminder_interval"), t("modal.reviewer_reminder_interval.hint"), strconv.Itoa(reviewerReminderInterval), false),
 		plainInput("business_hours_start", t("modal.business_hours_start"), "HH:MM", bhStart, false),
 		plainInput("business_hours_end", t("modal.business_hours_end"), "HH:MM", bhEnd, false),
 		plainInput("timezone", t("modal.timezone"), t("modal.timezone.hint"), tz, false),
 		plainInput("required_approvals", t("modal.required_approvals"), t("modal.required_approvals.hint"), strconv.Itoa(requiredApprovals), false),
-		staticSelect("language", t("modal.language"), langOptions, cfgLang),
-		staticSelect("is_active", t("modal.is_active"), activeOptions, activeInitial),
+		staticSelect("language", t("modal.language"), langOptions, cfgLang, false),
+		staticSelect("is_active", t("modal.is_active"), activeOptions, activeInitial, false),
+	)
+
+	if !creatingNew {
+		// "Delete this configuration" checkbox. Only meaningful when editing
+		// an existing label — in create-new mode there's nothing to delete.
+		deleteOption := option(t("modal.delete_config.option"), "yes")
+		blocks = append(blocks, map[string]any{
+			"type":     "input",
+			"block_id": "delete_config",
+			"optional": true,
+			"label":    plainText(t("modal.delete_config")),
+			"element": map[string]any{
+				"type":      "checkboxes",
+				"action_id": "delete_config",
+				"options":   []map[string]any{deleteOption},
+			},
+		})
 	}
 
 	return map[string]any{
 		"type":        "modal",
 		"callback_id": SettingsModalCallbackID,
 		"private_metadata": EncodeSettingsModalMetadata(SettingsModalMetadata{
-			ChannelID: channelID,
-			LabelName: labelName,
-			UserID:    userID,
+			ChannelID: in.ChannelID,
+			UserID:    in.UserID,
 		}),
 		"title":  plainText(t("modal.title")),
 		"submit": plainText(t("modal.submit")),
@@ -264,11 +419,9 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 		if !ok {
 			return ""
 		}
-		// Slack puts the action_id (== blockID for our inputs) as the inner key.
 		if v, ok := actions[blockID]; ok {
 			return strings.TrimSpace(v.Value)
 		}
-		// Fall back to first value (defensive).
 		for _, v := range actions {
 			return strings.TrimSpace(v.Value)
 		}
@@ -289,12 +442,113 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 		}
 		return ""
 	}
+	selectedUser := func(blockID string) string {
+		actions, ok := values[blockID]
+		if !ok {
+			return ""
+		}
+		if v, ok := actions[blockID]; ok {
+			return v.SelectedUser
+		}
+		for _, v := range actions {
+			return v.SelectedUser
+		}
+		return ""
+	}
+	selectedUsers := func(blockID string) []string {
+		actions, ok := values[blockID]
+		if !ok {
+			return nil
+		}
+		if v, ok := actions[blockID]; ok {
+			return v.SelectedUsers
+		}
+		for _, v := range actions {
+			return v.SelectedUsers
+		}
+		return nil
+	}
+	checkboxChecked := func(blockID, optionValue string) bool {
+		actions, ok := values[blockID]
+		if !ok {
+			return false
+		}
+		v, ok := actions[blockID]
+		if !ok {
+			// Fall back to the first value in the block.
+			for _, x := range actions {
+				v = x
+				break
+			}
+		}
+		for _, opt := range v.SelectedOptions {
+			if opt.Value == optionValue {
+				return true
+			}
+		}
+		return false
+	}
 
 	form := &SettingsForm{}
 
-	form.DefaultMentionID = field("default_mention_id")
-	form.ReviewerList = normalizeCSV(field("reviewer_list"))
+	// Label resolution: when the user picks the create-new sentinel, take the
+	// name from the new_label_name text input; otherwise use the selected value.
+	selected := selectField("label_select")
+	if selected == CreateNewLabelSentinel {
+		form.CreateNew = true
+		form.LabelName = field("new_label_name")
+		switch form.LabelName {
+		case "":
+			errs["new_label_name"] = "label name is required"
+		case CreateNewLabelSentinel:
+			// Reserved sentinel — saving this as a literal label name would
+			// make the row unaddressable from the dropdown later.
+			errs["new_label_name"] = "this label name is reserved"
+		}
+	} else if selected != "" {
+		form.LabelName = selected
+	}
+
+	// Delete checkbox short-circuits the rest of validation: when the user
+	// asked to delete the row, the other fields don't need to be valid.
+	form.DeleteConfig = checkboxChecked("delete_config", "yes")
+	if form.DeleteConfig && !form.CreateNew {
+		// Still need the label name to know what to delete; selectField above
+		// already set it. No further validation needed.
+		return form, nil
+	}
+
+	// Mention target: prefer the users_select (individual) over the subteam
+	// plain_text_input. Both empty → DefaultMentionID stays "". The subteam
+	// field still accepts either a raw S… ID or an @handle (resolved via
+	// usergroups.list), because Block Kit has no usergroups_select element.
+	if user := selectedUser("default_mention_user"); user != "" {
+		form.DefaultMentionID = user
+	} else if raw := strings.TrimPrefix(strings.TrimSpace(field("default_mention_subteam")), "@"); raw != "" {
+		resolved, err := LookupSlackSubteamID(raw)
+		if err != nil {
+			if _, ok := err.(*SlackLookupNotFoundError); ok {
+				errs["default_mention_subteam"] = fmt.Sprintf("could not find Slack subteam %q", raw)
+			} else {
+				errs["default_mention_subteam"] = "Slack lookup failed: " + err.Error()
+			}
+		} else {
+			form.DefaultMentionID = resolved
+		}
+	}
+
+	// Reviewer pool: multi_users_select gives us a slice of pre-resolved U…
+	// IDs. We canonicalize to a comma-separated string for the existing
+	// ChannelConfig column.
+	reviewers := selectedUsers("reviewer_list")
+	form.ReviewerList = strings.Join(reviewers, ",")
 	form.RepositoryList = normalizeCSV(field("repository_list"))
+
+	if interval, err := strconv.Atoi(field("reminder_interval")); err != nil || interval <= 0 {
+		errs["reminder_interval"] = "must be a positive integer"
+	} else {
+		form.ReminderInterval = interval
+	}
 
 	intervalStr := field("reviewer_reminder_interval")
 	if interval, err := strconv.Atoi(intervalStr); err != nil || interval <= 0 {

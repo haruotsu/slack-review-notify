@@ -69,6 +69,18 @@ GITHUB_WEBHOOK_SECRET=your-github-webhook-secret
 DB_PATH=review_tasks.db  # デフォルト: review_tasks.db（省略可能）
 ```
 
+### 必要な Slack Bot OAuth スコープ
+Slack App の *OAuth & Permissions* で以下のスコープを付与してください:
+
+| スコープ | 用途 |
+|---|---|
+| `chat:write` | 通知・リマインドの投稿 |
+| `chat:write.public` | Botが未参加のチャンネルへの投稿 |
+| `commands` | `/slack-review-notify` スラッシュコマンドの受付 |
+| `usergroups:read` | （任意）設定モーダルの「メンション先 (サブチーム)」フィールドに `@チーム名` で入力するとき必要。`S…` ID を直接貼る運用、または個人のみメンションする運用なら不要。 |
+
+設定モーダルの個人メンション欄・レビュワー欄は Slack ネイティブの `users_select` / `multi_users_select` を使うため、**`users:read` は不要**です（Bot は解決済みのユーザ ID を受け取ります）。
+
 ## 検証例
 ローカルサーバーを立てて、検証する方法を以下に記載しました。
 [/docs/example_usage.md](./docs/example_usage.md)
