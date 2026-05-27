@@ -76,14 +76,15 @@ func TestBuildSettingsModalView_HasAllFields(t *testing.T) {
 		t.Fatalf("blocks is not a slice: %T", view["blocks"])
 	}
 
-	// label_select is a static_select; default_mention_user is a users_select
-	// (no Slack scope needed); default_mention_subteam is a plain_text_input
-	// for subteams; reviewer_list is a multi_users_select.
+	// label_select: static_select. default_mention_user/reviewer_list: native
+	// pickers. default_mention_text/reviewer_list_text: free-text companions
+	// for subteam IDs, decorative text, and legacy non-ID data.
 	requiredBlockIDs := []string{
 		"label_select",
 		"default_mention_user",
-		"default_mention_subteam",
+		"default_mention_text",
 		"reviewer_list",
+		"reviewer_list_text",
 		"repository_list",
 		"reminder_interval",
 		"reviewer_reminder_interval",
@@ -335,11 +336,14 @@ func TestParseSettingsModalSubmission(t *testing.T) {
 		"default_mention_user": {
 			"default_mention_user": {Type: "users_select", SelectedUser: "U99999"},
 		},
-		"default_mention_subteam": {
-			"default_mention_subteam": {Type: "plain_text_input", Value: ""},
+		"default_mention_text": {
+			"default_mention_text": {Type: "plain_text_input", Value: ""},
 		},
 		"reviewer_list": {
 			"reviewer_list": {Type: "multi_users_select", SelectedUsers: []string{"U1", "U2", "U3"}},
+		},
+		"reviewer_list_text": {
+			"reviewer_list_text": {Type: "plain_text_input", Value: ""},
 		},
 		"repository_list": {
 			"repository_list": {Type: "plain_text_input", Value: "owner/repo1, owner/repo2"},
@@ -584,5 +588,113 @@ func TestParseSettingsModalSubmission_ValidationErrors(t *testing.T) {
 func TestCreateNewLabelSentinel_Value(t *testing.T) {
 	if CreateNewLabelSentinel == "" || !strings.HasPrefix(CreateNewLabelSentinel, "__") {
 		t.Errorf("CreateNewLabelSentinel = %q, want a stable __-prefixed sentinel", CreateNewLabelSentinel)
+	}
+}
+
+// minimalValidParseValues returns the smallest valid view_submission payload
+// state.values map for ParseSettingsModalSubmission. Individual tests override
+// specific fields to exercise their branches without re-stating the whole shape.
+func minimalValidParseValues() map[string]map[string]ViewStateValue {
+	return map[string]map[string]ViewStateValue{
+		"label_select":               {"label_select": {SelectedOption: &ViewSelectedOption{Value: "needs-review"}}},
+		"default_mention_user":       {"default_mention_user": {SelectedUser: "U99999"}},
+		"default_mention_text":       {"default_mention_text": {Value: ""}},
+		"reviewer_list":              {"reviewer_list": {SelectedUsers: nil}},
+		"reviewer_list_text":         {"reviewer_list_text": {Value: ""}},
+		"repository_list":            {"repository_list": {Value: ""}},
+		"reminder_interval":          {"reminder_interval": {Value: "30"}},
+		"reviewer_reminder_interval": {"reviewer_reminder_interval": {Value: "30"}},
+		"business_hours_start":       {"business_hours_start": {Value: "09:00"}},
+		"business_hours_end":         {"business_hours_end": {Value: "18:00"}},
+		"timezone":                   {"timezone": {Value: "Asia/Tokyo"}},
+		"required_approvals":         {"required_approvals": {Value: "1"}},
+		"language":                   {"language": {SelectedOption: &ViewSelectedOption{Value: "ja"}}},
+		"is_active":                  {"is_active": {SelectedOption: &ViewSelectedOption{Value: "true"}}},
+	}
+}
+
+// TestParseSettingsModalSubmission_PickerBeatsText: the user picker wins over
+// the free-text field for DefaultMentionID, so an accidentally-left-over text
+// entry doesn't override a newly picked user.
+func TestParseSettingsModalSubmission_PickerBeatsText(t *testing.T) {
+	v := minimalValidParseValues()
+	v["default_mention_user"] = map[string]ViewStateValue{
+		"default_mention_user": {SelectedUser: "UPICKED"},
+	}
+	v["default_mention_text"] = map[string]ViewStateValue{
+		"default_mention_text": {Value: "SLEFTOVER"},
+	}
+	got, err := ParseSettingsModalSubmission(v)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got.DefaultMentionID != "UPICKED" {
+		t.Errorf("DefaultMentionID = %q, want UPICKED (picker must win over text)", got.DefaultMentionID)
+	}
+}
+
+// TestParseSettingsModalSubmission_FreeTextMention: when the picker is empty,
+// the free-text field's raw value (subteam ID, decorative string, etc.) flows
+// through verbatim — no resolution attempted.
+func TestParseSettingsModalSubmission_FreeTextMention(t *testing.T) {
+	cases := []string{"S0123456789", "チームみなさん！", "@team-handle", "alice"}
+	for _, want := range cases {
+		v := minimalValidParseValues()
+		v["default_mention_user"] = map[string]ViewStateValue{
+			"default_mention_user": {SelectedUser: ""},
+		}
+		v["default_mention_text"] = map[string]ViewStateValue{
+			"default_mention_text": {Value: want},
+		}
+		got, err := ParseSettingsModalSubmission(v)
+		if err != nil {
+			t.Errorf("%q: err: %v", want, err)
+			continue
+		}
+		if got.DefaultMentionID != want {
+			t.Errorf("DefaultMentionID = %q, want %q (free text must pass through)", got.DefaultMentionID, want)
+		}
+	}
+}
+
+// TestParseSettingsModalSubmission_ReviewerMerge: picker IDs and free-text CSV
+// are concatenated (picker first) into one CSV, preserving legacy bare-name
+// entries while still letting the user add picker-resolved IDs.
+func TestParseSettingsModalSubmission_ReviewerMerge(t *testing.T) {
+	v := minimalValidParseValues()
+	v["reviewer_list"] = map[string]ViewStateValue{
+		"reviewer_list": {SelectedUsers: []string{"U1", "U2"}},
+	}
+	v["reviewer_list_text"] = map[string]ViewStateValue{
+		"reviewer_list_text": {Value: "alice, bob"},
+	}
+	got, err := ParseSettingsModalSubmission(v)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got.ReviewerList != "U1,U2,alice,bob" {
+		t.Errorf("ReviewerList = %q, want U1,U2,alice,bob", got.ReviewerList)
+	}
+}
+
+// TestBuildMentionText_PassesThroughFreeText covers the buildMentionText
+// branches: U… → <@…>, S… → subteam, "subteam^X" → subteam (legacy), empty →
+// empty, anything else → as-is (no <@…> wrapping for decorative text).
+func TestBuildMentionText_PassesThroughFreeText(t *testing.T) {
+	cases := map[string]string{
+		"":             "",
+		"U123ABC":      "<@U123ABC>",
+		"W123ABC":      "<@W123ABC>",
+		"S0123456789":  "<!subteam^S0123456789>",
+		"subteam^S012": "<!subteam^S012>",
+		"チームみなさん！":     "チームみなさん！",
+		"alice":        "alice",
+		"@team-handle": "@team-handle",
+		"SABC":         "<!subteam^SABC>", // all-caps S-prefix is treated as subteam ID shape
+	}
+	for in, want := range cases {
+		if got := buildMentionText(in); got != want {
+			t.Errorf("buildMentionText(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

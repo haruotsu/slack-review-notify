@@ -109,17 +109,65 @@ func GetSlackUserIDFromGitHub(db *gorm.DB, githubUsername string) string {
 	return mapping.SlackUserID
 }
 
-func buildMentionText(mentionID string) string {
-	// Empty mention is supported (some channels intentionally don't set a
-	// default mention target). Returning "" instead of "<@>" keeps the
-	// notification message valid Slack markup with just a leading space.
-	if mentionID == "" {
+// looksLikeUserID reports whether s has the shape of a Slack user ID
+// (U or W followed by uppercase alphanumerics). Used to route modal pre-fill
+// and to decide whether to wrap a stored mention value in <@…> markup.
+func looksLikeUserID(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return false
+	}
+	if s[0] != 'U' && s[0] != 'W' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')) {
+			return false
+		}
+	}
+	return true
+}
+
+// looksLikeSubteamID reports whether s has the shape of a Slack subteam ID
+// (S followed by uppercase alphanumerics).
+func looksLikeSubteamID(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || s[0] != 'S' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')) {
+			return false
+		}
+	}
+	return true
+}
+
+// buildMentionText converts a stored mention value to Slack message markup.
+// The stored value may be:
+//   - a user ID (U… / W…)              → "<@U…>"
+//   - a subteam ID (S…)                → "<!subteam^S…>"
+//   - a "subteam^X" prefixed form      → "<!subteam^X>"  (legacy storage shape)
+//   - free text (decorative phrases, "@team") → passed through as-is so Slack
+//     renders it verbatim; ID lookup isn't this bot's responsibility, and
+//     existing channel configs commonly use decorative text here
+//   - empty                             → ""
+func buildMentionText(s string) string {
+	if s == "" {
 		return ""
 	}
-	if strings.HasPrefix(mentionID, "subteam^") || strings.HasPrefix(mentionID, "S") {
-		return fmt.Sprintf("<!subteam^%s>", mentionID)
+	if rest, ok := strings.CutPrefix(s, "subteam^"); ok && rest != "" {
+		return fmt.Sprintf("<!subteam^%s>", rest)
 	}
-	return fmt.Sprintf("<@%s>", mentionID)
+	if looksLikeSubteamID(s) {
+		return fmt.Sprintf("<!subteam^%s>", s)
+	}
+	if looksLikeUserID(s) {
+		return fmt.Sprintf("<@%s>", s)
+	}
+	return s
 }
 
 // GetAwayUserIDs returns the user IDs of users currently on leave
