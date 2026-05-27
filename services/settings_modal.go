@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"slack-review-notify/i18n"
 	"slack-review-notify/models"
@@ -11,6 +12,36 @@ import (
 
 // SettingsModalCallbackID is the callback_id used by the settings modal view.
 const SettingsModalCallbackID = "settings_modal"
+
+// SettingsModalMetadata is the JSON shape we stash in `view.private_metadata` when
+// opening the settings modal. The label name is captured at open time and is NOT
+// editable in the modal — this prevents users from accidentally overwriting another
+// label's config by renaming. UserID is carried so the submission handler can post
+// an ephemeral confirmation back to the submitter only.
+type SettingsModalMetadata struct {
+	ChannelID string `json:"c"`
+	LabelName string `json:"l"`
+	UserID    string `json:"u"`
+}
+
+// EncodeSettingsModalMetadata serializes metadata for view.private_metadata.
+func EncodeSettingsModalMetadata(m SettingsModalMetadata) string {
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+// DecodeSettingsModalMetadata parses view.private_metadata. Empty input returns
+// a zero-value struct and no error so callers can treat it uniformly.
+func DecodeSettingsModalMetadata(s string) (SettingsModalMetadata, error) {
+	var m SettingsModalMetadata
+	if s == "" {
+		return m, nil
+	}
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return m, err
+	}
+	return m, nil
+}
 
 // ViewSelectedOption mirrors the option payload Slack sends back in view_submission.
 type ViewSelectedOption struct {
@@ -41,8 +72,9 @@ func (e *ModalValidationError) Error() string {
 }
 
 // SettingsForm is the parsed view_submission payload, ready to upsert into ChannelConfig.
+// LabelName is intentionally omitted: it is captured at modal-open time and carried
+// in private_metadata, not as an editable field.
 type SettingsForm struct {
-	LabelName                string
 	DefaultMentionID         string
 	ReviewerList             string
 	RepositoryList           string
@@ -56,11 +88,24 @@ type SettingsForm struct {
 }
 
 // BuildSettingsModalView returns the Slack Block Kit `view` payload for the settings modal.
-// channelID is embedded in private_metadata so the view_submission handler can resolve the channel.
-func BuildSettingsModalView(channelID string, cfg *models.ChannelConfig, lang string) map[string]interface{} {
+//
+// `labelName` identifies the (channelID, labelName) row being edited. It is rendered
+// as a non-editable section block and round-tripped through private_metadata so the
+// submission handler updates exactly that row — eliminating the "rename via modal
+// silently overwrites another label" footgun. To add a new label config, use the
+// slash command.
+//
+// `cfg` is the existing ChannelConfig for (channelID, labelName) if any; nil
+// renders a blank-defaults modal for a fresh label.
+//
+// `userID` is carried through private_metadata so the submission handler can
+// ephemeral-respond to the submitter only.
+func BuildSettingsModalView(channelID, labelName, userID string, cfg *models.ChannelConfig, lang string) map[string]any {
 	t := i18n.L(lang)
 
-	labelName := "needs-review"
+	if labelName == "" {
+		labelName = "needs-review"
+	}
 	mentionID := ""
 	reviewerList := ""
 	repoList := ""
@@ -76,9 +121,6 @@ func BuildSettingsModalView(channelID string, cfg *models.ChannelConfig, lang st
 	isActive := true
 
 	if cfg != nil {
-		if cfg.LabelName != "" {
-			labelName = cfg.LabelName
-		}
 		mentionID = cfg.DefaultMentionID
 		reviewerList = cfg.ReviewerList
 		repoList = cfg.RepositoryList
@@ -103,18 +145,18 @@ func BuildSettingsModalView(channelID string, cfg *models.ChannelConfig, lang st
 		isActive = cfg.IsActive
 	}
 
-	plainText := func(s string) map[string]interface{} {
-		return map[string]interface{}{"type": "plain_text", "text": s}
+	plainText := func(s string) map[string]any {
+		return map[string]any{"type": "plain_text", "text": s}
 	}
-	plainInput := func(blockID, label, hint, initial string, optional bool) map[string]interface{} {
-		element := map[string]interface{}{
+	plainInput := func(blockID, label, hint, initial string, optional bool) map[string]any {
+		element := map[string]any{
 			"type":      "plain_text_input",
 			"action_id": blockID,
 		}
 		if initial != "" {
 			element["initial_value"] = initial
 		}
-		block := map[string]interface{}{
+		block := map[string]any{
 			"type":     "input",
 			"block_id": blockID,
 			"label":    plainText(label),
@@ -128,14 +170,14 @@ func BuildSettingsModalView(channelID string, cfg *models.ChannelConfig, lang st
 		}
 		return block
 	}
-	option := func(text, value string) map[string]interface{} {
-		return map[string]interface{}{
+	option := func(text, value string) map[string]any {
+		return map[string]any{
 			"text":  plainText(text),
 			"value": value,
 		}
 	}
-	staticSelect := func(blockID, label string, options []map[string]interface{}, initialValue string) map[string]interface{} {
-		element := map[string]interface{}{
+	staticSelect := func(blockID, label string, options []map[string]any, initialValue string) map[string]any {
+		element := map[string]any{
 			"type":      "static_select",
 			"action_id": blockID,
 			"options":   options,
@@ -146,7 +188,7 @@ func BuildSettingsModalView(channelID string, cfg *models.ChannelConfig, lang st
 				break
 			}
 		}
-		return map[string]interface{}{
+		return map[string]any{
 			"type":     "input",
 			"block_id": blockID,
 			"label":    plainText(label),
@@ -154,11 +196,11 @@ func BuildSettingsModalView(channelID string, cfg *models.ChannelConfig, lang st
 		}
 	}
 
-	langOptions := []map[string]interface{}{
+	langOptions := []map[string]any{
 		option(t("modal.lang.ja"), "ja"),
 		option(t("modal.lang.en"), "en"),
 	}
-	activeOptions := []map[string]interface{}{
+	activeOptions := []map[string]any{
 		option(t("modal.active.true"), "true"),
 		option(t("modal.active.false"), "false"),
 	}
@@ -167,15 +209,24 @@ func BuildSettingsModalView(channelID string, cfg *models.ChannelConfig, lang st
 		activeInitial = "false"
 	}
 
-	blocks := []map[string]interface{}{
+	blocks := []map[string]any{
 		{
 			"type": "section",
-			"text": map[string]interface{}{
+			"text": map[string]any{
 				"type": "mrkdwn",
 				"text": t("modal.header"),
 			},
 		},
-		plainInput("label_name", t("modal.label_name"), t("modal.label_name.hint"), labelName, false),
+		// label_name is read-only: rendered as a section block so the user cannot
+		// accidentally point this modal at another label and overwrite its config.
+		{
+			"type":     "section",
+			"block_id": "label_name_display",
+			"text": map[string]any{
+				"type": "mrkdwn",
+				"text": fmt.Sprintf("%s *`%s`*", t("modal.label_name"), labelName),
+			},
+		},
 		plainInput("default_mention_id", t("modal.default_mention_id"), t("modal.default_mention_id.hint"), mentionID, true),
 		plainInput("reviewer_list", t("modal.reviewer_list"), t("modal.reviewer_list.hint"), reviewerList, true),
 		plainInput("repository_list", t("modal.repository_list"), t("modal.repository_list.hint"), repoList, true),
@@ -188,14 +239,18 @@ func BuildSettingsModalView(channelID string, cfg *models.ChannelConfig, lang st
 		staticSelect("is_active", t("modal.is_active"), activeOptions, activeInitial),
 	}
 
-	return map[string]interface{}{
-		"type":             "modal",
-		"callback_id":      SettingsModalCallbackID,
-		"private_metadata": channelID,
-		"title":            plainText(t("modal.title")),
-		"submit":           plainText(t("modal.submit")),
-		"close":            plainText(t("modal.close")),
-		"blocks":           blocks,
+	return map[string]any{
+		"type":        "modal",
+		"callback_id": SettingsModalCallbackID,
+		"private_metadata": EncodeSettingsModalMetadata(SettingsModalMetadata{
+			ChannelID: channelID,
+			LabelName: labelName,
+			UserID:    userID,
+		}),
+		"title":  plainText(t("modal.title")),
+		"submit": plainText(t("modal.submit")),
+		"close":  plainText(t("modal.close")),
+		"blocks": blocks,
 	}
 }
 
@@ -237,10 +292,6 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 
 	form := &SettingsForm{}
 
-	form.LabelName = field("label_name")
-	if form.LabelName == "" {
-		errs["label_name"] = "required"
-	}
 	form.DefaultMentionID = field("default_mention_id")
 	form.ReviewerList = normalizeCSV(field("reviewer_list"))
 	form.RepositoryList = normalizeCSV(field("repository_list"))

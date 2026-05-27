@@ -84,8 +84,42 @@ func TestHandleSlackAction_OpenSettings(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 }
 
+// TestHandleSlackAction_OpenSettings_NoFallback verifies that when the target label
+// has no config but ANOTHER label in the same channel does, we do NOT silently
+// fall back to it — the modal must open fresh for the requested label only.
+// (Regression guard for the previous "fallback pre-fills another label" UX bug.)
+func TestHandleSlackAction_OpenSettings_NoFallback(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+
+	// Unrelated label exists; the modal must NOT pre-fill from it.
+	db.Create(&models.ChannelConfig{
+		ID:               "other",
+		SlackChannelID:   "C12345",
+		LabelName:        "other-label",
+		DefaultMentionID: "Uother",
+		IsActive:         true,
+	})
+
+	payload := `{
+		"type": "block_actions",
+		"trigger_id": "trigger-xyz",
+		"user": {"id": "U12345"},
+		"actions": [{"action_id": "open_settings", "value": "needs-review"}],
+		"container": {"channel_id": "C12345"},
+		"message": {"ts": "1234.5"}
+	}`
+
+	w := postPayload(t, router, payload)
+	assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	// Functional verification (that the modal shows empty defaults rather than the
+	// other-label config) lives in services/settings_modal_test.go where the view
+	// payload is inspectable; here we just assert the request is accepted.
+}
+
 // TestHandleSlackAction_ViewSubmission_CreatesConfig verifies a view_submission payload
-// upserts the ChannelConfig identified by (channel_id, label_name).
+// upserts the ChannelConfig identified by (channel_id, label_name) read from
+// private_metadata. The form itself no longer carries label_name.
 func TestHandleSlackAction_ViewSubmission_CreatesConfig(t *testing.T) {
 	db := setupTestDB(t)
 	router := setupActionRouter(db)
@@ -95,10 +129,9 @@ func TestHandleSlackAction_ViewSubmission_CreatesConfig(t *testing.T) {
 		"user": {"id": "U12345"},
 		"view": {
 			"callback_id": "settings_modal",
-			"private_metadata": "C99999",
+			"private_metadata": "{\"c\":\"C99999\",\"l\":\"new-label\",\"u\":\"U12345\"}",
 			"state": {
 				"values": {
-					"label_name": {"label_name": {"type": "plain_text_input", "value": "new-label"}},
 					"default_mention_id": {"default_mention_id": {"type": "plain_text_input", "value": "U777"}},
 					"reviewer_list": {"reviewer_list": {"type": "plain_text_input", "value": "U1, U2"}},
 					"repository_list": {"repository_list": {"type": "plain_text_input", "value": "owner/repo"}},
@@ -157,10 +190,9 @@ func TestHandleSlackAction_ViewSubmission_UpdatesConfig(t *testing.T) {
 		"user": {"id": "U12345"},
 		"view": {
 			"callback_id": "settings_modal",
-			"private_metadata": "C99999",
+			"private_metadata": "{\"c\":\"C99999\",\"l\":\"needs-review\",\"u\":\"U12345\"}",
 			"state": {
 				"values": {
-					"label_name": {"label_name": {"value": "needs-review"}},
 					"default_mention_id": {"default_mention_id": {"value": "Unew"}},
 					"reviewer_list": {"reviewer_list": {"value": ""}},
 					"repository_list": {"repository_list": {"value": ""}},
@@ -207,10 +239,9 @@ func TestHandleSlackAction_ViewSubmission_ValidationError(t *testing.T) {
 		"user": {"id": "U12345"},
 		"view": {
 			"callback_id": "settings_modal",
-			"private_metadata": "C99999",
+			"private_metadata": "{\"c\":\"C99999\",\"l\":\"needs-review\",\"u\":\"U12345\"}",
 			"state": {
 				"values": {
-					"label_name": {"label_name": {"value": ""}},
 					"default_mention_id": {"default_mention_id": {"value": ""}},
 					"reviewer_list": {"reviewer_list": {"value": ""}},
 					"repository_list": {"repository_list": {"value": ""}},
@@ -231,7 +262,30 @@ func TestHandleSlackAction_ViewSubmission_ValidationError(t *testing.T) {
 	body := w.Body.String()
 	assert.Contains(t, body, "response_action")
 	assert.Contains(t, body, "errors")
-	// the bad fields should appear
-	assert.Contains(t, body, "label_name")
+	// the bad field should appear in the inline errors
 	assert.Contains(t, body, "reviewer_reminder_interval")
+}
+
+// TestHandleSlackAction_ViewSubmission_MissingPrivateMetadata verifies the handler
+// rejects a submission whose private_metadata is missing/invalid, so a bug that
+// loses modal context can't silently no-op or write to the wrong row.
+func TestHandleSlackAction_ViewSubmission_MissingPrivateMetadata(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+
+	payload := `{
+		"type": "view_submission",
+		"user": {"id": "U12345"},
+		"view": {
+			"callback_id": "settings_modal",
+			"private_metadata": "",
+			"state": {"values": {}}
+		}
+	}`
+
+	w := postPayload(t, router, payload)
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "response_action")
+	assert.Contains(t, body, "errors")
 }

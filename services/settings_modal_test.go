@@ -12,7 +12,7 @@ func TestBuildSettingsModalView_BasicShape(t *testing.T) {
 		LabelName:        "needs-review",
 		DefaultMentionID: "U99999",
 	}
-	view := BuildSettingsModalView("C12345", cfg, "ja")
+	view := BuildSettingsModalView("C12345", "needs-review", "U777", cfg, "ja")
 
 	if view["type"] != "modal" {
 		t.Errorf("type = %v, want modal", view["type"])
@@ -20,16 +20,24 @@ func TestBuildSettingsModalView_BasicShape(t *testing.T) {
 	if view["callback_id"] != "settings_modal" {
 		t.Errorf("callback_id = %v, want settings_modal", view["callback_id"])
 	}
-	// private_metadata must contain channel ID so view_submission can find the channel
+	// private_metadata must round-trip channel ID, label, and submitter so the
+	// submission handler can update exactly that (channel,label) without trusting
+	// any form-supplied label.
 	pm, ok := view["private_metadata"].(string)
-	if !ok || !strings.Contains(pm, "C12345") {
-		t.Errorf("private_metadata = %v, want to include C12345", view["private_metadata"])
+	if !ok {
+		t.Fatalf("private_metadata not a string: %T", view["private_metadata"])
 	}
-	// must have submit & close buttons
-	if _, ok := view["submit"].(map[string]interface{}); !ok {
+	meta, err := DecodeSettingsModalMetadata(pm)
+	if err != nil {
+		t.Fatalf("private_metadata is not valid JSON: %v (%q)", err, pm)
+	}
+	if meta.ChannelID != "C12345" || meta.LabelName != "needs-review" || meta.UserID != "U777" {
+		t.Errorf("metadata = %+v, want {C12345, needs-review, U777}", meta)
+	}
+	if _, ok := view["submit"].(map[string]any); !ok {
 		t.Errorf("missing submit button")
 	}
-	if _, ok := view["close"].(map[string]interface{}); !ok {
+	if _, ok := view["close"].(map[string]any); !ok {
 		t.Errorf("missing close button")
 	}
 }
@@ -49,15 +57,17 @@ func TestBuildSettingsModalView_HasAllFields(t *testing.T) {
 		Language:                 "ja",
 		IsActive:                 true,
 	}
-	view := BuildSettingsModalView("C12345", cfg, "ja")
+	view := BuildSettingsModalView("C12345", "needs-review", "U1", cfg, "ja")
 
-	blocks, ok := view["blocks"].([]map[string]interface{})
+	blocks, ok := view["blocks"].([]map[string]any)
 	if !ok {
 		t.Fatalf("blocks is not a slice: %T", view["blocks"])
 	}
 
+	// label_name is rendered as a read-only display block (label_name_display);
+	// all other settings are editable input blocks.
 	requiredBlockIDs := []string{
-		"label_name",
+		"label_name_display",
 		"default_mention_id",
 		"reviewer_list",
 		"repository_list",
@@ -82,6 +92,13 @@ func TestBuildSettingsModalView_HasAllFields(t *testing.T) {
 			t.Errorf("missing block_id: %s", want)
 		}
 	}
+
+	// label_name must NOT be an editable input — the modal cannot retarget another label.
+	for _, b := range blocks {
+		if id, _ := b["block_id"].(string); id == "label_name" {
+			t.Errorf("label_name input block must be removed; got %+v", b)
+		}
+	}
 }
 
 func TestBuildSettingsModalView_InitialValues(t *testing.T) {
@@ -99,13 +116,13 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 		Language:                 "en",
 		IsActive:                 true,
 	}
-	view := BuildSettingsModalView("C12345", cfg, "en")
-	blocks := view["blocks"].([]map[string]interface{})
+	view := BuildSettingsModalView("C12345", "my-label", "U777", cfg, "en")
+	blocks := view["blocks"].([]map[string]any)
 
-	getElement := func(blockID string) map[string]interface{} {
+	getElement := func(blockID string) map[string]any {
 		for _, b := range blocks {
 			if id, ok := b["block_id"].(string); ok && id == blockID {
-				if el, ok := b["element"].(map[string]interface{}); ok {
+				if el, ok := b["element"].(map[string]any); ok {
 					return el
 				}
 			}
@@ -118,7 +135,6 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 		key     string
 		want    string
 	}{
-		{"label_name", "initial_value", "my-label"},
 		{"default_mention_id", "initial_value", "U99999"},
 		{"reviewer_list", "initial_value", "U1,U2"},
 		{"repository_list", "initial_value", "owner/repo1"},
@@ -141,12 +157,26 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 		}
 	}
 
+	// label_name_display is a section block (not input); confirm its text
+	// surfaces the passed-in label name.
+	var labelDisplayText string
+	for _, b := range blocks {
+		if id, _ := b["block_id"].(string); id == "label_name_display" {
+			if txt, ok := b["text"].(map[string]any); ok {
+				labelDisplayText, _ = txt["text"].(string)
+			}
+		}
+	}
+	if !strings.Contains(labelDisplayText, "my-label") {
+		t.Errorf("label_name_display text = %q, want to contain %q", labelDisplayText, "my-label")
+	}
+
 	// language: static_select; initial_option must have value "en"
 	langEl := getElement("language")
 	if langEl == nil {
 		t.Fatalf("language element not found")
 	}
-	opt, ok := langEl["initial_option"].(map[string]interface{})
+	opt, ok := langEl["initial_option"].(map[string]any)
 	if !ok {
 		t.Fatalf("language.initial_option missing")
 	}
@@ -159,7 +189,7 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 	if activeEl == nil {
 		t.Fatalf("is_active element not found")
 	}
-	activeOpt, ok := activeEl["initial_option"].(map[string]interface{})
+	activeOpt, ok := activeEl["initial_option"].(map[string]any)
 	if !ok {
 		t.Fatalf("is_active.initial_option missing")
 	}
@@ -169,13 +199,14 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 }
 
 func TestBuildSettingsModalView_NilConfigDefaults(t *testing.T) {
-	view := BuildSettingsModalView("C99999", nil, "ja")
-	blocks := view["blocks"].([]map[string]interface{})
+	// Empty labelName triggers the in-function fallback to "needs-review".
+	view := BuildSettingsModalView("C99999", "", "U1", nil, "ja")
+	blocks := view["blocks"].([]map[string]any)
 
-	getElement := func(blockID string) map[string]interface{} {
+	getElement := func(blockID string) map[string]any {
 		for _, b := range blocks {
 			if id, ok := b["block_id"].(string); ok && id == blockID {
-				if el, ok := b["element"].(map[string]interface{}); ok {
+				if el, ok := b["element"].(map[string]any); ok {
 					return el
 				}
 			}
@@ -183,10 +214,19 @@ func TestBuildSettingsModalView_NilConfigDefaults(t *testing.T) {
 		return nil
 	}
 
-	// Reasonable defaults when no config exists
-	if v, _ := getElement("label_name")["initial_value"].(string); v != "needs-review" {
-		t.Errorf("default label_name = %q, want needs-review", v)
+	// label_name is now a display section; verify the fallback "needs-review" surfaces there.
+	var labelDisplayText string
+	for _, b := range blocks {
+		if id, _ := b["block_id"].(string); id == "label_name_display" {
+			if txt, ok := b["text"].(map[string]any); ok {
+				labelDisplayText, _ = txt["text"].(string)
+			}
+		}
 	}
+	if !strings.Contains(labelDisplayText, "needs-review") {
+		t.Errorf("default label display = %q, want to contain needs-review", labelDisplayText)
+	}
+
 	if v, _ := getElement("business_hours_start")["initial_value"].(string); v != "09:00" {
 		t.Errorf("default business_hours_start = %q, want 09:00", v)
 	}
@@ -205,11 +245,9 @@ func TestBuildSettingsModalView_NilConfigDefaults(t *testing.T) {
 }
 
 func TestParseSettingsModalSubmission(t *testing.T) {
-	// view.state.values shape from Slack view_submission payload
+	// view.state.values shape from Slack view_submission payload.
+	// Note: label_name is NOT a form field (carried via private_metadata).
 	stateValues := map[string]map[string]ViewStateValue{
-		"label_name": {
-			"label_name": {Type: "plain_text_input", Value: "my-label"},
-		},
 		"default_mention_id": {
 			"default_mention_id": {Type: "plain_text_input", Value: "U99999"},
 		},
@@ -247,9 +285,6 @@ func TestParseSettingsModalSubmission(t *testing.T) {
 		t.Fatalf("ParseSettingsModalSubmission returned error: %v", err)
 	}
 
-	if got.LabelName != "my-label" {
-		t.Errorf("LabelName = %q", got.LabelName)
-	}
 	if got.DefaultMentionID != "U99999" {
 		t.Errorf("DefaultMentionID = %q", got.DefaultMentionID)
 	}
@@ -283,9 +318,8 @@ func TestParseSettingsModalSubmission(t *testing.T) {
 }
 
 func TestParseSettingsModalSubmission_ValidationErrors(t *testing.T) {
-	mk := func(label, mention string, interval, approvals string, bhStart, bhEnd, tz, lang, active string) map[string]map[string]ViewStateValue {
+	mk := func(mention, interval, approvals, bhStart, bhEnd, tz, lang, active string) map[string]map[string]ViewStateValue {
 		return map[string]map[string]ViewStateValue{
-			"label_name":                 {"label_name": {Value: label}},
 			"default_mention_id":         {"default_mention_id": {Value: mention}},
 			"reviewer_list":              {"reviewer_list": {Value: ""}},
 			"repository_list":            {"repository_list": {Value: ""}},
@@ -305,38 +339,33 @@ func TestParseSettingsModalSubmission_ValidationErrors(t *testing.T) {
 		wantField string
 	}{
 		{
-			name:      "empty label",
-			values:    mk("", "U1", "30", "1", "09:00", "18:00", "Asia/Tokyo", "ja", "true"),
-			wantField: "label_name",
-		},
-		{
 			name:      "bad reminder interval",
-			values:    mk("L", "U1", "abc", "1", "09:00", "18:00", "Asia/Tokyo", "ja", "true"),
+			values:    mk("U1", "abc", "1", "09:00", "18:00", "Asia/Tokyo", "ja", "true"),
 			wantField: "reviewer_reminder_interval",
 		},
 		{
 			name:      "bad approvals (zero)",
-			values:    mk("L", "U1", "30", "0", "09:00", "18:00", "Asia/Tokyo", "ja", "true"),
+			values:    mk("U1", "30", "0", "09:00", "18:00", "Asia/Tokyo", "ja", "true"),
 			wantField: "required_approvals",
 		},
 		{
 			name:      "bad approvals (too many)",
-			values:    mk("L", "U1", "30", "11", "09:00", "18:00", "Asia/Tokyo", "ja", "true"),
+			values:    mk("U1", "30", "11", "09:00", "18:00", "Asia/Tokyo", "ja", "true"),
 			wantField: "required_approvals",
 		},
 		{
 			name:      "bad time format start",
-			values:    mk("L", "U1", "30", "1", "9am", "18:00", "Asia/Tokyo", "ja", "true"),
+			values:    mk("U1", "30", "1", "9am", "18:00", "Asia/Tokyo", "ja", "true"),
 			wantField: "business_hours_start",
 		},
 		{
 			name:      "bad time format end",
-			values:    mk("L", "U1", "30", "1", "09:00", "25:00", "Asia/Tokyo", "ja", "true"),
+			values:    mk("U1", "30", "1", "09:00", "25:00", "Asia/Tokyo", "ja", "true"),
 			wantField: "business_hours_end",
 		},
 		{
 			name:      "bad timezone",
-			values:    mk("L", "U1", "30", "1", "09:00", "18:00", "NotAZone", "ja", "true"),
+			values:    mk("U1", "30", "1", "09:00", "18:00", "NotAZone", "ja", "true"),
 			wantField: "timezone",
 		},
 	}

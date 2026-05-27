@@ -13,59 +13,60 @@ import (
 	"gorm.io/gorm"
 )
 
-// handleOpenSettings is invoked when the user clicks the "Open Settings" button on
-// the help response. It looks up the existing ChannelConfig (if any) for the channel/label
-// and opens a pre-filled modal via views.open.
+// handleOpenSettings is invoked when the user clicks the "Open Settings" button.
+// It resolves the (channel, label) ChannelConfig (if any), then opens a pre-filled
+// modal via views.open. The label name is captured here and round-tripped through
+// `view.private_metadata` so the submission handler updates exactly that row —
+// the modal does NOT let the user retarget another label.
+//
+// Slack's trigger_id expires ~3 seconds after issue, so we kick off the views.open
+// call asynchronously and ack the action immediately.
 func handleOpenSettings(c *gin.Context, db *gorm.DB, payload SlackActionPayload) {
 	channelID := payload.Container.ChannelID
+	userID := payload.User.ID
 	labelName := payload.Actions[0].Value
 	if labelName == "" {
 		labelName = "needs-review"
 	}
 
 	var cfg models.ChannelConfig
-	hasCfg := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&cfg).Error == nil
-
-	// If the user clicked the generic "open settings" button (no specific label),
-	// fall back to the first config in the channel so the modal isn't empty.
-	if !hasCfg {
-		if err := db.Where("slack_channel_id = ?", channelID).First(&cfg).Error; err == nil {
-			hasCfg = true
-		}
-	}
-
-	lang := "ja"
-	if hasCfg {
-		lang = cfg.Language
-		if lang == "" {
-			lang = "ja"
-		}
-	}
-
 	var cfgPtr *models.ChannelConfig
-	if hasCfg {
+	if err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&cfg).Error; err == nil {
 		cfgPtr = &cfg
 	}
-	view := services.BuildSettingsModalView(channelID, cfgPtr, lang)
+	// No silent fallback to other labels: an empty modal for a fresh label is
+	// clearer than an unexpected pre-fill from an unrelated config.
 
-	if err := services.OpenView(payload.TriggerID, view); err != nil {
-		log.Printf("views.open failed: %v", err)
-		// Still return 200 — Slack treats non-200 as a retry trigger.
+	lang := "ja"
+	if cfgPtr != nil && cfgPtr.Language != "" {
+		lang = cfgPtr.Language
 	}
+
+	view := services.BuildSettingsModalView(channelID, labelName, userID, cfgPtr, lang)
+	triggerID := payload.TriggerID
+
+	// Ack first; open the view in the background to stay within the 3s trigger window
+	// even if the Slack API is slow.
+	go func() {
+		if err := services.OpenView(triggerID, view); err != nil {
+			log.Printf("views.open failed: %v", err)
+		}
+	}()
 
 	c.Status(http.StatusOK)
 }
 
 // handleSettingsModalSubmission parses the view_submission payload and upserts the
-// corresponding ChannelConfig. On validation errors, returns the Slack-mandated
-// response_action:errors body so Slack renders inline messages.
+// corresponding ChannelConfig. The (channel, label) target is read from
+// private_metadata, not from form fields, so the modal cannot retarget another
+// label. On validation errors, returns response_action:errors for inline display.
 func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionPayload) {
-	channelID := payload.View.PrivateMetadata
-	if channelID == "" {
-		log.Printf("view_submission missing private_metadata (channel ID)")
+	meta, err := services.DecodeSettingsModalMetadata(payload.View.PrivateMetadata)
+	if err != nil || meta.ChannelID == "" || meta.LabelName == "" {
+		log.Printf("view_submission has invalid private_metadata: %q (err=%v)", payload.View.PrivateMetadata, err)
 		c.JSON(http.StatusOK, gin.H{
 			"response_action": "errors",
-			"errors":          gin.H{"label_name": "internal error: missing channel context"},
+			"errors":          gin.H{"default_mention_id": "internal error: modal context lost. Please reopen the settings."},
 		})
 		return
 	}
@@ -82,19 +83,19 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 		log.Printf("settings modal parse error: %v", err)
 		c.JSON(http.StatusOK, gin.H{
 			"response_action": "errors",
-			"errors":          gin.H{"label_name": err.Error()},
+			"errors":          gin.H{"default_mention_id": err.Error()},
 		})
 		return
 	}
 
 	var cfg models.ChannelConfig
 	now := time.Now()
-	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, form.LabelName).First(&cfg)
+	result := db.Where("slack_channel_id = ? AND label_name = ?", meta.ChannelID, meta.LabelName).First(&cfg)
 	if result.Error != nil {
 		cfg = models.ChannelConfig{
 			ID:             uuid.NewString(),
-			SlackChannelID: channelID,
-			LabelName:      form.LabelName,
+			SlackChannelID: meta.ChannelID,
+			LabelName:      meta.LabelName,
 			CreatedAt:      now,
 		}
 	}
@@ -115,7 +116,7 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 			log.Printf("failed to create config from modal: %v", err)
 			c.JSON(http.StatusOK, gin.H{
 				"response_action": "errors",
-				"errors":          gin.H{"label_name": "save failed"},
+				"errors":          gin.H{"default_mention_id": "save failed"},
 			})
 			return
 		}
@@ -124,21 +125,20 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 			log.Printf("failed to update config from modal: %v", err)
 			c.JSON(http.StatusOK, gin.H{
 				"response_action": "errors",
-				"errors":          gin.H{"label_name": "save failed"},
+				"errors":          gin.H{"default_mention_id": "save failed"},
 			})
 			return
 		}
 	}
 
-	// Post a confirmation message to the channel so the user gets feedback.
-	if !services.IsTestMode {
-		msg := i18n.TWithLang(form.Language, "modal.saved", form.LabelName)
-		if err := services.PostToThread(channelID, "", msg); err != nil {
-			// Not fatal — log only.
+	// Confirm to the submitting user only — avoids broadcasting setting changes
+	// to the whole channel.
+	if !services.IsTestMode && meta.UserID != "" {
+		msg := i18n.TWithLang(form.Language, "modal.saved", meta.LabelName)
+		if err := services.PostEphemeral(meta.ChannelID, meta.UserID, msg); err != nil {
 			log.Printf("settings saved confirmation post failed: %v", err)
 		}
 	}
 
-	// Empty 200 OK closes the modal.
 	c.Status(http.StatusOK)
 }
