@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -434,6 +435,36 @@ func TestHandleSlackCommand_HelpListsPerLabelButtons(t *testing.T) {
 	assert.Contains(t, body, "urgent")
 	// Create-new button uses the sentinel as its value.
 	assert.Contains(t, body, "__create_new__")
+
+	// Regression guard: Slack's Block Kit rejects responses whose buttons share
+	// the same action_id within a single actions block (invalid_command_response).
+	// Make sure every element's action_id is unique within its containing block.
+	var parsed struct {
+		Blocks []struct {
+			Type     string `json:"type"`
+			Elements []struct {
+				ActionID string `json:"action_id"`
+			} `json:"elements"`
+		} `json:"blocks"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	for i, b := range parsed.Blocks {
+		if b.Type != "actions" {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, el := range b.Elements {
+			if el.ActionID == "" {
+				continue
+			}
+			if seen[el.ActionID] {
+				t.Errorf("blocks[%d] has duplicate action_id %q within one actions block; Slack rejects this with invalid_command_response", i, el.ActionID)
+			}
+			seen[el.ActionID] = true
+		}
+	}
 }
 
 // TestHandleSlackAction_ViewSubmission_DeleteThenRecreate verifies the user can
