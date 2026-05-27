@@ -118,8 +118,8 @@ func TestHandleSlackAction_OpenSettings_NoFallback(t *testing.T) {
 }
 
 // TestHandleSlackAction_ViewSubmission_CreatesConfig verifies a view_submission payload
-// upserts the ChannelConfig identified by (channel_id, label_name) read from
-// private_metadata. The form itself no longer carries label_name.
+// upserts a new ChannelConfig when the dropdown is on the create-new sentinel
+// and a label name is provided in the new_label_name input.
 func TestHandleSlackAction_ViewSubmission_CreatesConfig(t *testing.T) {
 	db := setupTestDB(t)
 	router := setupActionRouter(db)
@@ -129,12 +129,15 @@ func TestHandleSlackAction_ViewSubmission_CreatesConfig(t *testing.T) {
 		"user": {"id": "U12345"},
 		"view": {
 			"callback_id": "settings_modal",
-			"private_metadata": "{\"c\":\"C99999\",\"l\":\"new-label\",\"u\":\"U12345\"}",
+			"private_metadata": "{\"c\":\"C99999\",\"u\":\"U12345\"}",
 			"state": {
 				"values": {
+					"label_select": {"label_select": {"type": "static_select", "selected_option": {"value": "__create_new__"}}},
+					"new_label_name": {"new_label_name": {"type": "plain_text_input", "value": "new-label"}},
 					"default_mention_id": {"default_mention_id": {"type": "plain_text_input", "value": "U777"}},
 					"reviewer_list": {"reviewer_list": {"type": "plain_text_input", "value": "U1, U2"}},
 					"repository_list": {"repository_list": {"type": "plain_text_input", "value": "owner/repo"}},
+					"reminder_interval": {"reminder_interval": {"type": "plain_text_input", "value": "20"}},
 					"reviewer_reminder_interval": {"reviewer_reminder_interval": {"type": "plain_text_input", "value": "60"}},
 					"business_hours_start": {"business_hours_start": {"type": "plain_text_input", "value": "10:00"}},
 					"business_hours_end": {"business_hours_end": {"type": "plain_text_input", "value": "19:00"}},
@@ -157,6 +160,7 @@ func TestHandleSlackAction_ViewSubmission_CreatesConfig(t *testing.T) {
 	assert.Equal(t, "U777", cfg.DefaultMentionID)
 	assert.Equal(t, "U1,U2", cfg.ReviewerList)
 	assert.Equal(t, "owner/repo", cfg.RepositoryList)
+	assert.Equal(t, 20, cfg.ReminderInterval)
 	assert.Equal(t, 60, cfg.ReviewerReminderInterval)
 	assert.Equal(t, "10:00", cfg.BusinessHoursStart)
 	assert.Equal(t, "19:00", cfg.BusinessHoursEnd)
@@ -190,12 +194,14 @@ func TestHandleSlackAction_ViewSubmission_UpdatesConfig(t *testing.T) {
 		"user": {"id": "U12345"},
 		"view": {
 			"callback_id": "settings_modal",
-			"private_metadata": "{\"c\":\"C99999\",\"l\":\"needs-review\",\"u\":\"U12345\"}",
+			"private_metadata": "{\"c\":\"C99999\",\"u\":\"U12345\"}",
 			"state": {
 				"values": {
+					"label_select": {"label_select": {"selected_option": {"value": "needs-review"}}},
 					"default_mention_id": {"default_mention_id": {"value": "Unew"}},
 					"reviewer_list": {"reviewer_list": {"value": ""}},
 					"repository_list": {"repository_list": {"value": ""}},
+					"reminder_interval": {"reminder_interval": {"value": "30"}},
 					"reviewer_reminder_interval": {"reviewer_reminder_interval": {"value": "45"}},
 					"business_hours_start": {"business_hours_start": {"value": "09:30"}},
 					"business_hours_end": {"business_hours_end": {"value": "18:30"}},
@@ -239,12 +245,14 @@ func TestHandleSlackAction_ViewSubmission_ValidationError(t *testing.T) {
 		"user": {"id": "U12345"},
 		"view": {
 			"callback_id": "settings_modal",
-			"private_metadata": "{\"c\":\"C99999\",\"l\":\"needs-review\",\"u\":\"U12345\"}",
+			"private_metadata": "{\"c\":\"C99999\",\"u\":\"U12345\"}",
 			"state": {
 				"values": {
+					"label_select": {"label_select": {"selected_option": {"value": "needs-review"}}},
 					"default_mention_id": {"default_mention_id": {"value": ""}},
 					"reviewer_list": {"reviewer_list": {"value": ""}},
 					"repository_list": {"repository_list": {"value": ""}},
+					"reminder_interval": {"reminder_interval": {"value": "30"}},
 					"reviewer_reminder_interval": {"reviewer_reminder_interval": {"value": "abc"}},
 					"business_hours_start": {"business_hours_start": {"value": "09:00"}},
 					"business_hours_end": {"business_hours_end": {"value": "18:00"}},
@@ -264,6 +272,164 @@ func TestHandleSlackAction_ViewSubmission_ValidationError(t *testing.T) {
 	assert.Contains(t, body, "errors")
 	// the bad field should appear in the inline errors
 	assert.Contains(t, body, "reviewer_reminder_interval")
+}
+
+// TestHandleSlackAction_ViewSubmission_DeletesConfig verifies the delete
+// checkbox path: when the user checks "delete this configuration" on an
+// existing label and submits, the corresponding ChannelConfig row must be
+// removed (soft-deleted via gorm).
+func TestHandleSlackAction_ViewSubmission_DeletesConfig(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+
+	db.Create(&models.ChannelConfig{
+		ID:               "victim",
+		SlackChannelID:   "C99999",
+		LabelName:        "needs-review",
+		DefaultMentionID: "Uold",
+		IsActive:         true,
+	})
+
+	payload := `{
+		"type": "view_submission",
+		"user": {"id": "U12345"},
+		"view": {
+			"callback_id": "settings_modal",
+			"private_metadata": "{\"c\":\"C99999\",\"u\":\"U12345\"}",
+			"state": {
+				"values": {
+					"label_select": {"label_select": {"selected_option": {"value": "needs-review"}}},
+					"delete_config": {"delete_config": {"type": "checkboxes", "selected_options": [{"value": "yes"}]}},
+					"language": {"language": {"selected_option": {"value": "ja"}}},
+					"is_active": {"is_active": {"selected_option": {"value": "true"}}}
+				}
+			}
+		}
+	}`
+
+	w := postPayload(t, router, payload)
+	assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	var cfg models.ChannelConfig
+	err := db.Where("slack_channel_id = ? AND label_name = ?", "C99999", "needs-review").First(&cfg).Error
+	assert.Error(t, err, "config row must be deleted")
+}
+
+// TestHandleSlackAction_LabelSelectDispatch verifies the label dropdown's
+// dispatch_action fires a views.update flow without erroring. The actual
+// views.update call is short-circuited by IsTestMode; here we just confirm the
+// block_actions branch is routed correctly and acknowledges with 200.
+func TestHandleSlackAction_LabelSelectDispatch(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+
+	db.Create(&models.ChannelConfig{
+		ID:               "c1",
+		SlackChannelID:   "C12345",
+		LabelName:        "needs-review",
+		DefaultMentionID: "U99999",
+		IsActive:         true,
+	})
+
+	payload := `{
+		"type": "block_actions",
+		"user": {"id": "U12345"},
+		"actions": [{"action_id": "label_select", "selected_option": {"value": "__create_new__"}}],
+		"container": {"channel_id": "C12345"},
+		"view": {
+			"id": "V1",
+			"callback_id": "settings_modal",
+			"private_metadata": "{\"c\":\"C12345\",\"u\":\"U12345\"}",
+			"state": {"values": {}}
+		}
+	}`
+
+	w := postPayload(t, router, payload)
+	assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+}
+
+// TestHandleSlackAction_ViewSubmission_CreateNewDuplicateRejected verifies
+// that picking the create-new sentinel but naming an already-configured label
+// fails with a per-field error, so the user doesn't silently overwrite an
+// existing row through the rename footgun.
+func TestHandleSlackAction_ViewSubmission_CreateNewDuplicateRejected(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+
+	db.Create(&models.ChannelConfig{
+		ID:             "existing",
+		SlackChannelID: "C99999",
+		LabelName:      "needs-review",
+		IsActive:       true,
+	})
+
+	payload := `{
+		"type": "view_submission",
+		"user": {"id": "U12345"},
+		"view": {
+			"callback_id": "settings_modal",
+			"private_metadata": "{\"c\":\"C99999\",\"u\":\"U12345\"}",
+			"state": {
+				"values": {
+					"label_select": {"label_select": {"selected_option": {"value": "__create_new__"}}},
+					"new_label_name": {"new_label_name": {"value": "needs-review"}},
+					"default_mention_id": {"default_mention_id": {"value": "U1"}},
+					"reviewer_list": {"reviewer_list": {"value": ""}},
+					"repository_list": {"repository_list": {"value": ""}},
+					"reminder_interval": {"reminder_interval": {"value": "30"}},
+					"reviewer_reminder_interval": {"reviewer_reminder_interval": {"value": "30"}},
+					"business_hours_start": {"business_hours_start": {"value": "09:00"}},
+					"business_hours_end": {"business_hours_end": {"value": "18:00"}},
+					"timezone": {"timezone": {"value": "Asia/Tokyo"}},
+					"required_approvals": {"required_approvals": {"value": "1"}},
+					"language": {"language": {"selected_option": {"value": "ja"}}},
+					"is_active": {"is_active": {"selected_option": {"value": "true"}}}
+				}
+			}
+		}
+	}`
+
+	w := postPayload(t, router, payload)
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "response_action")
+	assert.Contains(t, body, "new_label_name")
+
+	// Confirm we did NOT create a duplicate row.
+	var count int64
+	db.Model(&models.ChannelConfig{}).Where("slack_channel_id = ? AND label_name = ?", "C99999", "needs-review").Count(&count)
+	assert.Equal(t, int64(1), count)
+}
+
+// TestHandleSlackCommand_HelpListsPerLabelButtons verifies that the help
+// response renders one open_settings button per existing label config plus
+// the create-new button — so users with multiple labels can edit each one
+// from the UI rather than being stuck on the previously hardcoded "needs-review".
+func TestHandleSlackCommand_HelpListsPerLabelButtons(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupTestRouter(db)
+
+	db.Create(&models.ChannelConfig{ID: "a", SlackChannelID: "C12345", LabelName: "needs-review", IsActive: true})
+	db.Create(&models.ChannelConfig{ID: "b", SlackChannelID: "C12345", LabelName: "urgent", IsActive: true})
+
+	form := url.Values{}
+	form.Add("command", "/slack-review-notify")
+	form.Add("text", "help")
+	form.Add("channel_id", "C12345")
+	form.Add("user_id", "U12345")
+
+	req := httptest.NewRequest("POST", "/slack/command", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	// Each label's name appears in its own button.
+	assert.Contains(t, body, "needs-review")
+	assert.Contains(t, body, "urgent")
+	// Create-new button uses the sentinel as its value.
+	assert.Contains(t, body, "__create_new__")
 }
 
 // TestHandleSlackAction_ViewSubmission_MissingPrivateMetadata verifies the handler

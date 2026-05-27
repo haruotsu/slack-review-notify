@@ -12,7 +12,13 @@ func TestBuildSettingsModalView_BasicShape(t *testing.T) {
 		LabelName:        "needs-review",
 		DefaultMentionID: "U99999",
 	}
-	view := BuildSettingsModalView("C12345", "needs-review", "U777", cfg, "ja")
+	view := BuildSettingsModalView(SettingsModalInputs{
+		ChannelID:     "C12345",
+		UserID:        "U777",
+		SelectedLabel: "needs-review",
+		Configs:       []*models.ChannelConfig{cfg},
+		Lang:          "ja",
+	})
 
 	if view["type"] != "modal" {
 		t.Errorf("type = %v, want modal", view["type"])
@@ -20,9 +26,8 @@ func TestBuildSettingsModalView_BasicShape(t *testing.T) {
 	if view["callback_id"] != "settings_modal" {
 		t.Errorf("callback_id = %v, want settings_modal", view["callback_id"])
 	}
-	// private_metadata must round-trip channel ID, label, and submitter so the
-	// submission handler can update exactly that (channel,label) without trusting
-	// any form-supplied label.
+	// private_metadata round-trips channel ID and submitter; selected label is
+	// no longer in metadata because the dropdown is the source of truth at submit.
 	pm, ok := view["private_metadata"].(string)
 	if !ok {
 		t.Fatalf("private_metadata not a string: %T", view["private_metadata"])
@@ -31,8 +36,8 @@ func TestBuildSettingsModalView_BasicShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("private_metadata is not valid JSON: %v (%q)", err, pm)
 	}
-	if meta.ChannelID != "C12345" || meta.LabelName != "needs-review" || meta.UserID != "U777" {
-		t.Errorf("metadata = %+v, want {C12345, needs-review, U777}", meta)
+	if meta.ChannelID != "C12345" || meta.UserID != "U777" {
+		t.Errorf("metadata = %+v, want {C12345, U777}", meta)
 	}
 	if _, ok := view["submit"].(map[string]any); !ok {
 		t.Errorf("missing submit button")
@@ -49,6 +54,7 @@ func TestBuildSettingsModalView_HasAllFields(t *testing.T) {
 		DefaultMentionID:         "U99999",
 		ReviewerList:             "U1,U2",
 		RepositoryList:           "owner/repo1,owner/repo2",
+		ReminderInterval:         15,
 		ReviewerReminderInterval: 30,
 		BusinessHoursStart:       "09:00",
 		BusinessHoursEnd:         "18:00",
@@ -57,20 +63,28 @@ func TestBuildSettingsModalView_HasAllFields(t *testing.T) {
 		Language:                 "ja",
 		IsActive:                 true,
 	}
-	view := BuildSettingsModalView("C12345", "needs-review", "U1", cfg, "ja")
+	view := BuildSettingsModalView(SettingsModalInputs{
+		ChannelID:     "C12345",
+		UserID:        "U1",
+		SelectedLabel: "needs-review",
+		Configs:       []*models.ChannelConfig{cfg},
+		Lang:          "ja",
+	})
 
 	blocks, ok := view["blocks"].([]map[string]any)
 	if !ok {
 		t.Fatalf("blocks is not a slice: %T", view["blocks"])
 	}
 
-	// label_name is rendered as a read-only display block (label_name_display);
-	// all other settings are editable input blocks.
+	// label_select replaces the old label_name_display section: it is now a
+	// static_select including the existing labels plus a "create new" option.
+	// All other configuration fields remain as editable inputs.
 	requiredBlockIDs := []string{
-		"label_name_display",
+		"label_select",
 		"default_mention_id",
 		"reviewer_list",
 		"repository_list",
+		"reminder_interval",
 		"reviewer_reminder_interval",
 		"business_hours_start",
 		"business_hours_end",
@@ -78,6 +92,7 @@ func TestBuildSettingsModalView_HasAllFields(t *testing.T) {
 		"required_approvals",
 		"language",
 		"is_active",
+		"delete_config",
 	}
 
 	found := make(map[string]bool)
@@ -93,11 +108,10 @@ func TestBuildSettingsModalView_HasAllFields(t *testing.T) {
 		}
 	}
 
-	// label_name must NOT be an editable input — the modal cannot retarget another label.
-	for _, b := range blocks {
-		if id, _ := b["block_id"].(string); id == "label_name" {
-			t.Errorf("label_name input block must be removed; got %+v", b)
-		}
+	// In edit-mode (existing label selected), the new_label_name input must NOT
+	// appear; it is only rendered when the user picks the create-new option.
+	if found["new_label_name"] {
+		t.Errorf("new_label_name should not appear in edit mode")
 	}
 }
 
@@ -108,6 +122,7 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 		DefaultMentionID:         "U99999",
 		ReviewerList:             "U1,U2",
 		RepositoryList:           "owner/repo1",
+		ReminderInterval:         20,
 		ReviewerReminderInterval: 45,
 		BusinessHoursStart:       "10:00",
 		BusinessHoursEnd:         "19:00",
@@ -116,7 +131,13 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 		Language:                 "en",
 		IsActive:                 true,
 	}
-	view := BuildSettingsModalView("C12345", "my-label", "U777", cfg, "en")
+	view := BuildSettingsModalView(SettingsModalInputs{
+		ChannelID:     "C12345",
+		UserID:        "U777",
+		SelectedLabel: "my-label",
+		Configs:       []*models.ChannelConfig{cfg},
+		Lang:          "en",
+	})
 	blocks := view["blocks"].([]map[string]any)
 
 	getElement := func(blockID string) map[string]any {
@@ -138,6 +159,7 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 		{"default_mention_id", "initial_value", "U99999"},
 		{"reviewer_list", "initial_value", "U1,U2"},
 		{"repository_list", "initial_value", "owner/repo1"},
+		{"reminder_interval", "initial_value", "20"},
 		{"reviewer_reminder_interval", "initial_value", "45"},
 		{"business_hours_start", "initial_value", "10:00"},
 		{"business_hours_end", "initial_value", "19:00"},
@@ -157,18 +179,18 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 		}
 	}
 
-	// label_name_display is a section block (not input); confirm its text
-	// surfaces the passed-in label name.
-	var labelDisplayText string
-	for _, b := range blocks {
-		if id, _ := b["block_id"].(string); id == "label_name_display" {
-			if txt, ok := b["text"].(map[string]any); ok {
-				labelDisplayText, _ = txt["text"].(string)
-			}
-		}
+	// label_select initial_option must reflect the selected label so the dropdown
+	// opens preselected to the label being edited.
+	selectEl := getElement("label_select")
+	if selectEl == nil {
+		t.Fatalf("label_select element not found")
 	}
-	if !strings.Contains(labelDisplayText, "my-label") {
-		t.Errorf("label_name_display text = %q, want to contain %q", labelDisplayText, "my-label")
+	initial, ok := selectEl["initial_option"].(map[string]any)
+	if !ok {
+		t.Fatalf("label_select.initial_option missing")
+	}
+	if initial["value"] != "my-label" {
+		t.Errorf("label_select.initial_option.value = %v, want my-label", initial["value"])
 	}
 
 	// language: static_select; initial_option must have value "en"
@@ -198,56 +220,106 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 	}
 }
 
-func TestBuildSettingsModalView_NilConfigDefaults(t *testing.T) {
-	// Empty labelName triggers the in-function fallback to "needs-review".
-	view := BuildSettingsModalView("C99999", "", "U1", nil, "ja")
+func TestBuildSettingsModalView_CreateNewMode(t *testing.T) {
+	// When SelectedLabel is the create-new sentinel, the modal must:
+	// 1. include a new_label_name plain_text_input,
+	// 2. show defaults (no prefill from any existing config),
+	// 3. NOT include the delete_config block (nothing to delete yet).
+	view := BuildSettingsModalView(SettingsModalInputs{
+		ChannelID:     "C12345",
+		UserID:        "U777",
+		SelectedLabel: CreateNewLabelSentinel,
+		Configs:       []*models.ChannelConfig{{LabelName: "needs-review"}},
+		Lang:          "ja",
+	})
 	blocks := view["blocks"].([]map[string]any)
 
-	getElement := func(blockID string) map[string]any {
+	found := make(map[string]bool)
+	for _, b := range blocks {
+		if id, ok := b["block_id"].(string); ok {
+			found[id] = true
+		}
+	}
+	if !found["new_label_name"] {
+		t.Errorf("new_label_name input required in create-new mode")
+	}
+	if found["delete_config"] {
+		t.Errorf("delete_config must not appear in create-new mode")
+	}
+
+	// Defaults: 09:00 / 18:00 / Asia/Tokyo / 1 approver / 30min reviewer reminder
+	getInitial := func(blockID string) string {
 		for _, b := range blocks {
-			if id, ok := b["block_id"].(string); ok && id == blockID {
+			if id, _ := b["block_id"].(string); id == blockID {
 				if el, ok := b["element"].(map[string]any); ok {
-					return el
+					v, _ := el["initial_value"].(string)
+					return v
 				}
 			}
 		}
-		return nil
+		return ""
 	}
+	if v := getInitial("business_hours_start"); v != "09:00" {
+		t.Errorf("default business_hours_start = %q", v)
+	}
+	if v := getInitial("timezone"); v != "Asia/Tokyo" {
+		t.Errorf("default timezone = %q", v)
+	}
+	if v := getInitial("reviewer_reminder_interval"); v != "30" {
+		t.Errorf("default reviewer_reminder_interval = %q", v)
+	}
+}
 
-	// label_name is now a display section; verify the fallback "needs-review" surfaces there.
-	var labelDisplayText string
+func TestBuildSettingsModalView_LabelSelectOptions(t *testing.T) {
+	// The dropdown must list every existing label in the channel AND the
+	// create-new sentinel so the user can both edit and add labels.
+	configs := []*models.ChannelConfig{
+		{LabelName: "needs-review"},
+		{LabelName: "urgent"},
+		{LabelName: "design-review"},
+	}
+	view := BuildSettingsModalView(SettingsModalInputs{
+		ChannelID:     "C12345",
+		UserID:        "U777",
+		SelectedLabel: "needs-review",
+		Configs:       configs,
+		Lang:          "ja",
+	})
+	blocks := view["blocks"].([]map[string]any)
+
+	var optionValues []string
 	for _, b := range blocks {
-		if id, _ := b["block_id"].(string); id == "label_name_display" {
-			if txt, ok := b["text"].(map[string]any); ok {
-				labelDisplayText, _ = txt["text"].(string)
+		if id, _ := b["block_id"].(string); id == "label_select" {
+			el := b["element"].(map[string]any)
+			opts, _ := el["options"].([]map[string]any)
+			for _, o := range opts {
+				if v, ok := o["value"].(string); ok {
+					optionValues = append(optionValues, v)
+				}
 			}
 		}
 	}
-	if !strings.Contains(labelDisplayText, "needs-review") {
-		t.Errorf("default label display = %q, want to contain needs-review", labelDisplayText)
-	}
 
-	if v, _ := getElement("business_hours_start")["initial_value"].(string); v != "09:00" {
-		t.Errorf("default business_hours_start = %q, want 09:00", v)
-	}
-	if v, _ := getElement("business_hours_end")["initial_value"].(string); v != "18:00" {
-		t.Errorf("default business_hours_end = %q, want 18:00", v)
-	}
-	if v, _ := getElement("timezone")["initial_value"].(string); v != "Asia/Tokyo" {
-		t.Errorf("default timezone = %q, want Asia/Tokyo", v)
-	}
-	if v, _ := getElement("required_approvals")["initial_value"].(string); v != "1" {
-		t.Errorf("default required_approvals = %q, want 1", v)
-	}
-	if v, _ := getElement("reviewer_reminder_interval")["initial_value"].(string); v != "30" {
-		t.Errorf("default reviewer_reminder_interval = %q, want 30", v)
+	want := []string{"needs-review", "urgent", "design-review", CreateNewLabelSentinel}
+	for _, w := range want {
+		found := false
+		for _, v := range optionValues {
+			if v == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("label_select missing option %q (got %v)", w, optionValues)
+		}
 	}
 }
 
 func TestParseSettingsModalSubmission(t *testing.T) {
-	// view.state.values shape from Slack view_submission payload.
-	// Note: label_name is NOT a form field (carried via private_metadata).
 	stateValues := map[string]map[string]ViewStateValue{
+		"label_select": {
+			"label_select": {Type: "static_select", SelectedOption: &ViewSelectedOption{Value: "needs-review"}},
+		},
 		"default_mention_id": {
 			"default_mention_id": {Type: "plain_text_input", Value: "U99999"},
 		},
@@ -256,6 +328,9 @@ func TestParseSettingsModalSubmission(t *testing.T) {
 		},
 		"repository_list": {
 			"repository_list": {Type: "plain_text_input", Value: "owner/repo1, owner/repo2"},
+		},
+		"reminder_interval": {
+			"reminder_interval": {Type: "plain_text_input", Value: "20"},
 		},
 		"reviewer_reminder_interval": {
 			"reviewer_reminder_interval": {Type: "plain_text_input", Value: "45"},
@@ -285,6 +360,12 @@ func TestParseSettingsModalSubmission(t *testing.T) {
 		t.Fatalf("ParseSettingsModalSubmission returned error: %v", err)
 	}
 
+	if got.LabelName != "needs-review" {
+		t.Errorf("LabelName = %q, want needs-review", got.LabelName)
+	}
+	if got.CreateNew {
+		t.Errorf("CreateNew should be false when an existing label is selected")
+	}
 	if got.DefaultMentionID != "U99999" {
 		t.Errorf("DefaultMentionID = %q", got.DefaultMentionID)
 	}
@@ -293,6 +374,9 @@ func TestParseSettingsModalSubmission(t *testing.T) {
 	}
 	if got.RepositoryList != "owner/repo1,owner/repo2" {
 		t.Errorf("RepositoryList = %q, want trimmed CSV", got.RepositoryList)
+	}
+	if got.ReminderInterval != 20 {
+		t.Errorf("ReminderInterval = %d, want 20", got.ReminderInterval)
 	}
 	if got.ReviewerReminderInterval != 45 {
 		t.Errorf("ReviewerReminderInterval = %d", got.ReviewerReminderInterval)
@@ -315,22 +399,88 @@ func TestParseSettingsModalSubmission(t *testing.T) {
 	if got.IsActive != false {
 		t.Errorf("IsActive = %v, want false", got.IsActive)
 	}
+	if got.DeleteConfig {
+		t.Errorf("DeleteConfig should be false when checkbox unchecked")
+	}
+}
+
+func TestParseSettingsModalSubmission_CreateNew(t *testing.T) {
+	// When the dropdown is on the create-new sentinel, LabelName must come from
+	// the new_label_name input and CreateNew must be true.
+	values := minimalValidParseValues()
+	values["label_select"] = map[string]ViewStateValue{
+		"label_select": {SelectedOption: &ViewSelectedOption{Value: CreateNewLabelSentinel}},
+	}
+	values["new_label_name"] = map[string]ViewStateValue{
+		"new_label_name": {Value: "  shiny-new  "},
+	}
+
+	got, err := ParseSettingsModalSubmission(values)
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if !got.CreateNew {
+		t.Errorf("CreateNew should be true")
+	}
+	if got.LabelName != "shiny-new" {
+		t.Errorf("LabelName = %q, want shiny-new", got.LabelName)
+	}
+}
+
+func TestParseSettingsModalSubmission_CreateNew_EmptyNameFails(t *testing.T) {
+	// Selecting create-new but leaving the label name blank must surface a
+	// per-field validation error on new_label_name.
+	values := minimalValidParseValues()
+	values["label_select"] = map[string]ViewStateValue{
+		"label_select": {SelectedOption: &ViewSelectedOption{Value: CreateNewLabelSentinel}},
+	}
+	values["new_label_name"] = map[string]ViewStateValue{
+		"new_label_name": {Value: ""},
+	}
+
+	_, err := ParseSettingsModalSubmission(values)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	ve, ok := err.(*ModalValidationError)
+	if !ok {
+		t.Fatalf("expected *ModalValidationError, got %T", err)
+	}
+	if _, has := ve.Errors["new_label_name"]; !has {
+		t.Errorf("expected new_label_name error, got %+v", ve.Errors)
+	}
+}
+
+func TestParseSettingsModalSubmission_DeleteConfigCheckbox(t *testing.T) {
+	// The delete_config checkbox is a checkboxes element. When checked, parsing
+	// must reflect that so the submission handler can soft-delete the row.
+	values := minimalValidParseValues()
+	values["delete_config"] = map[string]ViewStateValue{
+		"delete_config": {Type: "checkboxes", SelectedOptions: []ViewSelectedOption{
+			{Value: "yes"},
+		}},
+	}
+	got, err := ParseSettingsModalSubmission(values)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !got.DeleteConfig {
+		t.Errorf("DeleteConfig = false, want true")
+	}
 }
 
 func TestParseSettingsModalSubmission_ValidationErrors(t *testing.T) {
 	mk := func(mention, interval, approvals, bhStart, bhEnd, tz, lang, active string) map[string]map[string]ViewStateValue {
-		return map[string]map[string]ViewStateValue{
-			"default_mention_id":         {"default_mention_id": {Value: mention}},
-			"reviewer_list":              {"reviewer_list": {Value: ""}},
-			"repository_list":            {"repository_list": {Value: ""}},
-			"reviewer_reminder_interval": {"reviewer_reminder_interval": {Value: interval}},
-			"business_hours_start":       {"business_hours_start": {Value: bhStart}},
-			"business_hours_end":         {"business_hours_end": {Value: bhEnd}},
-			"timezone":                   {"timezone": {Value: tz}},
-			"required_approvals":         {"required_approvals": {Value: approvals}},
-			"language":                   {"language": {SelectedOption: &ViewSelectedOption{Value: lang}}},
-			"is_active":                  {"is_active": {SelectedOption: &ViewSelectedOption{Value: active}}},
-		}
+		v := minimalValidParseValues()
+		v["default_mention_id"] = map[string]ViewStateValue{"default_mention_id": {Value: mention}}
+		v["reviewer_reminder_interval"] = map[string]ViewStateValue{"reviewer_reminder_interval": {Value: interval}}
+		v["required_approvals"] = map[string]ViewStateValue{"required_approvals": {Value: approvals}}
+		v["business_hours_start"] = map[string]ViewStateValue{"business_hours_start": {Value: bhStart}}
+		v["business_hours_end"] = map[string]ViewStateValue{"business_hours_end": {Value: bhEnd}}
+		v["timezone"] = map[string]ViewStateValue{"timezone": {Value: tz}}
+		v["language"] = map[string]ViewStateValue{"language": {SelectedOption: &ViewSelectedOption{Value: lang}}}
+		v["is_active"] = map[string]ViewStateValue{"is_active": {SelectedOption: &ViewSelectedOption{Value: active}}}
+		return v
 	}
 
 	tests := []struct {
@@ -384,5 +534,14 @@ func TestParseSettingsModalSubmission_ValidationErrors(t *testing.T) {
 				t.Errorf("expected validation error on %q, got %+v", tt.wantField, ve.Errors)
 			}
 		})
+	}
+}
+
+// labelSentinelTest pins the CreateNewLabelSentinel value so accidental
+// reformatting/refactoring doesn't silently break the dropdown handler that
+// matches against this exact string.
+func TestCreateNewLabelSentinel_Value(t *testing.T) {
+	if CreateNewLabelSentinel == "" || !strings.HasPrefix(CreateNewLabelSentinel, "__") {
+		t.Errorf("CreateNewLabelSentinel = %q, want a stable __-prefixed sentinel", CreateNewLabelSentinel)
 	}
 }

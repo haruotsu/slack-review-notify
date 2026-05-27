@@ -72,7 +72,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				if err := db.Where("slack_channel_id = ?", channelID).First(&emptyHelpConfig).Error; err == nil {
 					emptyHelpLang = getLang(&emptyHelpConfig)
 				}
-				showHelp(c, emptyHelpLang)
+				showHelp(c, db, channelID, emptyHelpLang)
 				return
 			}
 
@@ -128,7 +128,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				if err := db.Where("slack_channel_id = ?", channelID).First(&helpConfig).Error; err == nil {
 					helpLang = getLang(&helpConfig)
 				}
-				showHelp(c, helpLang)
+				showHelp(c, db, channelID, helpLang)
 				return
 			}
 
@@ -346,30 +346,69 @@ func getLang(config *models.ChannelConfig) string {
 	return "ja"
 }
 
-// showHelp displays the help message with a button to open the settings modal.
-// Responds with Slack response_type=ephemeral blocks payload so the help text is
-// shown alongside a Block Kit button. Plain-text help is still embedded inside
-// the section block.
-func showHelp(c *gin.Context, lang string) {
+// showHelp displays the help message with per-label "edit" buttons and a
+// "create new" button. The buttons all use action_id=open_settings; their
+// value carries the target label (or the create-new sentinel), so the modal
+// opens preselected to the right row.
+func showHelp(c *gin.Context, db *gorm.DB, channelID, lang string) {
 	t := i18n.L(lang)
-	c.JSON(200, gin.H{
-		"response_type": "ephemeral",
-		"text":          t("cmd.help"), // fallback for clients without block support
-		"blocks": []map[string]interface{}{
-			{
-				"type": "section",
-				"text": map[string]interface{}{
-					"type": "mrkdwn",
-					"text": t("cmd.help"),
-				},
-			},
-			{
-				"type": "actions",
-				"elements": []map[string]interface{}{
-					services.CreateButton(t("modal.open_button"), "open_settings", "needs-review", "primary"),
-				},
+
+	var configs []models.ChannelConfig
+	if err := db.Where("slack_channel_id = ?", channelID).Order("label_name").Find(&configs).Error; err != nil {
+		log.Printf("showHelp: failed to list configs: %v", err)
+	}
+
+	// Slack caps actions blocks at 25 elements; well within for any realistic
+	// number of labels, but we still split into chunks of 5 buttons per row to
+	// avoid horizontal overflow.
+	const buttonsPerRow = 5
+	var actionBlocks []map[string]interface{}
+	row := make([]map[string]interface{}, 0, buttonsPerRow)
+	flush := func() {
+		if len(row) == 0 {
+			return
+		}
+		actionBlocks = append(actionBlocks, map[string]interface{}{
+			"type":     "actions",
+			"elements": row,
+		})
+		row = make([]map[string]interface{}, 0, buttonsPerRow)
+	}
+	for _, cfg := range configs {
+		row = append(row, services.CreateButton(
+			fmt.Sprintf(t("modal.open_button.edit"), cfg.LabelName),
+			"open_settings",
+			cfg.LabelName,
+			"",
+		))
+		if len(row) >= buttonsPerRow {
+			flush()
+		}
+	}
+	// Always include a "create new" button so users with no existing config can still get in.
+	row = append(row, services.CreateButton(
+		t("modal.open_button.new"),
+		"open_settings",
+		services.CreateNewLabelSentinel,
+		"primary",
+	))
+	flush()
+
+	blocks := []map[string]interface{}{
+		{
+			"type": "section",
+			"text": map[string]interface{}{
+				"type": "mrkdwn",
+				"text": t("cmd.help"),
 			},
 		},
+	}
+	blocks = append(blocks, actionBlocks...)
+
+	c.JSON(200, gin.H{
+		"response_type": "ephemeral",
+		"text":          t("cmd.help"),
+		"blocks":        blocks,
 	})
 }
 

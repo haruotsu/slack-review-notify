@@ -109,6 +109,13 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		// Label dropdown changed inside the settings modal → re-render via views.update
+		// so prefilled values reflect the newly chosen label (or the create-new mode).
+		if actionID == services.LabelSelectActionID && payload.View != nil {
+			handleLabelSelectChanged(c, db, payload)
+			return
+		}
+
 		// Handle "Pause Reminder" selection menu
 		if actionID == "pause_reminder" || actionID == "pause_reminder_initial" {
 			// Get value from selection menu
