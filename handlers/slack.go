@@ -18,8 +18,9 @@ import (
 )
 
 type SlackActionPayload struct {
-	Type string `json:"type"`
-	User struct {
+	Type      string `json:"type"`
+	TriggerID string `json:"trigger_id,omitempty"`
+	User      struct {
 		ID string `json:"id"`
 	} `json:"user"`
 	Actions []struct {
@@ -39,6 +40,17 @@ type SlackActionPayload struct {
 	Message struct {
 		Ts string `json:"ts"`
 	} `json:"message"`
+	View *SlackViewPayload `json:"view,omitempty"`
+}
+
+// SlackViewPayload is the subset of the view object Slack sends with view_submission.
+type SlackViewPayload struct {
+	ID              string `json:"id"`
+	CallbackID      string `json:"callback_id"`
+	PrivateMetadata string `json:"private_metadata"`
+	State           struct {
+		Values map[string]map[string]services.ViewStateValue `json:"values"`
+	} `json:"state"`
 }
 
 func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
@@ -70,6 +82,12 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		// Handle view_submission (settings modal save) before the block_actions logic.
+		if payload.Type == "view_submission" && payload.View != nil && payload.View.CallbackID == services.SettingsModalCallbackID {
+			handleSettingsModalSubmission(c, db, payload)
+			return
+		}
+
 		slackUserID := payload.User.ID
 		ts := payload.Message.Ts
 		channel := payload.Container.ChannelID
@@ -84,6 +102,12 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 
 		// Get the action ID
 		actionID := payload.Actions[0].ActionID
+
+		// Handle "Open Settings" button: opens the settings modal via views.open.
+		if actionID == "open_settings" {
+			handleOpenSettings(c, db, payload)
+			return
+		}
 
 		// Handle "Pause Reminder" selection menu
 		if actionID == "pause_reminder" || actionID == "pause_reminder_initial" {
