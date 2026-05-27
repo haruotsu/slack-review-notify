@@ -136,8 +136,9 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 	}
 
 	mentionUser := ""
-	mentionSubteam := ""
-	reviewerIDs := []string{}
+	mentionText := ""
+	pickerReviewerIDs := []string{}
+	freeTextReviewerEntries := []string{}
 	repoList := ""
 	reminderInterval := 30
 	reviewerReminderInterval := 30
@@ -152,18 +153,28 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 	isActive := true
 
 	if cfg != nil {
-		// DefaultMentionID is one column but can be either a user (U…/W…) or a
-		// subteam (S…); pre-fill the appropriate field based on the prefix.
-		switch {
-		case looksLikeUserID(cfg.DefaultMentionID):
+		// DefaultMentionID is a single column with mixed shapes in real configs
+		// (U…, S…, "@team", decorative phrases). Route to the picker iff it
+		// parses as a user ID; everything else (subteam IDs, free text) is
+		// shown raw in the adjacent free-text field so the user can edit it
+		// without data loss.
+		if looksLikeUserID(cfg.DefaultMentionID) {
 			mentionUser = cfg.DefaultMentionID
-		case looksLikeSubteamID(cfg.DefaultMentionID):
-			mentionSubteam = cfg.DefaultMentionID
+		} else {
+			mentionText = cfg.DefaultMentionID
 		}
+		// Same split for the reviewer list: CSV entries that look like user IDs
+		// go into the multi_users_select; bare names / decorative entries land
+		// in the free-text CSV input so they round-trip cleanly.
 		for _, r := range strings.Split(cfg.ReviewerList, ",") {
 			r = strings.TrimSpace(r)
+			if r == "" {
+				continue
+			}
 			if looksLikeUserID(r) {
-				reviewerIDs = append(reviewerIDs, r)
+				pickerReviewerIDs = append(pickerReviewerIDs, r)
+			} else {
+				freeTextReviewerEntries = append(freeTextReviewerEntries, r)
 			}
 		}
 		repoList = cfg.RepositoryList
@@ -316,9 +327,9 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		))
 	}
 
-	// Individual mention target → users_select. Native picker means we don't
-	// need users:read scope just to render the field, and the bot receives a
-	// pre-resolved U… ID in the submission payload.
+	// Individual mention target → users_select. Native picker gives autocomplete
+	// and avatars; the bot receives a pre-resolved U… ID in the submission
+	// payload (no users:read scope needed).
 	mentionUserElement := map[string]any{
 		"type":      "users_select",
 		"action_id": "default_mention_user",
@@ -335,24 +346,25 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		"element":  mentionUserElement,
 	}
 
-	// Subteam mention target → plain_text_input. Slack does not provide a
-	// usergroups_select element, so this field accepts either a raw S… ID or
-	// an @team-handle (resolved via usergroups.list at submit time).
-	mentionSubteamBlock := plainInput(
-		"default_mention_subteam",
-		t("modal.default_mention_subteam"),
-		t("modal.default_mention_subteam.hint"),
-		mentionSubteam,
+	// Free-text mention field. Catches everything the user picker can't express:
+	// subteam IDs (S…), decorative text, legacy bare names from pre-modal slash
+	// command configs. The picker wins on save if both are set.
+	mentionTextBlock := plainInput(
+		"default_mention_text",
+		t("modal.default_mention_text"),
+		t("modal.default_mention_text.hint"),
+		mentionText,
 		true,
 	)
 
-	// Reviewer pool → multi_users_select. Same scope/UX benefits as above.
+	// Reviewer pool picker → multi_users_select. Plus a free-text CSV next to
+	// it for non-U… entries (legacy data, decorative names).
 	reviewerElement := map[string]any{
 		"type":      "multi_users_select",
 		"action_id": "reviewer_list",
 	}
-	if len(reviewerIDs) > 0 {
-		reviewerElement["initial_users"] = reviewerIDs
+	if len(pickerReviewerIDs) > 0 {
+		reviewerElement["initial_users"] = pickerReviewerIDs
 	}
 	reviewerBlock := map[string]any{
 		"type":     "input",
@@ -362,11 +374,19 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		"hint":     plainText(t("modal.reviewer_list.hint")),
 		"element":  reviewerElement,
 	}
+	reviewerTextBlock := plainInput(
+		"reviewer_list_text",
+		t("modal.reviewer_list_text"),
+		t("modal.reviewer_list_text.hint"),
+		strings.Join(freeTextReviewerEntries, ","),
+		true,
+	)
 
 	blocks = append(blocks,
 		mentionUserBlock,
-		mentionSubteamBlock,
+		mentionTextBlock,
 		reviewerBlock,
+		reviewerTextBlock,
 		plainInput("repository_list", t("modal.repository_list"), t("modal.repository_list.hint"), repoList, true),
 		plainInput("reminder_interval", t("modal.reminder_interval"), t("modal.reminder_interval.hint"), strconv.Itoa(reminderInterval), false),
 		plainInput("reviewer_reminder_interval", t("modal.reviewer_reminder_interval"), t("modal.reviewer_reminder_interval.hint"), strconv.Itoa(reviewerReminderInterval), false),
@@ -518,30 +538,31 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 		return form, nil
 	}
 
-	// Mention target: prefer the users_select (individual) over the subteam
-	// plain_text_input. Both empty → DefaultMentionID stays "". The subteam
-	// field still accepts either a raw S… ID or an @handle (resolved via
-	// usergroups.list), because Block Kit has no usergroups_select element.
+	// Mention target. Two co-existing input shapes:
+	//   - default_mention_user (users_select)    — native picker for individuals
+	//   - default_mention_text (plain_text_input) — free-form: subteam ID, @team,
+	//                                               decorative text, anything
+	// The picker takes precedence; if it's empty we fall back to the text field
+	// as-is. We don't try to resolve the text to an ID — existing channel
+	// configs commonly use decorative text here, and buildMentionText handles
+	// the routing at message-render time.
 	if user := selectedUser("default_mention_user"); user != "" {
 		form.DefaultMentionID = user
-	} else if raw := strings.TrimPrefix(strings.TrimSpace(field("default_mention_subteam")), "@"); raw != "" {
-		resolved, err := LookupSlackSubteamID(raw)
-		if err != nil {
-			if _, ok := err.(*SlackLookupNotFoundError); ok {
-				errs["default_mention_subteam"] = fmt.Sprintf("could not find Slack subteam %q", raw)
-			} else {
-				errs["default_mention_subteam"] = "Slack lookup failed: " + err.Error()
-			}
-		} else {
-			form.DefaultMentionID = resolved
-		}
+	} else {
+		form.DefaultMentionID = strings.TrimSpace(field("default_mention_text"))
 	}
 
-	// Reviewer pool: multi_users_select gives us a slice of pre-resolved U…
-	// IDs. We canonicalize to a comma-separated string for the existing
-	// ChannelConfig column.
-	reviewers := selectedUsers("reviewer_list")
-	form.ReviewerList = strings.Join(reviewers, ",")
+	// Reviewer pool: multi_users_select for picked users + free-text CSV for
+	// anything else (legacy bare names, decorative entries). The two lists are
+	// concatenated, with picker IDs first, and stored as a single CSV.
+	pickerReviewers := selectedUsers("reviewer_list")
+	textReviewers := normalizeCSV(field("reviewer_list_text"))
+	merged := make([]string, 0, len(pickerReviewers)+1)
+	merged = append(merged, pickerReviewers...)
+	if textReviewers != "" {
+		merged = append(merged, strings.Split(textReviewers, ",")...)
+	}
+	form.ReviewerList = strings.Join(merged, ",")
 	form.RepositoryList = normalizeCSV(field("repository_list"))
 
 	if interval, err := strconv.Atoi(field("reminder_interval")); err != nil || interval <= 0 {
