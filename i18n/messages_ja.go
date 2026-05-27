@@ -14,15 +14,17 @@ var messagesJa = map[string]string{
 - 例: /slack-review-notify "needs review" set-mention @team
 - 例: /slack-review-notify 'security review' add-reviewer @security
 
-*初期設定（必須）*
-通知を受けるには最低限以下の設定が必要です：
-:point_right: *1. メンション先の設定*
-   /slack-review-notify [ラベル名] set-mention @user
-
-:point_right: *2. 対象リポジトリの追加（重要！）*
+*初期設定*
+通知を受けるには以下のリポジトリ設定が必須です:
+:point_right: *対象リポジトリの追加（必須）*
    /slack-review-notify [ラベル名] add-repo owner/repo
 
-:information_source: この2つを設定しないと通知は送信されません
+:information_source: リポジトリが未設定の場合、通知は送信されません。
+
+*推奨設定（任意）*
+:point_right: *メンション先の設定*
+   /slack-review-notify [ラベル名] set-mention @user
+   未設定でも通知は送信されます（メンション無し）。チームに気付かせたい場合に設定してください。
 
 *複数ラベル設定の使い方*
 このチャンネル内で複数の異なるラベルごとに独立した設定を持つことができます:
@@ -43,8 +45,10 @@ var messagesJa = map[string]string{
 • /slack-review-notify [ラベル名] show - 指定ラベルの詳細設定を表示
 
 *必須設定:*
-• /slack-review-notify [ラベル名] set-mention @user - メンション先を設定
-• /slack-review-notify [ラベル名] add-repo owner/repo1,owner/repo2 - 対象リポジトリを追加
+• /slack-review-notify [ラベル名] add-repo owner/repo1,owner/repo2 - 対象リポジトリを追加（必須）
+
+*任意設定:*
+• /slack-review-notify [ラベル名] set-mention @user - メンション先を設定（未設定可。設定するとレビュー依頼通知に @ メンションが付きます）
 
 *レビュワー管理:*
 • /slack-review-notify [ラベル名] add-reviewer @user1,@user2 - レビュワーを追加

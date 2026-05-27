@@ -110,6 +110,12 @@ func GetSlackUserIDFromGitHub(db *gorm.DB, githubUsername string) string {
 }
 
 func buildMentionText(mentionID string) string {
+	// Empty mention is supported (some channels intentionally don't set a
+	// default mention target). Returning "" instead of "<@>" keeps the
+	// notification message valid Slack markup with just a leading space.
+	if mentionID == "" {
+		return ""
+	}
 	if strings.HasPrefix(mentionID, "subteam^") || strings.HasPrefix(mentionID, "S") {
 		return fmt.Sprintf("<!subteam^%s>", mentionID)
 	}
@@ -150,6 +156,12 @@ func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, coun
 	}
 
 	if config.ReviewerList == "" {
+		// Falling back to DefaultMentionID is only meaningful when one is
+		// configured. An empty mention here would propagate as a "<@>"
+		// literal downstream, so return an empty slice instead.
+		if config.DefaultMentionID == "" {
+			return []string{}
+		}
 		return []string{config.DefaultMentionID}
 	}
 
@@ -178,6 +190,9 @@ func SelectRandomReviewers(db *gorm.DB, channelID string, labelName string, coun
 	}
 
 	if len(candidates) == 0 {
+		if config.DefaultMentionID == "" {
+			return []string{}
+		}
 		return []string{config.DefaultMentionID}
 	}
 

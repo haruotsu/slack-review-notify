@@ -736,6 +736,57 @@ func TestSelectRandomReviewers_InsufficientAfterExclusion(t *testing.T) {
 	assert.Equal(t, "U2", result[0])
 }
 
+// TestBuildMentionText_EmptyReturnsEmpty pins the behavior that an empty
+// mention ID must produce no mention text — not the broken "<@>" literal,
+// which Slack renders as invalid markup. Empty DefaultMentionID is a
+// supported state (some channels intentionally don't set a mention).
+func TestBuildMentionText_EmptyReturnsEmpty(t *testing.T) {
+	if got := buildMentionText(""); got != "" {
+		t.Errorf("buildMentionText(\"\") = %q, want empty string", got)
+	}
+}
+
+// TestSelectRandomReviewers_NoReviewersNoDefault: when both ReviewerList and
+// DefaultMentionID are empty, returning [DefaultMentionID] would push the
+// empty string downstream and produce broken "<@>" mentions in notifications.
+// The function must return an empty slice instead so callers can skip the
+// mention block cleanly.
+func TestSelectRandomReviewers_NoReviewersNoDefault(t *testing.T) {
+	db := setupTestDB(t)
+	db.Create(&models.ChannelConfig{
+		ID:               "noment",
+		SlackChannelID:   "C_NOMENT",
+		LabelName:        "needs-review",
+		DefaultMentionID: "",
+		ReviewerList:     "",
+		IsActive:         true,
+	})
+
+	result := SelectRandomReviewers(db, "C_NOMENT", "needs-review", 1, nil)
+	if len(result) != 0 {
+		t.Errorf("expected empty slice when no reviewers and no default mention, got %v", result)
+	}
+}
+
+// TestSelectRandomReviewers_AllExcludedNoDefault: when every reviewer
+// candidate is excluded AND DefaultMentionID is empty, also return empty.
+func TestSelectRandomReviewers_AllExcludedNoDefault(t *testing.T) {
+	db := setupTestDB(t)
+	db.Create(&models.ChannelConfig{
+		ID:               "allx-nom",
+		SlackChannelID:   "C_ALLX_NOM",
+		LabelName:        "needs-review",
+		DefaultMentionID: "",
+		ReviewerList:     "U1,U2",
+		IsActive:         true,
+	})
+
+	result := SelectRandomReviewers(db, "C_ALLX_NOM", "needs-review", 1, []string{"U1", "U2"})
+	if len(result) != 0 {
+		t.Errorf("expected empty slice, got %v", result)
+	}
+}
+
 func TestSelectRandomReviewers_AllExcluded(t *testing.T) {
 	db := setupTestDB(t)
 
