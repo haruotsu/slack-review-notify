@@ -347,10 +347,31 @@ func getLang(config *models.ChannelConfig) string {
 	return "ja"
 }
 
-// showHelp displays the help message
+// showHelp displays the help message with a button to open the settings modal.
+// Responds with Slack response_type=ephemeral blocks payload so the help text is
+// shown alongside a Block Kit button. Plain-text help is still embedded inside
+// the section block.
 func showHelp(c *gin.Context, lang string) {
 	t := i18n.L(lang)
-	c.String(200, t("cmd.help"))
+	c.JSON(200, gin.H{
+		"response_type": "ephemeral",
+		"text":          t("cmd.help"), // fallback for clients without block support
+		"blocks": []map[string]interface{}{
+			{
+				"type": "section",
+				"text": map[string]interface{}{
+					"type": "mrkdwn",
+					"text": t("cmd.help"),
+				},
+			},
+			{
+				"type": "actions",
+				"elements": []map[string]interface{}{
+					services.CreateButton(t("modal.open_button"), "open_settings", "needs-review", "primary"),
+				},
+			},
+		},
+	})
 }
 
 // showAllLabels displays all label configurations
