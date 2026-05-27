@@ -72,6 +72,19 @@ GITHUB_WEBHOOK_SECRET=your-github-webhook-secret
 DB_PATH=review_tasks.db  # Default: review_tasks.db (optional)
 ```
 
+### Required Slack Bot OAuth Scopes
+Configure the following bot scopes in *OAuth & Permissions*:
+
+| Scope | Used for |
+|---|---|
+| `chat:write` | Post notifications and reminders |
+| `chat:write.public` | Post into channels the bot is not yet a member of |
+| `commands` | Handle the `/slack-review-notify` slash command |
+| `users:read` | Resolve `@display-name` to a user ID inside the settings modal |
+| `usergroups:read` | Resolve `@team-handle` (subteam) inside the settings modal |
+
+Without `users:read` / `usergroups:read`, saving the settings modal with an `@name` entry will surface an inline Slack API error.
+
 ## Testing Locally
 See [/docs/example_usage.md](./docs/example_usage.md) for instructions on setting up a local server with ngrok.
 

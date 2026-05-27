@@ -231,13 +231,19 @@ type usersListResponse struct {
 	} `json:"response_metadata"`
 }
 
+// maxUsersListPages bounds users.list pagination at 200 users × 100 = 20,000
+// active users — well above any realistic workspace size. The cap prevents a
+// runaway loop if Slack ever returns a non-empty next_cursor in a degenerate
+// response.
+const maxUsersListPages = 100
+
 // fetchUsersIndex pages through users.list and builds a name→ID map. Multiple
 // name fields map to the same ID so callers can use whichever name they see in
 // Slack. Deleted users are skipped.
 func fetchUsersIndex() (map[string]string, error) {
 	idx := map[string]string{}
 	cursor := ""
-	for {
+	for range maxUsersListPages {
 		params := url.Values{}
 		params.Set("limit", "200")
 		if cursor != "" {

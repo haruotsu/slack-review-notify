@@ -451,6 +451,31 @@ func TestParseSettingsModalSubmission_CreateNew_EmptyNameFails(t *testing.T) {
 	}
 }
 
+func TestParseSettingsModalSubmission_CreateNew_RejectsSentinelAsName(t *testing.T) {
+	// A user must not be able to enter the create-new sentinel as a literal
+	// label name — saving such a row would make the label unaddressable from
+	// the dropdown (it would collide with the "create new" option).
+	values := minimalValidParseValues()
+	values["label_select"] = map[string]ViewStateValue{
+		"label_select": {SelectedOption: &ViewSelectedOption{Value: CreateNewLabelSentinel}},
+	}
+	values["new_label_name"] = map[string]ViewStateValue{
+		"new_label_name": {Value: CreateNewLabelSentinel},
+	}
+
+	_, err := ParseSettingsModalSubmission(values)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	ve, ok := err.(*ModalValidationError)
+	if !ok {
+		t.Fatalf("expected *ModalValidationError, got %T", err)
+	}
+	if _, has := ve.Errors["new_label_name"]; !has {
+		t.Errorf("expected new_label_name error, got %+v", ve.Errors)
+	}
+}
+
 func TestParseSettingsModalSubmission_DeleteConfigCheckbox(t *testing.T) {
 	// The delete_config checkbox is a checkboxes element. When checked, parsing
 	// must reflect that so the submission handler can soft-delete the row.

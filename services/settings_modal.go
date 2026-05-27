@@ -404,8 +404,13 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 	if selected == CreateNewLabelSentinel {
 		form.CreateNew = true
 		form.LabelName = field("new_label_name")
-		if form.LabelName == "" {
+		switch form.LabelName {
+		case "":
 			errs["new_label_name"] = "label name is required"
+		case CreateNewLabelSentinel:
+			// Reserved sentinel — saving this as a literal label name would
+			// make the row unaddressable from the dropdown later.
+			errs["new_label_name"] = "this label name is reserved"
 		}
 	} else if selected != "" {
 		form.LabelName = selected

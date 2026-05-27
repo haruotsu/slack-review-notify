@@ -69,6 +69,19 @@ GITHUB_WEBHOOK_SECRET=your-github-webhook-secret
 DB_PATH=review_tasks.db  # デフォルト: review_tasks.db（省略可能）
 ```
 
+### 必要な Slack Bot OAuth スコープ
+Slack App の *OAuth & Permissions* で以下のスコープを付与してください:
+
+| スコープ | 用途 |
+|---|---|
+| `chat:write` | 通知・リマインドの投稿 |
+| `chat:write.public` | Botが未参加のチャンネルへの投稿 |
+| `commands` | `/slack-review-notify` スラッシュコマンドの受付 |
+| `users:read` | 設定モーダル内で `@表示名` → ユーザID 解決 |
+| `usergroups:read` | 設定モーダル内で `@チームハンドル`（サブチーム）解決 |
+
+`users:read` / `usergroups:read` が無い状態で `@表示名` を入力して保存しようとすると、Slack API エラーがモーダル上にインライン表示されます。
+
 ## 検証例
 ローカルサーバーを立てて、検証する方法を以下に記載しました。
 [/docs/example_usage.md](./docs/example_usage.md)

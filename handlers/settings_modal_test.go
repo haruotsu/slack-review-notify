@@ -432,6 +432,78 @@ func TestHandleSlackCommand_HelpListsPerLabelButtons(t *testing.T) {
 	assert.Contains(t, body, "__create_new__")
 }
 
+// TestHandleSlackAction_ViewSubmission_DeleteThenRecreate verifies the user can
+// delete a label configuration and then immediately recreate one with the same
+// label name through the create-new flow. A naive soft-delete leaves a row in
+// place that, combined with the (slack_channel_id, label_name) unique index,
+// blocks the recreate INSERT at the DB layer.
+func TestHandleSlackAction_ViewSubmission_DeleteThenRecreate(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+
+	db.Create(&models.ChannelConfig{
+		ID:               "victim",
+		SlackChannelID:   "C99999",
+		LabelName:        "needs-review",
+		DefaultMentionID: "Uold",
+		IsActive:         true,
+	})
+
+	deletePayload := `{
+		"type": "view_submission",
+		"user": {"id": "U12345"},
+		"view": {
+			"callback_id": "settings_modal",
+			"private_metadata": "{\"c\":\"C99999\",\"u\":\"U12345\"}",
+			"state": {
+				"values": {
+					"label_select": {"label_select": {"selected_option": {"value": "needs-review"}}},
+					"delete_config": {"delete_config": {"type": "checkboxes", "selected_options": [{"value": "yes"}]}},
+					"language": {"language": {"selected_option": {"value": "ja"}}},
+					"is_active": {"is_active": {"selected_option": {"value": "true"}}}
+				}
+			}
+		}
+	}`
+	w := postPayload(t, router, deletePayload)
+	assert.Equal(t, http.StatusOK, w.Code, "delete body: %s", w.Body.String())
+
+	recreatePayload := `{
+		"type": "view_submission",
+		"user": {"id": "U12345"},
+		"view": {
+			"callback_id": "settings_modal",
+			"private_metadata": "{\"c\":\"C99999\",\"u\":\"U12345\"}",
+			"state": {
+				"values": {
+					"label_select": {"label_select": {"selected_option": {"value": "__create_new__"}}},
+					"new_label_name": {"new_label_name": {"value": "needs-review"}},
+					"default_mention_id": {"default_mention_id": {"value": "Unew"}},
+					"reviewer_list": {"reviewer_list": {"value": ""}},
+					"repository_list": {"repository_list": {"value": ""}},
+					"reminder_interval": {"reminder_interval": {"value": "30"}},
+					"reviewer_reminder_interval": {"reviewer_reminder_interval": {"value": "30"}},
+					"business_hours_start": {"business_hours_start": {"value": "09:00"}},
+					"business_hours_end": {"business_hours_end": {"value": "18:00"}},
+					"timezone": {"timezone": {"value": "Asia/Tokyo"}},
+					"required_approvals": {"required_approvals": {"value": "1"}},
+					"language": {"language": {"selected_option": {"value": "ja"}}},
+					"is_active": {"is_active": {"selected_option": {"value": "true"}}}
+				}
+			}
+		}
+	}`
+	w = postPayload(t, router, recreatePayload)
+	assert.Equal(t, http.StatusOK, w.Code, "recreate body: %s", w.Body.String())
+	assert.NotContains(t, w.Body.String(), "errors", "recreate must not return a validation error")
+
+	var cfg models.ChannelConfig
+	if err := db.Where("slack_channel_id = ? AND label_name = ?", "C99999", "needs-review").First(&cfg).Error; err != nil {
+		t.Fatalf("recreated config not found: %v", err)
+	}
+	assert.Equal(t, "Unew", cfg.DefaultMentionID)
+}
+
 // TestHandleSlackAction_ViewSubmission_MissingPrivateMetadata verifies the handler
 // rejects a submission whose private_metadata is missing/invalid, so a bug that
 // loses modal context can't silently no-op or write to the wrong row.

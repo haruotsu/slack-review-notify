@@ -159,11 +159,14 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 
 	now := time.Now()
 
-	// Delete path: soft-delete the row when the user checked "delete this config".
+	// Delete path: hard-delete the row when the user checked "delete this
+	// config". We Unscoped() the delete because the (channel, label) unique
+	// index doesn't include deleted_at — a soft-deleted row would block the
+	// user from recreating a configuration with the same label name.
 	if form.DeleteConfig && !form.CreateNew {
 		var existing models.ChannelConfig
 		if err := db.Where("slack_channel_id = ? AND label_name = ?", meta.ChannelID, form.LabelName).First(&existing).Error; err == nil {
-			if err := db.Delete(&existing).Error; err != nil {
+			if err := db.Unscoped().Delete(&existing).Error; err != nil {
 				log.Printf("settings modal delete failed: %v", err)
 				c.JSON(http.StatusOK, gin.H{
 					"response_action": "errors",
