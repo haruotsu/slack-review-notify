@@ -14,15 +14,17 @@ If your label name contains spaces, wrap it in quotes (" or '):
 - Example: /slack-review-notify "needs review" set-mention @team
 - Example: /slack-review-notify 'security review' add-reviewer @security
 
-*Initial Setup (Required)*
-At minimum, the following settings are required to receive notifications:
-:point_right: *1. Set mention target*
-   /slack-review-notify [label-name] set-mention @user
-
-:point_right: *2. Add target repository (important!)*
+*Initial Setup*
+The following repository setting is required to receive notifications:
+:point_right: *Add target repository (required)*
    /slack-review-notify [label-name] add-repo owner/repo
 
-:information_source: Notifications will not be sent without both of these settings
+:information_source: Notifications will not be sent until at least one repository is added.
+
+*Recommended (Optional)*
+:point_right: *Set mention target*
+   /slack-review-notify [label-name] set-mention @user
+   Without this, notifications are still sent — just without an @-mention. Add it when you want to ping a person or team.
 
 *Multiple Label Configuration*
 You can have independent settings for different labels in this channel:
@@ -43,8 +45,10 @@ Specify multiple labels separated by commas to notify only when all labels are p
 • /slack-review-notify [label-name] show - Show detailed settings for specified label
 
 *Required Settings:*
-• /slack-review-notify [label-name] set-mention @user - Set mention target
-• /slack-review-notify [label-name] add-repo owner/repo1,owner/repo2 - Add target repositories
+• /slack-review-notify [label-name] add-repo owner/repo1,owner/repo2 - Add target repositories (required)
+
+*Optional Settings:*
+• /slack-review-notify [label-name] set-mention @user - Set mention target (notifications still go out without it, just without an @-mention)
 
 *Reviewer Management:*
 • /slack-review-notify [label-name] add-reviewer @user1,@user2 - Add reviewers
