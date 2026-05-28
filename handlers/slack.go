@@ -97,6 +97,10 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			handleAwayModalSubmission(c, db, payload)
 			return
 		}
+		if payload.Type == "view_submission" && payload.View != nil && payload.View.CallbackID == services.UserMappingModalCallbackID {
+			handleUserMappingModalSubmission(c, db, payload)
+			return
+		}
 
 		slackUserID := payload.User.ID
 		ts := payload.Message.Ts
@@ -126,6 +130,12 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 		// "🌴 Manage availability" button → open the away-management modal.
 		if actionID == services.OpenAwayManagementActionID {
 			handleOpenAwayManagement(c, db, payload)
+			return
+		}
+
+		// "👥 User mapping" button → open the user-mapping modal.
+		if actionID == services.OpenUserMappingActionID {
+			handleOpenUserMapping(c, db, payload)
 			return
 		}
 

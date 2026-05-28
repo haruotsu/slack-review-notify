@@ -177,11 +177,34 @@ var messagesJa = map[string]string{
 - 言語: %s`,
 
 	// ==================== Command: map-user ====================
+	// ==================== Modal: user_mapping ====================
+	"modal.user_mapping.title":                       "ユーザーマッピング",
+	"modal.user_mapping.submit":                      "保存",
+	"modal.user_mapping.close":                       "閉じる",
+	"modal.user_mapping.header":                      "GitHubユーザーをSlackユーザーに紐付けます。設定するとPR作成者がレビュー抽選から除外されます。",
+	"modal.user_mapping.existing_header":             "*現在のマッピング*",
+	"modal.user_mapping.legacy_flag":                 "(再登録が必要)",
+	"modal.user_mapping.github":                      "GitHubユーザー名",
+	"modal.user_mapping.github.hint":                 "例: octocat",
+	"modal.user_mapping.slack_user":                  "Slackユーザー",
+	"modal.user_mapping.slack_user.hint":             "Slackユーザーピッカーから選択してください。",
+	"modal.user_mapping.delete":                      "このマッピングを削除",
+	"modal.user_mapping.delete.hint":                 "チェックすると、上で指定したGitHubユーザー名のマッピングを削除します。",
+	"modal.user_mapping.delete.option":               "削除する",
+	"modal.user_mapping.error.github_required":       "GitHubユーザー名は必須です。",
+	"modal.user_mapping.error.slack_user_required":   "Slackユーザーを選択してください。",
+	"modal.user_mapping.error.slack_user_not_resolved": "SlackユーザーIDが解決できませんでした。",
+	"modal.user_mapping.open_button":                 "👥 ユーザーマッピング",
+	"modal.user_mapping.saved":                       "GitHubユーザー `%s` のマッピングを保存しました。",
+	"modal.user_mapping.deleted":                     "GitHubユーザー `%s` のマッピングを削除しました。",
+	"modal.user_mapping.delete_not_found":            "GitHubユーザー `%s` のマッピングは存在しません。",
+
 	"cmd.map_user.usage":        "使用方法: /slack-review-notify map-user <github-username> @slack-user\n例: /slack-review-notify map-user octocat @user",
 	"cmd.map_user.invalid":      "GitHubユーザー名とSlackユーザーIDの両方を指定してください。",
 	"cmd.map_user.updated":      "GitHubユーザー `%s` のマッピングを <@%s> に更新しました。",
 	"cmd.map_user.create_error": "ユーザーマッピングの作成に失敗しました。",
 	"cmd.map_user.created":      "GitHubユーザー `%s` を <@%s> にマッピングしました。",
+	"cmd.map_user.not_user_id":  "SlackユーザーIDが解決できませんでした (`%s`)。スラッシュコマンドのオートコンプリート候補をクリックして送信するか、`/slack-review-notify help` の「👥 ユーザーマッピング」ボタンからモーダルで設定してください。",
 
 	// ==================== Command: show-user-mappings ====================
 	"cmd.show_user_mappings.error":  "ユーザーマッピングの取得に失敗しました。",

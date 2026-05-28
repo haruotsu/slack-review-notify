@@ -41,6 +41,12 @@ func main() {
 		log.Fatal("fail to migrate reviewer availability index:", err)
 	}
 
+	// Surface user_mappings rows whose slack_user_id is not a resolved U-id.
+	// These date from before the modal picker landed and silently leak the PR
+	// author into the reviewer candidate pool. The operator can re-register
+	// each entry from the user-mapping modal.
+	services.LogLegacyUserMappings(db)
+
 	// Background periodic task to check watching tasks
 	go runTaskChecker(db)
 

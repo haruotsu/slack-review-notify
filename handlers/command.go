@@ -399,15 +399,21 @@ func showHelp(c *gin.Context, db *gorm.DB, channelID, lang string) {
 	))
 	flush()
 
-	// "🌴 休暇管理を開く" lives in its own row so it's visually separated
-	// from the per-label settings buttons. Different domain (per-user, not
-	// per-label), different modal.
+	// "🌴 休暇管理を開く" and "👥 ユーザーマッピング" live in their own row
+	// so they're visually separated from the per-label settings buttons.
+	// Different domain (per-user, not per-label), different modals.
 	actionBlocks = append(actionBlocks, map[string]interface{}{
 		"type": "actions",
 		"elements": []map[string]interface{}{
 			services.CreateButton(
 				t("modal.away.open_button"),
 				services.OpenAwayManagementActionID,
+				"",
+				"",
+			),
+			services.CreateButton(
+				t("modal.user_mapping.open_button"),
+				services.OpenUserMappingActionID,
 				"",
 				"",
 			),
@@ -538,9 +544,17 @@ func cleanUserID(userID string) string {
 		}
 	}
 
-	// Handle regular user mention <@ID>
+	// Handle regular user mention <@ID> and the autocomplete-escape form
+	// <@ID|displayname>. Slack delivers the latter when the slash command app
+	// has "Escape channels, users, and links sent to your app" enabled and the
+	// caller picked an autocomplete suggestion; without stripping the suffix
+	// we'd store `ID|displayname` which never matches a reviewer id.
 	if strings.HasPrefix(userID, "<@") && strings.HasSuffix(userID, ">") {
-		return strings.TrimPrefix(strings.TrimSuffix(userID, ">"), "<@")
+		inner := strings.TrimPrefix(strings.TrimSuffix(userID, ">"), "<@")
+		if idx := strings.Index(inner, "|"); idx >= 0 {
+			inner = inner[:idx]
+		}
+		return inner
 	}
 
 	// Remove @ prefix if present
@@ -550,6 +564,28 @@ func cleanUserID(userID string) string {
 	userID = strings.ReplaceAll(userID, ",", "")
 
 	return userID
+}
+
+// looksLikeSlackUserID reports whether s is a bare Slack user id of the form
+// `U…` or `W…` followed by uppercase alphanumerics. Used to validate
+// `set-user` input so we never persist a plain @handle into user_mappings —
+// the reviewer_list stores Slack-resolved user ids, so a mismatched form
+// causes the PR author to be selected as their own reviewer.
+func looksLikeSlackUserID(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return false
+	}
+	if s[0] != 'U' && s[0] != 'W' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')) {
+			return false
+		}
+	}
+	return true
 }
 
 // cleanupUserIDs cleans up multiple user IDs
@@ -1100,6 +1136,16 @@ func mapUser(c *gin.Context, db *gorm.DB, params, lang string) {
 
 	if githubUsername == "" || slackUserID == "" {
 		c.String(200, t("cmd.map_user.invalid"))
+		return
+	}
+
+	// The Slack identifier must be a resolved user id (U… / W…). A plain
+	// @handle here will silently mismatch the reviewer_list (which the modal
+	// picker writes as U-ids) and the PR author will end up in the candidate
+	// pool. Guard at the point of write so user_mappings can't accrue more
+	// legacy values.
+	if !looksLikeSlackUserID(slackUserID) {
+		c.String(200, t("cmd.map_user.not_user_id", parts[1]))
 		return
 	}
 
