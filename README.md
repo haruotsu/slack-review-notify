@@ -131,6 +131,8 @@ When a mapping is set, notifications appear like:
 - `/slack-review-notify unset-away @user`: Remove away status
 - `/slack-review-notify show-availability`: Show users currently on leave
 
+You can also manage leave from the **🌴 Manage availability** button under `/slack-review-notify help`, which opens a modal with a user picker, optional start/end datepickers, an optional reason, and a "remove all leave for this user" checkbox.
+
 ### Review Management
 Various actions are available from notification messages:
 

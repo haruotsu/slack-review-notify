@@ -273,6 +273,27 @@ var messagesJa = map[string]string{
 	"modal.open_button.new":              "➕ 新規ラベル設定を追加",
 	"modal.open_button.edit":             "⚙️ `%s` の設定を編集",
 
+	// ==================== Away Management Modal ====================
+	"modal.away.open_button":      "🌴 休暇管理を開く",
+	"modal.away.title":            "休暇管理",
+	"modal.away.submit":           "保存",
+	"modal.away.close":            "閉じる",
+	"modal.away.header":           "*ユーザーの休暇を登録 / 削除*\n登録：ユーザーを選んで（期間と理由は任意）保存。\n全削除：下のチェックをオンにすると、そのユーザーの休暇記録すべてを削除します。",
+	"modal.away.user":             "対象ユーザー",
+	"modal.away.user.hint":        "Slack のユーザーピッカーから選択。",
+	"modal.away.from":             "開始日",
+	"modal.away.from.hint":        "未指定なら「今すぐ」開始扱い。",
+	"modal.away.until":            "終了日",
+	"modal.away.until.hint":       "未指定なら「無期限」扱い。",
+	"modal.away.reason":           "理由（任意）",
+	"modal.away.reason.hint":      "例: 有給休暇、出張、療養 など。",
+	"modal.away.delete_all":       "このユーザーの休暇を全削除",
+	"modal.away.delete_all.hint":  "オンにして保存すると、上の入力は無視され、対象ユーザーの休暇記録がすべて削除されます。",
+	"modal.away.delete_all.option": "このユーザーの休暇記録をすべて削除する",
+	"modal.away.saved":            "<@%s> の休暇を保存しました 🌴",
+	"modal.away.deleted":          "<@%s> の休暇を全削除しました 🗑️",
+	"modal.away.nothing_deleted":  "<@%s> には削除対象の休暇がありませんでした。",
+
 	// ==================== Pause Options ====================
 	"pause.1h":    "1時間停止",
 	"pause.2h":    "2時間停止",
