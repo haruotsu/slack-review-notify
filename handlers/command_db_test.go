@@ -671,3 +671,77 @@ func TestShowAvailability_Integration(t *testing.T) {
 	assert.Contains(t, body, "USHOW3")
 	assert.Contains(t, body, "予定休暇")
 }
+
+// TestMapUserCommand_RejectsPlainHandle ensures that `map-user` refuses to
+// persist a Slack identifier that isn't a resolved user id. Without this
+// guard, a plain @handle is stored verbatim and silently mismatches the
+// reviewer_list rewritten by the modal picker (which always emits U-ids), so
+// the PR author ends up in the candidate pool.
+func TestMapUserCommand_RejectsPlainHandle(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	req := setupHTTPRequest(t, "map-user octocat @octocat", "C12345")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "SlackユーザーIDが解決できませんでした")
+
+	var count int64
+	db.Model(&models.UserMapping{}).Where("github_username = ?", "octocat").Count(&count)
+	assert.Equal(t, int64(0), count, "non-user-id input must not be persisted")
+}
+
+// TestMapUserCommand_AcceptsResolvedUserID verifies that the canonical input
+// shape — a Slack-resolved `<@U…>` mention or a bare U-id — still works.
+func TestMapUserCommand_AcceptsResolvedUserID(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	req := setupHTTPRequest(t, "map-user octocat <@U01ABCDE234>", "C12345")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+
+	var mapping models.UserMapping
+	if err := db.Where("github_username = ?", "octocat").First(&mapping).Error; err != nil {
+		t.Fatalf("expected user mapping to be created, got: %v", err)
+	}
+	assert.Equal(t, "U01ABCDE234", mapping.SlackUserID)
+}
+
+// TestMapUserCommand_AcceptsEscapedMentionWithName confirms that the autocomplete
+// form `<@U…|displayname>` is normalized down to the bare user id.
+func TestMapUserCommand_AcceptsEscapedMentionWithName(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	req := setupHTTPRequest(t, "map-user octocat <@U01ABCDE234|octocat>", "C12345")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+
+	var mapping models.UserMapping
+	if err := db.Where("github_username = ?", "octocat").First(&mapping).Error; err != nil {
+		t.Fatalf("expected user mapping to be created, got: %v", err)
+	}
+	assert.Equal(t, "U01ABCDE234", mapping.SlackUserID)
+}

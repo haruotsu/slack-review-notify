@@ -746,6 +746,37 @@ func TestBuildMentionText_EmptyReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestSelectRandomReviewers_ExcludesPRAuthorAcrossFullList is a regression test
+// for the bug where a PR author was randomly reassigned as their own reviewer.
+// We request `count == len(reviewers)` so that — if the author id weren't
+// removed from the candidate set — they'd deterministically appear in the
+// returned slice. The exclusion contract must hold even when the requested
+// count saturates the list size.
+func TestSelectRandomReviewers_ExcludesPRAuthorAcrossFullList(t *testing.T) {
+	db := setupTestDB(t)
+
+	testConfig := models.ChannelConfig{
+		ID:             "author-excl",
+		SlackChannelID: "C_AUTHOR",
+		LabelName:      "needs-review",
+		ReviewerList:   "U01EXAMPLE0,U02EXAMPLE0,U03EXAMPLE0,U04EXAMPLE0",
+		IsActive:       true,
+	}
+	db.Create(&testConfig)
+
+	authorID := "U01EXAMPLE0"
+
+	// Run several iterations to defeat the random shuffle: if the author leaks
+	// through, at least one run will surface it.
+	for i := 0; i < 50; i++ {
+		result := SelectRandomReviewers(db, "C_AUTHOR", "needs-review", 2, []string{authorID})
+		assert.Equal(t, 2, len(result), "iteration %d: should return exactly 2 reviewers", i)
+		for _, id := range result {
+			assert.NotEqual(t, authorID, id, "iteration %d: PR author %q was returned as a reviewer", i, authorID)
+		}
+	}
+}
+
 // TestSelectRandomReviewers_NoReviewersNoDefault: when both ReviewerList and
 // DefaultMentionID are empty, returning [DefaultMentionID] would push the
 // empty string downstream and produce broken "<@>" mentions in notifications.
