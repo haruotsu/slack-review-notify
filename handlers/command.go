@@ -566,28 +566,6 @@ func cleanUserID(userID string) string {
 	return userID
 }
 
-// looksLikeSlackUserID reports whether s is a bare Slack user id of the form
-// `U…` or `W…` followed by uppercase alphanumerics. Used to validate
-// `set-user` input so we never persist a plain @handle into user_mappings —
-// the reviewer_list stores Slack-resolved user ids, so a mismatched form
-// causes the PR author to be selected as their own reviewer.
-func looksLikeSlackUserID(s string) bool {
-	s = strings.TrimSpace(s)
-	if len(s) < 2 {
-		return false
-	}
-	if s[0] != 'U' && s[0] != 'W' {
-		return false
-	}
-	for i := 1; i < len(s); i++ {
-		c := s[i]
-		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')) {
-			return false
-		}
-	}
-	return true
-}
-
 // cleanupUserIDs cleans up multiple user IDs
 func cleanupUserIDs(userIDs string) string {
 	ids := strings.Split(userIDs, ",")
@@ -1144,7 +1122,7 @@ func mapUser(c *gin.Context, db *gorm.DB, params, lang string) {
 	// picker writes as U-ids) and the PR author will end up in the candidate
 	// pool. Guard at the point of write so user_mappings can't accrue more
 	// legacy values.
-	if !looksLikeSlackUserID(slackUserID) {
+	if !services.LooksLikeResolvedSlackUserID(slackUserID) {
 		c.String(200, t("cmd.map_user.not_user_id", parts[1]))
 		return
 	}

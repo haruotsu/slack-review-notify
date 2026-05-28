@@ -114,30 +114,3 @@ func TestCleanUserID(t *testing.T) {
 		})
 	}
 }
-
-// TestLooksLikeSlackUserID verifies the helper used to validate `set-user`
-// input. Anything starting with U/W followed by uppercase alphanumerics counts
-// as a Slack user id. A bare github-style handle must not pass.
-func TestLooksLikeSlackUserID(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  bool
-	}{
-		{name: "U-prefixed id", input: "U01ABCDE234", want: true},
-		{name: "W-prefixed enterprise id", input: "W01ABCDE234", want: true},
-		{name: "lowercase plain", input: "octocat", want: false},
-		{name: "U-prefixed but with display suffix", input: "U01ABCDE234|octocat", want: false},
-		{name: "empty", input: "", want: false},
-		{name: "mention markup", input: "<@U01ABCDE234>", want: false},
-		{name: "subteam id", input: "S0123ABCDEF", want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := looksLikeSlackUserID(tt.input)
-			if got != tt.want {
-				t.Errorf("looksLikeSlackUserID(%q) = %v, want %v", tt.input, got, tt.want)
-			}
-		})
-	}
-}
