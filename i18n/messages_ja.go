@@ -293,6 +293,12 @@ var messagesJa = map[string]string{
 	"modal.away.saved":            "<@%s> の休暇を保存しました 🌴",
 	"modal.away.deleted":          "<@%s> の休暇を全削除しました 🗑️",
 	"modal.away.nothing_deleted":  "<@%s> には削除対象の休暇がありませんでした。",
+	"modal.away.error.user_required":    "対象ユーザーを選択してください。",
+	"modal.away.error.invalid_date":     "日付は YYYY-MM-DD 形式で指定してください。",
+	"modal.away.error.until_before_from": "終了日は開始日と同じか、それより後にしてください。",
+	"modal.away.error.save_failed":      "保存に失敗しました。時間をおいて再度お試しください。",
+	"modal.away.error.delete_failed":    "削除に失敗しました。時間をおいて再度お試しください。",
+	"modal.away.error.context_lost":     "モーダルの状態が失われました。お手数ですが再度開き直してください。",
 
 	// ==================== Pause Options ====================
 	"pause.1h":    "1時間停止",

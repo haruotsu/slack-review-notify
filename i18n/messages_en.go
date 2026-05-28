@@ -293,6 +293,12 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"modal.away.saved":            "Saved leave for <@%s> 🌴",
 	"modal.away.deleted":          "Removed all leave for <@%s> 🗑️",
 	"modal.away.nothing_deleted":  "<@%s> had no leave records to remove.",
+	"modal.away.error.user_required":    "Please pick a target user.",
+	"modal.away.error.invalid_date":     "Date must be in YYYY-MM-DD format.",
+	"modal.away.error.until_before_from": "End date must be on or after the start date.",
+	"modal.away.error.save_failed":      "Failed to save. Please try again in a moment.",
+	"modal.away.error.delete_failed":    "Failed to delete. Please try again in a moment.",
+	"modal.away.error.context_lost":     "Modal state was lost. Please reopen and try again.",
 
 	// ==================== Pause Options ====================
 	"pause.1h":    "Pause 1 hour",

@@ -169,6 +169,59 @@ func TestAwayModal_ViewSubmission_FromAfterUntil(t *testing.T) {
 	assert.EqualValues(t, 0, count, "no row may be written on validation failure")
 }
 
+// TestAwayModal_ViewSubmission_UpsertMatchesSlashCommandRecord:
+// the modal's upsert must hit an existing row created by the slash command
+// when the user picks the same dates. The slash command stores `from` at
+// 00:00 +tz and `until` at 23:59:59 +tz; the modal must do the same, otherwise
+// a "re-save with new reason" leaks a duplicate row instead of updating in
+// place. This is a regression test for the timezone fix.
+func TestAwayModal_ViewSubmission_UpsertMatchesSlashCommandRecord(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+
+	// Configure the channel's timezone so pickModalTimezone selects JST.
+	db.Create(&models.ChannelConfig{
+		ID:             uuid.NewString(),
+		SlackChannelID: "C12345",
+		LabelName:      "needs-review",
+		Timezone:       "Asia/Tokyo",
+		IsActive:       true,
+	})
+
+	// Simulate a row written by the slash command path: 00:00 / 23:59:59 in JST.
+	jst, _ := time.LoadLocation("Asia/Tokyo")
+	from := time.Date(2030, 4, 1, 0, 0, 0, 0, jst)
+	until := time.Date(2030, 4, 5, 23, 59, 59, 0, jst)
+	preExisting := models.ReviewerAvailability{
+		ID:          uuid.NewString(),
+		SlackUserID: "U_TARGET",
+		AwayFrom:    &from,
+		AwayUntil:   &until,
+		Reason:      "original",
+	}
+	if err := db.Create(&preExisting).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	payload := buildAwayViewSubmission(t, awaySubmission{
+		channelID: "C12345",
+		userID:    "U_ADMIN",
+		awayUser:  "U_TARGET",
+		from:      "2030-04-01",
+		until:     "2030-04-05",
+		reason:    "updated reason",
+	})
+	w := postPayload(t, router, payload)
+	assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	var rows []models.ReviewerAvailability
+	db.Where("slack_user_id = ?", "U_TARGET").Find(&rows)
+	if assert.Len(t, rows, 1, "modal save must update in place, not insert a duplicate") {
+		assert.Equal(t, "updated reason", rows[0].Reason)
+		assert.Equal(t, preExisting.ID, rows[0].ID, "primary key must be preserved (UPDATE, not INSERT)")
+	}
+}
+
 // awaySubmission is a tiny DSL for assembling test payloads. Empty string
 // fields are rendered as empty values; deleteAll=true ticks the checkbox.
 type awaySubmission struct {

@@ -89,7 +89,7 @@ func TestParseAwayModalSubmission_UserRequired(t *testing.T) {
 	v["away_user"] = map[string]ViewStateValue{
 		"away_user": {SelectedUser: ""},
 	}
-	_, err := ParseAwayModalSubmission(v)
+	_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
 	if err == nil {
 		t.Fatalf("expected validation error")
 	}
@@ -106,7 +106,7 @@ func TestParseAwayModalSubmission_UserRequired(t *testing.T) {
 // no checkbox. This is the analogue of `/slack-review-notify set-away @user`
 // with no period — an immediate, indefinite leave.
 func TestParseAwayModalSubmission_SetIndefinite(t *testing.T) {
-	form, err := ParseAwayModalSubmission(minimalAwayValues())
+	form, err := ParseAwayModalSubmission(minimalAwayValues(), time.UTC, "ja")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestParseAwayModalSubmission_SetWithDatesAndReason(t *testing.T) {
 	v["away_reason"] = map[string]ViewStateValue{
 		"away_reason": {Value: "  vacation  "},
 	}
-	form, err := ParseAwayModalSubmission(v)
+	form, err := ParseAwayModalSubmission(v, time.UTC, "ja")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestParseAwayModalSubmission_FromAfterUntil(t *testing.T) {
 	v["away_until"] = map[string]ViewStateValue{
 		"away_until": {Value: "2030-02-01"},
 	}
-	_, err := ParseAwayModalSubmission(v)
+	_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
 	if err == nil {
 		t.Fatalf("expected validation error")
 	}
@@ -180,7 +180,7 @@ func TestParseAwayModalSubmission_InvalidDate(t *testing.T) {
 	v["away_from"] = map[string]ViewStateValue{
 		"away_from": {Value: "not-a-date"},
 	}
-	_, err := ParseAwayModalSubmission(v)
+	_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
 	if err == nil {
 		t.Fatalf("expected validation error")
 	}
@@ -193,6 +193,65 @@ func TestParseAwayModalSubmission_InvalidDate(t *testing.T) {
 	}
 }
 
+// TestParseAwayModalSubmission_TimezoneAware: dates picked in the modal must
+// be interpreted in the channel's timezone (`from` at 00:00 +loc, `until` at
+// 23:59:59 +loc) so that records line up with what the slash command writes.
+// Without this, upserts against slash-command-created rows never match and
+// `until` expires hours earlier than the user expects.
+func TestParseAwayModalSubmission_TimezoneAware(t *testing.T) {
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("load JST: %v", err)
+	}
+	v := minimalAwayValues()
+	v["away_from"] = map[string]ViewStateValue{
+		"away_from": {Value: "2030-04-01"},
+	}
+	v["away_until"] = map[string]ViewStateValue{
+		"away_until": {Value: "2030-04-05"},
+	}
+	form, err := ParseAwayModalSubmission(v, jst, "ja")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	wantFrom := time.Date(2030, 4, 1, 0, 0, 0, 0, jst)
+	if form.AwayFrom == nil || !form.AwayFrom.Equal(wantFrom) {
+		t.Errorf("AwayFrom = %v, want %v", form.AwayFrom, wantFrom)
+	}
+	wantUntil := time.Date(2030, 4, 5, 23, 59, 59, 0, jst)
+	if form.AwayUntil == nil || !form.AwayUntil.Equal(wantUntil) {
+		t.Errorf("AwayUntil = %v, want %v", form.AwayUntil, wantUntil)
+	}
+}
+
+// TestParseAwayModalSubmission_SameDayAllowed: `from == until` is a legitimate
+// "out for one day" leave, equivalent to the slash command's `on YYYY-MM-DD`.
+// Combined with the end-of-day stretch for `until`, the resulting row covers
+// the whole selected day instead of being a zero-length window.
+func TestParseAwayModalSubmission_SameDayAllowed(t *testing.T) {
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("load JST: %v", err)
+	}
+	v := minimalAwayValues()
+	v["away_from"] = map[string]ViewStateValue{
+		"away_from": {Value: "2030-04-05"},
+	}
+	v["away_until"] = map[string]ViewStateValue{
+		"away_until": {Value: "2030-04-05"},
+	}
+	form, err := ParseAwayModalSubmission(v, jst, "ja")
+	if err != nil {
+		t.Fatalf("expected success on same-day leave, got: %v", err)
+	}
+	if form.AwayFrom == nil || form.AwayUntil == nil {
+		t.Fatalf("dates must be set, got from=%v until=%v", form.AwayFrom, form.AwayUntil)
+	}
+	if !form.AwayFrom.Before(*form.AwayUntil) {
+		t.Errorf("expected from < until after end-of-day stretch, got from=%v until=%v", form.AwayFrom, form.AwayUntil)
+	}
+}
+
 // TestParseAwayModalSubmission_DeleteAll: checkbox checked → DeleteAll=true.
 // Per the field semantics (slash command `unset-away @user` without dates),
 // this wipes every record for the user, so we don't require the date fields.
@@ -201,7 +260,7 @@ func TestParseAwayModalSubmission_DeleteAll(t *testing.T) {
 	v["away_delete_all"] = map[string]ViewStateValue{
 		"away_delete_all": {SelectedOptions: []ViewSelectedOption{{Value: "yes"}}},
 	}
-	form, err := ParseAwayModalSubmission(v)
+	form, err := ParseAwayModalSubmission(v, time.UTC, "ja")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

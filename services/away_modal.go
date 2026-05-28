@@ -134,8 +134,9 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 		t("modal.away.reason"),
 		t("modal.away.reason.hint"),
 		map[string]any{
-			"type":      "plain_text_input",
-			"action_id": "away_reason",
+			"type":       "plain_text_input",
+			"action_id":  "away_reason",
+			"max_length": 500,
 		},
 		true,
 	)
@@ -190,7 +191,17 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 // AwayForm. Validation errors (missing user, malformed date, from > until)
 // are returned as *ModalValidationError with per-field keys so Slack can
 // highlight the offending input.
-func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue) (*AwayForm, error) {
+//
+// loc is the timezone used to interpret datepicker values; pass the
+// channel-resolved Location so the saved AwayFrom/AwayUntil line up with what
+// the slash command writes (00:00:00 +tz / 23:59:59 +tz). nil falls back to
+// UTC, used by unit tests that don't care about tz semantics. lang chooses
+// the i18n locale for the validation messages Slack renders inside the modal.
+func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *time.Location, lang string) (*AwayForm, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	t := i18n.L(lang)
 	errs := map[string]string{}
 
 	field := func(blockID string) string {
@@ -243,7 +254,7 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue) (*Awa
 
 	form.SlackUserID = selectedUser("away_user")
 	if form.SlackUserID == "" {
-		errs["away_user"] = "select a user"
+		errs["away_user"] = t("modal.away.error.user_required")
 	}
 
 	form.DeleteAll = checkboxChecked("away_delete_all", "yes")
@@ -252,7 +263,12 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue) (*Awa
 	// ignores them so users can wipe records without picking dates.
 	// Slack's datepicker delivers the value in `selected_date`, but we also
 	// fall back to `value` so handcrafted test payloads still work.
-	parseDate := func(blockID string) *time.Time {
+	//
+	// endOfDay=true (used for `until`) anchors the timestamp at 23:59:59 +loc
+	// so the leave covers the entire selected day, matching the slash-command
+	// behavior. Without this, an `until` of 2030-04-05 would expire at midnight
+	// the same day instead of at the end of it.
+	parseDate := func(blockID string, endOfDay bool) *time.Time {
 		actions, ok := values[blockID]
 		if !ok {
 			return nil
@@ -268,20 +284,28 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue) (*Awa
 		if raw == "" {
 			return nil
 		}
-		ts, err := time.Parse("2006-01-02", raw)
+		parsed, err := time.ParseInLocation("2006-01-02", raw, loc)
 		if err != nil {
-			errs[blockID] = "must be YYYY-MM-DD"
+			errs[blockID] = t("modal.away.error.invalid_date")
 			return nil
 		}
+		hh, mm, ss := 0, 0, 0
+		if endOfDay {
+			hh, mm, ss = 23, 59, 59
+		}
+		ts := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), hh, mm, ss, 0, loc)
 		return &ts
 	}
 
-	form.AwayFrom = parseDate("away_from")
-	form.AwayUntil = parseDate("away_until")
+	form.AwayFrom = parseDate("away_from", false)
+	form.AwayUntil = parseDate("away_until", true)
 	form.Reason = field("away_reason")
 
-	if form.AwayFrom != nil && form.AwayUntil != nil && !form.AwayFrom.Before(*form.AwayUntil) {
-		errs["away_until"] = "must be after the start date"
+	// Same-day leave is legitimate (from=00:00 +loc, until=23:59:59 +loc), so
+	// only reject when start is strictly after end. The slash command's
+	// `on YYYY-MM-DD` form expresses the same intent.
+	if form.AwayFrom != nil && form.AwayUntil != nil && form.AwayFrom.After(*form.AwayUntil) {
+		errs["away_until"] = t("modal.away.error.until_before_from")
 	}
 
 	if len(errs) > 0 {

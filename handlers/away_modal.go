@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"slack-review-notify/i18n"
@@ -48,16 +49,23 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 	meta, err := services.DecodeAwayModalMetadata(payload.View.PrivateMetadata)
 	if err != nil {
 		log.Printf("away view_submission has invalid private_metadata: %q (err=%v)", payload.View.PrivateMetadata, err)
+		// PrivateMetadata is JSON we control, so the language hint inside is
+		// unreachable on decode failure. Fall back to ja for the error label.
 		c.JSON(http.StatusOK, gin.H{
 			"response_action": "errors",
-			"errors":          gin.H{"away_user": "internal error: modal context lost. Please reopen."},
+			"errors":          gin.H{"away_user": i18n.TWithLang("ja", "modal.away.error.context_lost")},
 		})
 		return
 	}
 
-	form, err := services.ParseAwayModalSubmission(payload.View.State.Values)
+	configs := loadChannelConfigs(db, meta.ChannelID)
+	lang := pickModalLanguage(configs, "")
+	loc := pickModalTimezone(configs)
+
+	form, err := services.ParseAwayModalSubmission(payload.View.State.Values, loc, lang)
 	if err != nil {
-		if ve, ok := err.(*services.ModalValidationError); ok {
+		var ve *services.ModalValidationError
+		if errors.As(err, &ve) {
 			c.JSON(http.StatusOK, gin.H{
 				"response_action": "errors",
 				"errors":          ve.Errors,
@@ -72,11 +80,6 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 		return
 	}
 
-	// Pick the modal language for the post-save confirmation. There's no
-	// per-user language preference; fall back to whatever the modal-opening
-	// channel had configured, defaulting to ja.
-	lang := pickModalLanguage(loadChannelConfigs(db, meta.ChannelID), "")
-
 	if form.DeleteAll {
 		// `unset-away @user` (no date) semantics: wipe every row, hard delete
 		// so the (slack_user_id) index doesn't collide on a future re-add.
@@ -85,7 +88,7 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 			log.Printf("away delete-all failed: user=%s err=%v", form.SlackUserID, res.Error)
 			c.JSON(http.StatusOK, gin.H{
 				"response_action": "errors",
-				"errors":          gin.H{"away_delete_all": "delete failed"},
+				"errors":          gin.H{"away_delete_all": i18n.TWithLang(lang, "modal.away.error.delete_failed")},
 			})
 			return
 		}
@@ -109,32 +112,21 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 	// updates Reason only; a new period inserts a fresh row.
 	now := time.Now()
 	var existing models.ReviewerAvailability
-	query := db.Where("slack_user_id = ?", form.SlackUserID)
-	query = applyAwayPeriodMatch(query, form.AwayFrom, form.AwayUntil)
-	switch err := query.First(&existing).Error; err {
-	case nil:
+	query := applyPeriodMatch(db.Where("slack_user_id = ?", form.SlackUserID), form.AwayFrom, form.AwayUntil)
+	err = query.First(&existing).Error
+	switch {
+	case err == nil:
 		existing.Reason = form.Reason
 		existing.UpdatedAt = now
 		if err := db.Save(&existing).Error; err != nil {
 			log.Printf("away upsert update failed: user=%s err=%v", form.SlackUserID, err)
 			c.JSON(http.StatusOK, gin.H{
 				"response_action": "errors",
-				"errors":          gin.H{"away_user": "save failed"},
+				"errors":          gin.H{"away_user": i18n.TWithLang(lang, "modal.away.error.save_failed")},
 			})
 			return
 		}
-	default:
-		// First() returns ErrRecordNotFound when no match exists. Treat any
-		// non-nil error (including transient DB errors) as "not found" only
-		// when it IS the not-found sentinel; otherwise log and bail.
-		if err != gorm.ErrRecordNotFound {
-			log.Printf("away lookup failed: user=%s err=%v", form.SlackUserID, err)
-			c.JSON(http.StatusOK, gin.H{
-				"response_action": "errors",
-				"errors":          gin.H{"away_user": "save failed"},
-			})
-			return
-		}
+	case errors.Is(err, gorm.ErrRecordNotFound):
 		record := models.ReviewerAvailability{
 			ID:          uuid.NewString(),
 			SlackUserID: form.SlackUserID,
@@ -148,10 +140,18 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 			log.Printf("away create failed: user=%s err=%v", form.SlackUserID, err)
 			c.JSON(http.StatusOK, gin.H{
 				"response_action": "errors",
-				"errors":          gin.H{"away_user": "save failed"},
+				"errors":          gin.H{"away_user": i18n.TWithLang(lang, "modal.away.error.save_failed")},
 			})
 			return
 		}
+	default:
+		// Any other DB error must not silently fall through to Create.
+		log.Printf("away lookup failed: user=%s err=%v", form.SlackUserID, err)
+		c.JSON(http.StatusOK, gin.H{
+			"response_action": "errors",
+			"errors":          gin.H{"away_user": i18n.TWithLang(lang, "modal.away.error.save_failed")},
+		})
+		return
 	}
 
 	if !services.IsTestMode && meta.UserID != "" {
@@ -162,21 +162,4 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 	}
 
 	c.Status(http.StatusOK)
-}
-
-// applyAwayPeriodMatch narrows a query so it matches a row with the same
-// (away_from, away_until) tuple as the form. Required because GORM's
-// `Where("away_from = ?", nil)` doesn't translate to `IS NULL`.
-func applyAwayPeriodMatch(q *gorm.DB, from, until *time.Time) *gorm.DB {
-	if from == nil {
-		q = q.Where("away_from IS NULL")
-	} else {
-		q = q.Where("away_from = ?", from)
-	}
-	if until == nil {
-		q = q.Where("away_until IS NULL")
-	} else {
-		q = q.Where("away_until = ?", until)
-	}
-	return q
 }
