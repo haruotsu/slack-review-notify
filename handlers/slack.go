@@ -93,6 +93,10 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			handleSettingsModalSubmission(c, db, payload)
 			return
 		}
+		if payload.Type == "view_submission" && payload.View != nil && payload.View.CallbackID == services.AwayManagementModalCallbackID {
+			handleAwayModalSubmission(c, db, payload)
+			return
+		}
 
 		slackUserID := payload.User.ID
 		ts := payload.Message.Ts
@@ -116,6 +120,12 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 		// label is carried in the button's value field, not the action_id.
 		if actionID == actionOpenSettings || strings.HasPrefix(actionID, actionOpenSettings+":") {
 			handleOpenSettings(c, db, payload)
+			return
+		}
+
+		// "🌴 Manage availability" button → open the away-management modal.
+		if actionID == services.OpenAwayManagementActionID {
+			handleOpenAwayManagement(c, db, payload)
 			return
 		}
 

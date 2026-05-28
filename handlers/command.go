@@ -399,6 +399,21 @@ func showHelp(c *gin.Context, db *gorm.DB, channelID, lang string) {
 	))
 	flush()
 
+	// "🌴 休暇管理を開く" lives in its own row so it's visually separated
+	// from the per-label settings buttons. Different domain (per-user, not
+	// per-label), different modal.
+	actionBlocks = append(actionBlocks, map[string]interface{}{
+		"type": "actions",
+		"elements": []map[string]interface{}{
+			services.CreateButton(
+				t("modal.away.open_button"),
+				services.OpenAwayManagementActionID,
+				"",
+				"",
+			),
+		},
+	})
+
 	blocks := []map[string]interface{}{
 		{
 			"type": "section",

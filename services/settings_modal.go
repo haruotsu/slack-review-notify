@@ -65,6 +65,7 @@ type ViewSelectedOption struct {
 //   - SelectedOptions checkboxes / multi_static_select
 //   - SelectedUser    users_select       (resolved user ID, e.g. "U123")
 //   - SelectedUsers   multi_users_select (slice of user IDs)
+//   - SelectedDate    datepicker         (YYYY-MM-DD)
 type ViewStateValue struct {
 	Type            string               `json:"type"`
 	Value           string               `json:"value"`
@@ -72,6 +73,7 @@ type ViewStateValue struct {
 	SelectedOptions []ViewSelectedOption `json:"selected_options,omitempty"`
 	SelectedUser    string               `json:"selected_user,omitempty"`
 	SelectedUsers   []string             `json:"selected_users,omitempty"`
+	SelectedDate    string               `json:"selected_date,omitempty"`
 }
 
 // ModalValidationError carries per-field error messages for views.update / response_action: errors.

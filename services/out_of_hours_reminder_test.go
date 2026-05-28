@@ -26,12 +26,20 @@ func setupOutOfHoursTestDB(t *testing.T) *gorm.DB {
 func TestCheckInReviewTasks_OutOfHoursReminder(t *testing.T) {
 	db := setupOutOfHoursTestDB(t)
 
-	// Create channel configuration
+	// Create channel configuration. BusinessHours/Timezone match the
+	// defaultConfig used by the assertion below so the DB-side branch in
+	// CheckInReviewTasks and the test-side IsWithinBusinessHours call agree
+	// on the same window. Without this, IsWithinBusinessHours(empty config)
+	// returns true (always within hours) for the runtime call but the local
+	// defaultConfig says otherwise, making the assertion flap by time-of-day.
 	config := models.ChannelConfig{
 		SlackChannelID:           "C123456",
 		LabelName:                "needs-review",
 		DefaultMentionID:         "U123456",
 		ReviewerReminderInterval: 30,
+		BusinessHoursStart:       "10:00",
+		BusinessHoursEnd:         "19:00",
+		Timezone:                 "Asia/Tokyo",
 		IsActive:                 true,
 	}
 	db.Create(&config)
