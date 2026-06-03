@@ -344,9 +344,9 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"notify.review_request.without_creator": "%s *There is a PR to review!*\n\n*PR Title*: %s\n*URL*: <%s>",
 
 	"notify.business_hours_morning":  "🌅 *Good morning!* %s\n\n📋 Please review this PR. %s",
-	"notify.reviewer_in_morning":     "\n\n🎯 *Reviewer*: @%s, please take a look!",
+	"notify.reviewer_in_morning":     "\n\n🎯 *Reviewer*: %s, please take a look!",
 	"notify.reminder":                "%s Would love a review! 👀",
-	"notify.out_of_hours_reminder":   "@%s Would love a review! 👀\n\nOutside business hours - next reminder will be sent on the next business day.",
+	"notify.out_of_hours_reminder":   "%s Would love a review! 👀\n\nOutside business hours - next reminder will be sent on the next business day.",
 
 	"notify.reminder_paused.1h":      "Got it! Pausing reminders for 1 hour!",
 	"notify.reminder_paused.2h":      "Got it! Pausing reminders for 2 hours!",

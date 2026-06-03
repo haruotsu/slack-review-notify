@@ -344,9 +344,9 @@ var messagesJa = map[string]string{
 	"notify.review_request.without_creator": "%s *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>",
 
 	"notify.business_hours_morning":  "🌅 *おはようございます！* %s\n\n📋 こちらのPRのレビューをお願いします。%s",
-	"notify.reviewer_in_morning":     "\n\n🎯 *レビュワー*: @%s さん、よろしくお願いします！",
+	"notify.reviewer_in_morning":     "\n\n🎯 *レビュワー*: %s さん、よろしくお願いします！",
 	"notify.reminder":                "%s レビューしてくれたら嬉しいです...👀",
-	"notify.out_of_hours_reminder":   "@%s レビューしてくれたら嬉しいです...👀\n\n営業時間外のため、次回のリマインドは翌営業日に送信します。",
+	"notify.out_of_hours_reminder":   "%s レビューしてくれたら嬉しいです...👀\n\n営業時間外のため、次回のリマインドは翌営業日に送信します。",
 
 	"notify.reminder_paused.1h":      "はい！1時間リマインドをストップします！",
 	"notify.reminder_paused.2h":      "はい！2時間リマインドをストップします！",

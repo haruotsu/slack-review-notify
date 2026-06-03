@@ -454,7 +454,7 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 	// Append reviewer info if a reviewer is assigned
 	var reviewerText string
 	if task.Reviewer != "" {
-		reviewerText = t("notify.reviewer_in_morning", task.Reviewer)
+		reviewerText = t("notify.reviewer_in_morning", formatReviewerMentions(task.Reviewer))
 	}
 
 	message := t("notify.business_hours_morning", mentionText, reviewerText)
@@ -1053,7 +1053,7 @@ func GetNextBusinessDayMorningWithConfig(now time.Time, config *models.ChannelCo
 // SendOutOfHoursReminderMessage sends a reminder message for off-hours
 func SendOutOfHoursReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	t := i18n.L(task.Language)
-	message := t("notify.out_of_hours_reminder", task.Reviewer)
+	message := t("notify.out_of_hours_reminder", formatReviewerMentions(task.Reviewer))
 
 	pauseSelect := CreateStopOnlyPauseReminderSelect(task.ID, "pause_reminder", t("button.stop_reminder"), task.Language)
 	blocks := CreateMessageWithActionBlocks(message, pauseSelect)
