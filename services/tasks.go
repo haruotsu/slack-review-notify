@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -42,48 +43,59 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 			continue // Outside business hours, skip processing
 		}
 
-		// Randomly select reviewers (excluding PR author)
-		excludeIDs := []string{}
-		if task.PRAuthorSlackID != "" {
-			excludeIDs = append(excludeIDs, task.PRAuthorSlackID)
-		}
-		requiredApprovals := config.RequiredApprovals
-		if requiredApprovals <= 0 {
-			requiredApprovals = 1
-		}
-		reviewerIDs := SelectRandomReviewers(db, task.SlackChannel, labelName, requiredApprovals, excludeIDs)
-		reviewerID := ""
-		if len(reviewerIDs) > 0 {
-			reviewerID = reviewerIDs[0]
-		}
-		reviewersStr := strings.Join(reviewerIDs, ",")
-
-		// Send business hours notification to thread
-		if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
-			log.Printf("business hours notification error (task: %s): %v", task.ID, err)
+		if err := activateBusinessHoursTask(db, task, config, labelName); err != nil {
+			log.Printf("activate waiting_business_hours task failed (task: %s): %v", task.ID, err)
 			continue
-		}
-
-		// Update task status
-		task.Status = "in_review"
-		task.Reviewer = reviewerID
-		task.Reviewers = reviewersStr
-		task.UpdatedAt = time.Now()
-
-		if err := db.Save(&task).Error; err != nil {
-			log.Printf("task status update error (task: %s): %v", task.ID, err)
-			continue
-		}
-
-		log.Printf("waiting_business_hours task activated: %s", task.ID)
-
-		// If a reviewer was assigned, also send notification with change button
-		if reviewerID != "" {
-			if err := PostReviewerAssignedMessageWithChangeButton(task); err != nil {
-				log.Printf("reviewer assigned notification error: %v", err)
-			}
 		}
 	}
+}
+
+// activateBusinessHoursTask assigns reviewers to a task that was waiting for business
+// hours, posts the morning notification to the thread, and marks the task as in_review.
+// Reviewers are assigned to the task before the notification is sent so the morning
+// greeting can mention them. The task is persisted as in_review only after the
+// notification succeeds, so a failed notification leaves it to be retried next tick.
+func activateBusinessHoursTask(db *gorm.DB, task models.ReviewTask, config models.ChannelConfig, labelName string) error {
+	// Randomly select reviewers (excluding PR author)
+	excludeIDs := []string{}
+	if task.PRAuthorSlackID != "" {
+		excludeIDs = append(excludeIDs, task.PRAuthorSlackID)
+	}
+	requiredApprovals := config.RequiredApprovals
+	if requiredApprovals <= 0 {
+		requiredApprovals = 1
+	}
+	reviewerIDs := SelectRandomReviewers(db, task.SlackChannel, labelName, requiredApprovals, excludeIDs)
+	reviewerID := ""
+	if len(reviewerIDs) > 0 {
+		reviewerID = reviewerIDs[0]
+	}
+
+	// Assign reviewers before notifying so the morning greeting mentions them
+	task.Reviewer = reviewerID
+	task.Reviewers = strings.Join(reviewerIDs, ",")
+
+	// Send business hours notification to thread (mentions the assigned reviewers)
+	if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
+		return fmt.Errorf("business hours notification error: %w", err)
+	}
+
+	// Mark the task as in_review only after the notification succeeded
+	task.Status = "in_review"
+	task.UpdatedAt = time.Now()
+	if err := db.Save(&task).Error; err != nil {
+		return fmt.Errorf("task status update error: %w", err)
+	}
+
+	log.Printf("waiting_business_hours task activated: %s", task.ID)
+
+	// If a reviewer was assigned, also send notification with change button
+	if reviewerID != "" {
+		if err := PostReviewerAssignedMessageWithChangeButton(task); err != nil {
+			log.Printf("reviewer assigned notification error: %v", err)
+		}
+	}
+	return nil
 }
 
 // CheckPendingReReviewNotifications sends deferred re-review notifications when business hours begin
