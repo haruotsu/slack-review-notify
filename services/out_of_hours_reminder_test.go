@@ -1,10 +1,12 @@
 package services
 
 import (
+	"os"
 	"slack-review-notify/models"
 	"testing"
 	"time"
 
+	"github.com/h2non/gock"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -57,6 +59,27 @@ func TestCheckInReviewTasks_OutOfHoursReminder(t *testing.T) {
 		UpdatedAt:    oldTime,
 	}
 	db.Create(&task)
+
+	// Stub the Slack API so the reminder send does not depend on real network
+	// reachability. Both the in-hours and out-of-hours reminder paths post to
+	// chat.postMessage; without this the test flakes (or hangs on a dial timeout)
+	// when the CI runner cannot reach slack.com.
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+	// The in-hours reminder path also checks whether the channel is archived.
+	gock.New("https://slack.com").
+		Get("/api/conversations.info").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true, "channel": map[string]interface{}{"is_archived": false}})
 
 	// Execute CheckInReviewTasks
 	CheckInReviewTasks(db)
