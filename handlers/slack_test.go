@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"slack-review-notify/models"
 	"slack-review-notify/services"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/h2non/gock"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -240,6 +242,20 @@ func TestHandleSlackAction_PauseReminder_Hours(t *testing.T) {
 func TestHandleSlackAction_PauseReminderInitial(t *testing.T) {
 	// Enable test mode (skip signature verification)
 	services.IsTestMode = true
+
+	// Stub the Slack API: the pause confirmation message (SendReminderPausedMessage)
+	// posts to chat.postMessage and does not honor test mode, so without this stub
+	// the test depends on real network reachability and flakes on a dial timeout.
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
 
 	// Create test DB
 	db := setupTestDB(t)
