@@ -71,7 +71,9 @@ func activateBusinessHoursTask(db *gorm.DB, task models.ReviewTask, config model
 		reviewerID = reviewerIDs[0]
 	}
 
-	// Assign reviewers before notifying so the morning greeting mentions them
+	// Assign reviewers before notifying so the morning greeting mentions them. The
+	// morning notification itself announces the reviewers and carries the change/pause
+	// controls, so no separate auto-assigned message is sent.
 	task.Reviewer = reviewerID
 	task.Reviewers = strings.Join(reviewerIDs, ",")
 
@@ -89,12 +91,6 @@ func activateBusinessHoursTask(db *gorm.DB, task models.ReviewTask, config model
 
 	log.Printf("waiting_business_hours task activated: %s", task.ID)
 
-	// If a reviewer was assigned, also send notification with change button
-	if reviewerID != "" {
-		if err := PostReviewerAssignedMessageWithChangeButton(task); err != nil {
-			log.Printf("reviewer assigned notification error: %v", err)
-		}
-	}
 	return nil
 }
 

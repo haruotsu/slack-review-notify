@@ -451,15 +451,25 @@ func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID str
 	t := i18n.L(task.Language)
 	mentionText := buildMentionText(mentionID)
 
-	// Append reviewer info if a reviewer is assigned
+	// Mention every assigned reviewer in the morning greeting. The reviewer assignment
+	// and its change/pause controls are merged into this single message so reviewers
+	// are not announced twice in the thread.
+	reviewerMentions := formatReviewerCSVMentions(task.Reviewers, task.Reviewer)
 	var reviewerText string
-	if task.Reviewer != "" {
-		reviewerText = t("notify.reviewer_in_morning", formatReviewerMentions(task.Reviewer))
+	if reviewerMentions != "" {
+		reviewerText = t("notify.reviewer_in_morning", reviewerMentions)
 	}
 
 	message := t("notify.business_hours_morning", mentionText, reviewerText)
 
-	blocks := CreateMessageBlocks(message)
+	var blocks []map[string]interface{}
+	if reviewerMentions != "" {
+		changeButton := CreateChangeReviewerButton(task.ID, task.Language)
+		pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder_initial", t("button.stop_reminder"), task.Language)
+		blocks = CreateMessageWithActionsBlocks(message, changeButton, pauseSelect)
+	} else {
+		blocks = CreateMessageBlocks(message)
+	}
 
 	body := map[string]interface{}{
 		"channel":   task.SlackChannel,
@@ -905,18 +915,7 @@ func IsChannelArchived(channelID string) (bool, error) {
 // PostReviewerAssignedMessageWithChangeButton displays the auto-assigned reviewers and shows a change button
 func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
 	t := i18n.L(task.Language)
-	var message string
-	if task.Reviewers != "" {
-		var mentions []string
-		for _, id := range strings.Split(task.Reviewers, ",") {
-			if trimmed := strings.TrimSpace(id); trimmed != "" {
-				mentions = append(mentions, fmt.Sprintf("<@%s>", trimmed))
-			}
-		}
-		message = t("notify.reviewer_auto_assigned", strings.Join(mentions, " "))
-	} else {
-		message = t("notify.reviewer_auto_assigned", fmt.Sprintf("<@%s>", task.Reviewer))
-	}
+	message := t("notify.reviewer_auto_assigned", formatReviewerCSVMentions(task.Reviewers, task.Reviewer))
 
 	changeButton := CreateChangeReviewerButton(task.ID, task.Language)
 	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder_initial", t("button.stop_reminder"), task.Language)
@@ -947,6 +946,21 @@ func PostReviewerAssignedMessageWithChangeButton(task models.ReviewTask) error {
 	}()
 
 	return nil
+}
+
+// formatReviewerCSVMentions builds Slack mentions from a comma-separated reviewer list,
+// falling back to a single reviewer ID when the list is empty.
+func formatReviewerCSVMentions(reviewersCSV, fallbackReviewer string) string {
+	var mentions []string
+	for _, id := range strings.Split(reviewersCSV, ",") {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			mentions = append(mentions, fmt.Sprintf("<@%s>", trimmed))
+		}
+	}
+	if len(mentions) == 0 && fallbackReviewer != "" {
+		mentions = append(mentions, fmt.Sprintf("<@%s>", fallbackReviewer))
+	}
+	return strings.Join(mentions, " ")
 }
 
 // formatReviewerMentions converts multiple reviewer IDs into Slack mention format

@@ -11,10 +11,11 @@ import (
 )
 
 // When a task waiting for business hours is activated, the reviewer is selected at
-// activation time. The morning greeting must mention that freshly-selected reviewer,
-// which only works if the reviewer is assigned to the task before the notification is
-// sent. This guards against the notification being posted before the assignment.
-func TestActivateBusinessHoursTask_MorningGreetingMentionsAssignedReviewer(t *testing.T) {
+// activation time and announced in a single morning message. Previously the reviewer
+// was announced twice: once in the morning greeting and again in a follow-up
+// "auto-assigned" message. The two are now merged, so activation must send exactly one
+// chat.postMessage that mentions the reviewer and carries the change/pause controls.
+func TestActivateBusinessHoursTask_SendsSingleMergedReviewerMessage(t *testing.T) {
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
 	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
@@ -50,28 +51,59 @@ func TestActivateBusinessHoursTask_MorningGreetingMentionsAssignedReviewer(t *te
 	}
 	db.Create(&task)
 
-	defer gock.Off()
+	defer gock.OffAll()
+	gock.CleanUnmatchedRequest()
 
-	// The morning greeting ("おはよう") must contain the assigned reviewer mention.
+	// The single morning message must mention the reviewer and carry the change
+	// reviewer button and the reminder pause select.
 	// json.Marshal escapes "<@UREV1>" to "<@UREV1>" in the body.
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
-		BodyString(`おはよう[\s\S]*\\u003c@UREV1\\u003e`).
-		Reply(200).
-		JSON(map[string]interface{}{"ok": true})
-
-	// The follow-up "reviewer assigned + change button" message.
-	gock.New("https://slack.com").
-		Post("/api/chat.postMessage").
+		BodyString(`おはよう[\s\S]*\\u003c@UREV1\\u003e[\s\S]*change_reviewer[\s\S]*pause_reminder_initial`).
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
 	err := activateBusinessHoursTask(db, task, config, "needs-review")
 	assert.NoError(t, err)
-	assert.True(t, gock.IsDone(), "expected the morning greeting to mention <@UREV1>")
+	assert.True(t, gock.IsDone(), "expected one merged morning message with reviewer mention and controls")
+	assert.False(t, gock.HasUnmatchedRequest(), "expected no second reviewer-assigned message")
 
 	var updated models.ReviewTask
 	db.First(&updated, "id = ?", "task-activation")
 	assert.Equal(t, "in_review", updated.Status)
 	assert.Equal(t, "UREV1", updated.Reviewer)
+}
+
+// The merged morning message mentions every assigned reviewer (not just the first) and
+// includes the change reviewer button and the reminder pause select.
+func TestPostBusinessHoursNotificationToThread_MentionsAllReviewersWithControls(t *testing.T) {
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.OffAll()
+	gock.CleanUnmatchedRequest()
+
+	// Reviewers are serialized in list order, so the mentions and controls appear in a
+	// deterministic sequence in the request body.
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		BodyString(`\\u003c@UREV1\\u003e \\u003c@UREV2\\u003e[\s\S]*change_reviewer[\s\S]*pause_reminder_initial`).
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	task := models.ReviewTask{
+		ID:           "task-morning-multi",
+		SlackTS:      "1234.5678",
+		SlackChannel: "C12345",
+		Reviewer:     "UREV1",
+		Reviewers:    "UREV1,UREV2",
+		Status:       "in_review",
+		Language:     "ja",
+	}
+
+	err := PostBusinessHoursNotificationToThread(task, "UDEFAULT")
+	assert.NoError(t, err)
+	assert.True(t, gock.IsDone(), "expected a single message mentioning all reviewers with controls")
+	assert.False(t, gock.HasUnmatchedRequest())
 }
