@@ -100,7 +100,7 @@ func MigrateNormalizeSlackUserIDs(db *gorm.DB) error {
 			// pair. Drop the legacy row instead so the "one row per (user, period)"
 			// invariant survives. NULL-aware so indefinite periods match correctly.
 			var dup int64
-			dupQuery := matchPeriod(
+			dupQuery := MatchPeriod(
 				tx.Unscoped().Model(&ReviewerAvailability{}).Where("id <> ? AND slack_user_id = ?", r.ID, cleanID),
 				r.AwayFrom, r.AwayUntil,
 			)
@@ -126,10 +126,11 @@ func MigrateNormalizeSlackUserIDs(db *gorm.DB) error {
 	})
 }
 
-// matchPeriod narrows a query to rows whose away_from/away_until exactly match
+// MatchPeriod narrows a query to rows whose away_from/away_until exactly match
 // the given bounds, treating nil as a NULL column (so an indefinite period
-// matches only indefinite rows).
-func matchPeriod(q *gorm.DB, from, until *time.Time) *gorm.DB {
+// matches only indefinite rows). Shared by the set-away/unset-away handlers and
+// the normalization migration so period matching stays consistent everywhere.
+func MatchPeriod(q *gorm.DB, from, until *time.Time) *gorm.DB {
 	if from == nil {
 		q = q.Where("away_from IS NULL")
 	} else {

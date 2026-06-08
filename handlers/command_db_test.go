@@ -695,6 +695,53 @@ func TestUnsetAway_WildcardDoesNotMatchLegacy(t *testing.T) {
 	assert.Equal(t, int64(1), count, "wildcard input must not delete another user's legacy row")
 }
 
+// TestUnsetAway_LegacyPipeFormat_SpecificPeriod guards the trickiest path: a
+// legacy "ID|displayname" record removed by unset-away WITH a date. The query
+// combines "(exact OR LIKE) AND period", so the period predicate must apply to
+// the LIKE branch too — only the matching period of the legacy row is removed,
+// and a non-matching legacy period for the same user survives.
+func TestUnsetAway_LegacyPipeFormat_SpecificPeriod(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	// Seed two periods via set-away so the stored away_from/away_until exactly
+	// match what the parser produces, then rewrite the id to the legacy pipe
+	// format an older cleanUserID would have stored.
+	send("set-away <@UPIPEP> on 2099-06-01")
+	send("set-away <@UPIPEP> on 2099-06-10")
+	assert.NoError(t, db.Model(&models.ReviewerAvailability{}).
+		Where("slack_user_id = ?", "UPIPEP").
+		Update("slack_user_id", "UPIPEP|username").Error)
+
+	// Remove only the 2099-06-01 period of the legacy-format records.
+	w := send("unset-away <@UPIPEP|username> on 2099-06-01")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇を解除しました")
+
+	var records []models.ReviewerAvailability
+	db.Where("slack_user_id LIKE ?", "UPIPEP%").Find(&records)
+	assert.Len(t, records, 1, "only the matching legacy period should be removed")
+	if len(records) == 1 && assert.NotNil(t, records[0].AwayFrom) {
+		assert.Equal(t, "2099-06-10", records[0].AwayFrom.Format("2006-01-02"),
+			"the non-matching legacy period must remain")
+	}
+}
+
 func TestShowAvailability_Integration(t *testing.T) {
 	db := setupCommandIntegrationTestDB(t)
 
