@@ -1310,22 +1310,6 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 	return p, ""
 }
 
-// applyPeriodMatch narrows a query to records whose away_from/away_until exactly match the period.
-// nil bounds match NULL columns, so an indefinite period matches only indefinite records.
-func applyPeriodMatch(q *gorm.DB, from, until *time.Time) *gorm.DB {
-	if from == nil {
-		q = q.Where("away_from IS NULL")
-	} else {
-		q = q.Where("away_from = ?", from)
-	}
-	if until == nil {
-		q = q.Where("away_until IS NULL")
-	} else {
-		q = q.Where("away_until = ?", until)
-	}
-	return q
-}
-
 // setAway marks a user as away/on leave
 func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang string) {
 	t := i18n.L(lang)
@@ -1366,7 +1350,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 	// plus a sudden sick day), so each distinct period is stored as its own record.
 	// To stay idempotent, update the reason when an identical period already exists.
 	var existing models.ReviewerAvailability
-	matched := applyPeriodMatch(db.Where("slack_user_id = ?", slackUserID), awayFrom, awayUntil)
+	matched := models.MatchPeriod(db.Where("slack_user_id = ?", slackUserID), awayFrom, awayUntil)
 	err := matched.First(&existing).Error
 	switch {
 	case err == nil:
@@ -1439,7 +1423,20 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 		return
 	}
 
+	// Always match the clean ID exactly. Additionally catch legacy records stored
+	// as "ID|displayname" (written by an older cleanUserID before the pipe-strip
+	// fix) via a LIKE prefix — but ONLY when slackUserID is a well-formed Slack
+	// id. A well-formed id ([UW][0-9A-Z]+) cannot contain LIKE metacharacters
+	// (% or _), so gating here prevents a caller-supplied "%"/"_" from widening
+	// this irreversible hard-delete to other users' legacy rows. Legacy pipe
+	// variants only ever exist for real Slack ids, so the gate loses no match.
 	query := db.Unscoped().Where("slack_user_id = ?", slackUserID)
+	if services.LooksLikeResolvedSlackUserID(slackUserID) {
+		query = db.Unscoped().Where(
+			"slack_user_id = ? OR slack_user_id LIKE ?",
+			slackUserID, slackUserID+"|%",
+		)
+	}
 
 	// If a date is specified, delete only the matching period; otherwise delete all.
 	if len(parts) > 1 {
@@ -1454,7 +1451,7 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 		// Extra tokens without a date keyword (e.g. a stray "reason") must not
 		// silently restrict the match to indefinite records.
 		if period.from != nil || period.until != nil {
-			query = applyPeriodMatch(query, period.from, period.until)
+			query = models.MatchPeriod(query, period.from, period.until)
 		}
 	}
 

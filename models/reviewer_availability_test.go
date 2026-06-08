@@ -77,6 +77,159 @@ func TestMigrateReviewerAvailabilityIndex_LegacyDB(t *testing.T) {
 	}
 }
 
+// TestMigrateNormalizeSlackUserIDs verifies that legacy "ID|displayname" values
+// are stripped to the bare ID, and that records with clean IDs are untouched.
+func TestMigrateNormalizeSlackUserIDs(t *testing.T) {
+	dbPath := t.TempDir() + "/normalize.db"
+	db := openSilent(t, dbPath)
+	if err := db.AutoMigrate(&ReviewerAvailability{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+
+	// Insert one legacy record and one already-clean record.
+	legacy := ReviewerAvailability{ID: uuid.NewString(), SlackUserID: "UABC123|username", Reason: "old"}
+	clean := ReviewerAvailability{ID: uuid.NewString(), SlackUserID: "UDEF456", Reason: "new"}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("create legacy: %v", err)
+	}
+	if err := db.Create(&clean).Error; err != nil {
+		t.Fatalf("create clean: %v", err)
+	}
+
+	if err := MigrateNormalizeSlackUserIDs(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	var got ReviewerAvailability
+	if err := db.First(&got, "id = ?", legacy.ID).Error; err != nil {
+		t.Fatalf("fetch legacy: %v", err)
+	}
+	if got.SlackUserID != "UABC123" {
+		t.Errorf("legacy record: want SlackUserID %q, got %q", "UABC123", got.SlackUserID)
+	}
+
+	var gotClean ReviewerAvailability
+	if err := db.First(&gotClean, "id = ?", clean.ID).Error; err != nil {
+		t.Fatalf("fetch clean: %v", err)
+	}
+	if gotClean.SlackUserID != "UDEF456" {
+		t.Errorf("clean record should be unchanged: want %q, got %q", "UDEF456", gotClean.SlackUserID)
+	}
+}
+
+// TestMigrateNormalizeSlackUserIDs_Dedup verifies that when a user already has
+// a clean-ID record for the same period, normalizing the legacy "ID|name" row
+// drops it instead of creating a duplicate (user, period) pair.
+func TestMigrateNormalizeSlackUserIDs_Dedup(t *testing.T) {
+	dbPath := t.TempDir() + "/dedup.db"
+	db := openSilent(t, dbPath)
+	if err := db.AutoMigrate(&ReviewerAvailability{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+
+	// Same user, same (indefinite) period: one legacy row and one clean row.
+	legacy := ReviewerAvailability{ID: uuid.NewString(), SlackUserID: "UDUP|username", Reason: "legacy"}
+	clean := ReviewerAvailability{ID: uuid.NewString(), SlackUserID: "UDUP", Reason: "clean"}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("create legacy: %v", err)
+	}
+	if err := db.Create(&clean).Error; err != nil {
+		t.Fatalf("create clean: %v", err)
+	}
+
+	if err := MigrateNormalizeSlackUserIDs(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	// Exactly one row must remain for UDUP — the legacy row was deduped away,
+	// not normalized into a second identical (user, period) row.
+	var count int64
+	db.Model(&ReviewerAvailability{}).Where("slack_user_id = ?", "UDUP").Count(&count)
+	if count != 1 {
+		t.Fatalf("expected 1 row after dedup, got %d", count)
+	}
+	// The surviving row is the pre-existing clean one.
+	var got ReviewerAvailability
+	if err := db.First(&got, "slack_user_id = ?", "UDUP").Error; err != nil {
+		t.Fatalf("fetch survivor: %v", err)
+	}
+	if got.ID != clean.ID {
+		t.Errorf("dedup should keep the existing clean row %q, kept %q", clean.ID, got.ID)
+	}
+}
+
+// TestMigrateNormalizeSlackUserIDs_Idempotent confirms the normalization is a
+// no-op when re-run (it runs on every startup), matching the index migration's
+// idempotency guarantee.
+func TestMigrateNormalizeSlackUserIDs_Idempotent(t *testing.T) {
+	dbPath := t.TempDir() + "/normalize-idem.db"
+	db := openSilent(t, dbPath)
+	if err := db.AutoMigrate(&ReviewerAvailability{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+
+	legacy := ReviewerAvailability{ID: uuid.NewString(), SlackUserID: "UIDEM|username"}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("create legacy: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if err := MigrateNormalizeSlackUserIDs(db); err != nil {
+			t.Fatalf("migrate (run %d): %v", i, err)
+		}
+		var got ReviewerAvailability
+		if err := db.First(&got, "id = ?", legacy.ID).Error; err != nil {
+			t.Fatalf("fetch after run %d: %v", i, err)
+		}
+		if got.SlackUserID != "UIDEM" {
+			t.Errorf("run %d: want %q, got %q", i, "UIDEM", got.SlackUserID)
+		}
+	}
+}
+
+// TestMigrateNormalizeSlackUserIDs_MultipleAndMultiPipe verifies that every
+// legacy row in a single pass is normalized, and that a value with multiple
+// pipes is truncated at the first pipe.
+func TestMigrateNormalizeSlackUserIDs_MultipleAndMultiPipe(t *testing.T) {
+	dbPath := t.TempDir() + "/normalize-multi.db"
+	db := openSilent(t, dbPath)
+	if err := db.AutoMigrate(&ReviewerAvailability{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+
+	rows := map[string]string{ // id -> legacy slack_user_id
+		uuid.NewString(): "UAAA|alice",
+		uuid.NewString(): "UBBB|bob",
+		uuid.NewString(): "UCCC|name|extra", // multiple pipes -> truncate at first
+	}
+	want := map[string]string{ // same id -> expected normalized id
+		"UAAA|alice":      "UAAA",
+		"UBBB|bob":        "UBBB",
+		"UCCC|name|extra": "UCCC",
+	}
+	ids := map[string]string{} // id -> original legacy value
+	for id, sid := range rows {
+		if err := db.Create(&ReviewerAvailability{ID: id, SlackUserID: sid}).Error; err != nil {
+			t.Fatalf("create %s: %v", sid, err)
+		}
+		ids[id] = sid
+	}
+
+	if err := MigrateNormalizeSlackUserIDs(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	for id, original := range ids {
+		var got ReviewerAvailability
+		if err := db.First(&got, "id = ?", id).Error; err != nil {
+			t.Fatalf("fetch %s: %v", id, err)
+		}
+		if got.SlackUserID != want[original] {
+			t.Errorf("%q: want %q, got %q", original, want[original], got.SlackUserID)
+		}
+	}
+}
+
 // TestMigrateReviewerAvailabilityIndex_Idempotent confirms the migration is a
 // no-op on a fresh DB (already non-unique) and safe to run repeatedly.
 func TestMigrateReviewerAvailabilityIndex_Idempotent(t *testing.T) {

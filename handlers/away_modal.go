@@ -112,7 +112,7 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 	// updates Reason only; a new period inserts a fresh row.
 	now := time.Now()
 	var existing models.ReviewerAvailability
-	query := applyPeriodMatch(db.Where("slack_user_id = ?", form.SlackUserID), form.AwayFrom, form.AwayUntil)
+	query := models.MatchPeriod(db.Where("slack_user_id = ?", form.SlackUserID), form.AwayFrom, form.AwayUntil)
 	err = query.First(&existing).Error
 	switch {
 	case err == nil:
