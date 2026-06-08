@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"slack-review-notify/services"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -677,4 +679,111 @@ func TestE2E_MultipleAwayPeriods_ExcludedFromReviewerAssignment(t *testing.T) {
 	var task models.ReviewTask
 	err := db.Where("pr_number = ? AND slack_channel = ?", 101, "C_E2E_BH").First(&task).Error
 	assert.NoError(t, err, "Review task should be created")
+}
+
+// sendSlashCommand posts a /slack-review-notify slash command to the test server
+// and returns the response body.
+func sendSlashCommand(t *testing.T, ts *httptest.Server, channelID, text string) string {
+	t.Helper()
+	form := url.Values{}
+	form.Set("command", "/slack-review-notify")
+	form.Set("text", text)
+	form.Set("channel_id", channelID)
+	form.Set("user_id", "U_E2E_ADMIN")
+	req, err := http.NewRequest("POST", ts.URL+"/slack/command", strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return string(body)
+}
+
+// setupE2EAppWithCommands returns a test server that includes the slash command handler.
+func setupE2EAppWithCommands(t *testing.T) (*gorm.DB, *httptest.Server) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.ReviewTask{}, &models.ChannelConfig{}, &models.UserMapping{}, &models.ReviewerAvailability{}))
+
+	gin.SetMode(gin.TestMode)
+	r := gin.Default()
+	r.POST("/webhook", handlers.HandleGitHubWebhook(db))
+	r.POST("/slack/actions", handlers.HandleSlackAction(db))
+	r.POST("/slack/command", handlers.HandleSlackCommand(db))
+
+	ts := httptest.NewServer(r)
+	return db, ts
+}
+
+// TestE2E_UnsetAway_LegacyUserID verifies that a ReviewerAvailability record
+// stored with the legacy "ID|displayname" slack_user_id format (written by an
+// older cleanUserID) can be fully removed via the unset-away slash command.
+// This exercises the LIKE fallback added to unsetAway in PR #108.
+func TestE2E_UnsetAway_LegacyUserID(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	db, ts := setupE2EAppWithCommands(t)
+	defer ts.Close()
+
+	// Insert a legacy record with "ID|displayname" format directly into the DB,
+	// simulating a record created before cleanUserID stripped the pipe suffix.
+	legacy := models.ReviewerAvailability{
+		ID:          uuid.NewString(),
+		SlackUserID: "ULEGACY|username",
+		Reason:      "on leave",
+	}
+	require.NoError(t, db.Create(&legacy).Error)
+
+	// Verify the record exists before the command.
+	var before int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "ULEGACY|username").Count(&before)
+	require.Equal(t, int64(1), before, "legacy record must exist before unset-away")
+
+	// Run unset-away with the clean ID (what cleanUserID returns from <@ULEGACY|username>).
+	body := sendSlashCommand(t, ts, "C_E2E_LEGACY", "unset-away <@ULEGACY|username>")
+	assert.Contains(t, body, "解除", "unset-away should report success (contains 解除)")
+
+	// The legacy record must now be gone (hard-deleted via LIKE fallback).
+	var after int64
+	db.Unscoped().Model(&models.ReviewerAvailability{}).
+		Where("slack_user_id = ? OR slack_user_id LIKE ?", "ULEGACY|username", "ULEGACY|%").
+		Count(&after)
+	assert.Equal(t, int64(0), after, "legacy record must be fully removed after unset-away")
+}
+
+// TestE2E_MigrateNormalizeSlackUserIDs verifies the full path: the startup
+// migration normalizes a legacy "ID|displayname" record, and afterwards the
+// record is reachable through the real slash-command path by its bare id —
+// proving normalization makes set-away/unset-away's exact-match work end to end.
+func TestE2E_MigrateNormalizeSlackUserIDs(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	db, ts := setupE2EAppWithCommands(t)
+	defer ts.Close()
+
+	// Seed a legacy record (pipe suffix) directly, as an old binary would have.
+	legacy := models.ReviewerAvailability{ID: uuid.NewString(), SlackUserID: "UMIG|testuser"}
+	require.NoError(t, db.Create(&legacy).Error)
+
+	// Run the migration (same call as main.go on startup).
+	require.NoError(t, models.MigrateNormalizeSlackUserIDs(db))
+
+	// The legacy record is now stored under the bare id.
+	var gotLegacy models.ReviewerAvailability
+	require.NoError(t, db.First(&gotLegacy, "id = ?", legacy.ID).Error)
+	assert.Equal(t, "UMIG", gotLegacy.SlackUserID, "pipe suffix must be stripped by the migration")
+
+	// End-to-end: unset-away with the bare id now matches via the EXACT path
+	// (no LIKE fallback needed), proving the migration repaired the record so
+	// the normal slash-command flow finds it.
+	body := sendSlashCommand(t, ts, "C_E2E_MIG", "unset-away <@UMIG>")
+	assert.Contains(t, body, "解除", "unset-away should remove the normalized record")
+
+	var count int64
+	db.Unscoped().Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UMIG").Count(&count)
+	assert.Equal(t, int64(0), count, "normalized record must be removed via the slash-command path")
 }
