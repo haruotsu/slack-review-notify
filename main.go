@@ -41,6 +41,12 @@ func main() {
 		log.Fatal("fail to migrate reviewer availability index:", err)
 	}
 
+	// Normalize legacy slack_user_id values stored as "ID|displayname" by
+	// an older version of cleanUserID that did not strip the pipe suffix.
+	if err := models.MigrateNormalizeSlackUserIDs(db); err != nil {
+		log.Fatal("fail to normalize slack_user_id values:", err)
+	}
+
 	// Surface user_mappings rows whose slack_user_id is not a resolved U-id.
 	// These date from before the modal picker landed and silently leak the PR
 	// author into the reviewer candidate pool. The operator can re-register

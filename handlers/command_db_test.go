@@ -621,6 +621,80 @@ func TestUnsetAway_Integration(t *testing.T) {
 	assert.Contains(t, w3.Body.String(), "休暇に設定されていません")
 }
 
+// TestUnsetAway_LegacyPipeFormat verifies that a record stored with the legacy
+// "ID|displayname" slack_user_id (written by an older cleanUserID before the
+// pipe-strip fix) is removed by unset-away via the LIKE fallback, exercised
+// through the slash-command handler rather than only the E2E layer.
+func TestUnsetAway_LegacyPipeFormat(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	// Seed a legacy-format record directly.
+	require := db.Create(&models.ReviewerAvailability{
+		ID:          "rec-legacy-pipe",
+		SlackUserID: "ULEGACY|username",
+		Reason:      "old",
+	})
+	assert.NoError(t, require.Error)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	// cleanUserID(<@ULEGACY|username>) -> "ULEGACY", a well-formed id, so the
+	// LIKE fallback applies and matches the legacy "ULEGACY|username" row.
+	req := setupHTTPRequest(t, "unset-away <@ULEGACY|username>", "C12345")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇を解除しました")
+
+	var count int64
+	db.Unscoped().Model(&models.ReviewerAvailability{}).
+		Where("slack_user_id LIKE ?", "ULEGACY%").Count(&count)
+	assert.Equal(t, int64(0), count, "legacy record must be fully removed")
+}
+
+// TestUnsetAway_WildcardDoesNotMatchLegacy guards the LIKE-escaping fix: a
+// caller-supplied LIKE metacharacter ("%") must NOT widen the delete to other
+// users' legacy rows. cleanUserID("U%") is not a well-formed Slack id, so the
+// LIKE fallback is skipped and only an exact match is attempted.
+func TestUnsetAway_WildcardDoesNotMatchLegacy(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	// A legacy row that a naive `LIKE 'U%|%'` would have matched.
+	res := db.Create(&models.ReviewerAvailability{
+		ID:          "rec-victim",
+		SlackUserID: "UVICTIM|username",
+		Reason:      "should survive",
+	})
+	assert.NoError(t, res.Error)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	// "U%" must not delete UVICTIM's legacy record.
+	req := setupHTTPRequest(t, "unset-away U%", "C12345")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, 200, w.Code)
+
+	var count int64
+	db.Unscoped().Model(&models.ReviewerAvailability{}).
+		Where("slack_user_id = ?", "UVICTIM|username").Count(&count)
+	assert.Equal(t, int64(1), count, "wildcard input must not delete another user's legacy row")
+}
+
 func TestShowAvailability_Integration(t *testing.T) {
 	db := setupCommandIntegrationTestDB(t)
 

@@ -1439,7 +1439,20 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 		return
 	}
 
+	// Always match the clean ID exactly. Additionally catch legacy records stored
+	// as "ID|displayname" (written by an older cleanUserID before the pipe-strip
+	// fix) via a LIKE prefix — but ONLY when slackUserID is a well-formed Slack
+	// id. A well-formed id ([UW][0-9A-Z]+) cannot contain LIKE metacharacters
+	// (% or _), so gating here prevents a caller-supplied "%"/"_" from widening
+	// this irreversible hard-delete to other users' legacy rows. Legacy pipe
+	// variants only ever exist for real Slack ids, so the gate loses no match.
 	query := db.Unscoped().Where("slack_user_id = ?", slackUserID)
+	if services.LooksLikeResolvedSlackUserID(slackUserID) {
+		query = db.Unscoped().Where(
+			"slack_user_id = ? OR slack_user_id LIKE ?",
+			slackUserID, slackUserID+"|%",
+		)
+	}
 
 	// If a date is specified, delete only the matching period; otherwise delete all.
 	if len(parts) > 1 {
