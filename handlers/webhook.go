@@ -528,6 +528,14 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 			log.Printf("task reactivated for re-review: id=%s, repo=%s, pr=%d", latestTask.ID, repoFullName, pr.GetNumber())
 		}
 
+		// sender と reviewer が同一表示の場合、「X さんが X に再レビューを依頼しました」という
+		// 無意味な通知になるため、状態復帰だけ行い通知（即時/遅延）はスキップする
+		if senderMention == reviewerMention {
+			log.Printf("skip re-review notification: sender and reviewer are the same (%s): task=%s",
+				senderMention, latestTask.ID)
+			continue
+		}
+
 		// Check business hours before sending re-review notification
 		var config models.ChannelConfig
 		labelName := latestTask.LabelName

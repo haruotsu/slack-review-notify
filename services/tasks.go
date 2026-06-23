@@ -132,6 +132,11 @@ func CheckPendingReReviewNotifications(db *gorm.DB) {
 		reviewers := strings.Split(task.PendingReReviewReviewer, ",")
 		t := i18n.L(task.Language)
 		for idx := 0; idx < len(senders) && idx < len(reviewers); idx++ {
+			// sender と reviewer が同一表示のペアは無意味な通知になるためスキップ
+			// （本変更前に蓄積された pending データへの防御）
+			if senders[idx] == reviewers[idx] {
+				continue
+			}
 			message := t("notify.re_review_requested", senders[idx], reviewers[idx])
 			if err := PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
 				log.Printf("deferred re-review notification error (task: %s, idx: %d): %v", task.ID, idx, err)
