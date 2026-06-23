@@ -2144,3 +2144,60 @@ func TestHandleReviewRequestedEvent_WithinBusinessHours_SendsImmediately(t *test
 	assert.False(t, updatedTask.PendingReReviewNotify, "Notification should be sent immediately without business hours config")
 	assert.True(t, gock.IsDone(), "Slack notification should have been sent")
 }
+
+func TestHandleReviewRequestedEvent_SkipsWhenSenderEqualsReviewer(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	// Register a Slack mock; if it stays unconsumed (gock.IsDone() == false),
+	// no re-review notification was posted.
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	// Completed task: status revert must still happen even when the notification is skipped
+	task := models.ReviewTask{
+		ID:           "rereview-same-user-task",
+		PRURL:        "https://github.com/owner/repo/pull/600",
+		Repo:         "owner/repo",
+		PRNumber:     600,
+		Title:        "Test PR",
+		SlackTS:      "1234.6000",
+		SlackChannel: "C_NO_CONFIG",
+		Status:       "completed",
+		LabelName:    "needs-review",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	db.Create(&task)
+
+	// sender と requested_reviewer が同一ログイン → 同一メンションに解決される
+	payload := `{
+		"action": "review_requested",
+		"pull_request": {"number": 600, "html_url": "https://github.com/owner/repo/pull/600"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"},
+		"requested_reviewer": {"login": "author"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// 通知はスキップされるが、状態復帰は従来通り行われる
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "rereview-same-user-task").First(&updatedTask)
+	assert.Equal(t, "in_review", updatedTask.Status, "Completed task should still be reverted to in_review")
+	assert.False(t, updatedTask.PendingReReviewNotify, "Should not defer when sender equals reviewer")
+	assert.False(t, gock.IsDone(), "No re-review notification should be sent when sender equals reviewer")
+}

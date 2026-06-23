@@ -278,6 +278,71 @@ func TestCheckPendingReReviewNotifications_MultipleNotifications(t *testing.T) {
 	assert.True(t, gock.IsDone(), "Both Slack notifications should have been sent")
 }
 
+func TestCheckPendingReReviewNotifications_SkipsSamePair(t *testing.T) {
+	now := time.Now()
+	loc, _ := time.LoadLocation("Asia/Tokyo")
+	nowJST := now.In(loc)
+	if nowJST.Weekday() == time.Saturday || nowJST.Weekday() == time.Sunday {
+		t.Skip("This test requires running on a weekday")
+	}
+
+	db := setupTestDB(t)
+	IsTestMode = true
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+	defer gock.Off()
+	// Register 2 mocks but expect only 1 to be consumed (the differing pair).
+	// The identical pair must be skipped, leaving one mock pending → gock.IsDone() == false.
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	config := models.ChannelConfig{
+		ID:                 "config-same-pair-rr",
+		SlackChannelID:     "C_SAME_PAIR_RR",
+		LabelName:          "needs-review",
+		IsActive:           true,
+		BusinessHoursStart: "00:00",
+		BusinessHoursEnd:   "23:59",
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+	}
+	db.Create(&config)
+
+	// First pair is identical (should be skipped), second pair differs (should be sent)
+	task := models.ReviewTask{
+		ID:                      "same-pair-rr-task",
+		PRURL:                   "https://github.com/owner/repo/pull/606",
+		Repo:                    "owner/repo",
+		PRNumber:                606,
+		Title:                   "Test PR",
+		SlackTS:                 "1234.2222",
+		SlackChannel:            "C_SAME_PAIR_RR",
+		Status:                  "in_review",
+		LabelName:               "needs-review",
+		PendingReReviewNotify:   true,
+		PendingReReviewSender:   "<@USAME>,<@USENDER>",
+		PendingReReviewReviewer: "<@USAME>,<@UREVIEWER>",
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+	}
+	db.Create(&task)
+
+	CheckPendingReReviewNotifications(db)
+
+	var updatedTask models.ReviewTask
+	db.Where("id = ?", "same-pair-rr-task").First(&updatedTask)
+	assert.False(t, updatedTask.PendingReReviewNotify, "Pending flag should be cleared")
+	assert.False(t, gock.IsDone(), "Identical sender/reviewer pair should be skipped, only one notification sent")
+}
+
 func TestClearPendingReReviewFlags_CASMiss(t *testing.T) {
 	db := setupTestDB(t)
 	IsTestMode = true
