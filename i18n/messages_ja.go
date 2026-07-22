@@ -43,7 +43,7 @@ var messagesJa = map[string]string{
 *基本操作:*
 • /slack-review-notify show - このチャンネルの全ラベル設定を表示
 • /slack-review-notify [ラベル名] show - 指定ラベルの詳細設定を表示
-• /slack-review-notify reviews - 全チャンネルから自分宛ての未完了レビュー依頼を表示
+• /slack-review-notify show-my-reviews - 全チャンネルから自分宛ての未完了レビュー依頼を表示
 
 *必須設定:*
 • /slack-review-notify [ラベル名] add-repo owner/repo1,owner/repo2 - 対象リポジトリを追加（必須）
@@ -81,7 +81,7 @@ var messagesJa = map[string]string{
 
 [ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します`,
 
-	// ==================== Command: reviews ====================
+	// ==================== Command: show-my-reviews ====================
 	"cmd.reviews.header":                        ":clipboard: *あなたへの未完了レビュー依頼 (%d件)*\n_古い依頼から表示しています_",
 	"cmd.reviews.empty":                         ":white_check_mark: あなたへの未完了レビュー依頼はありません。",
 	"cmd.reviews.truncated":                     ":information_source: ほか%d件あります。",

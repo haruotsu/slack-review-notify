@@ -78,7 +78,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			// Determine whether the first argument is a subcommand or a label name
-			potentialSubCommands := []string{"show", "help", "reviews", "set-mention", "add-reviewer",
+			potentialSubCommands := []string{"show", "help", "show-my-reviews", "set-mention", "add-reviewer",
 				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
 				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
 				"set-business-hours-start", "set-business-hours-end", "set-timezone",
@@ -88,7 +88,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 
 			isSubCommand := false
 			for _, cmd := range potentialSubCommands {
-				if parts[0] == cmd && (cmd != "reviews" || len(parts) == 1) {
+				if parts[0] == cmd {
 					isSubCommand = true
 					break
 				}
@@ -159,7 +159,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 					showConfig(c, db, channelID, labelName, lang)
 				}
 
-			case "reviews":
+			case "show-my-reviews":
 				showAssignedReviews(c, db, userID, lang)
 
 			case "set-mention":

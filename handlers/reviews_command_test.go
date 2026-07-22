@@ -32,7 +32,7 @@ func runReviewsCommand(t *testing.T, db *gorm.DB, channelID string) reviewsComma
 	router := gin.New()
 	router.POST("/slack/command", HandleSlackCommand(db))
 
-	req := setupHTTPRequest(t, "reviews", channelID)
+	req := setupHTTPRequest(t, "show-my-reviews", channelID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -133,7 +133,7 @@ func TestReviewsCommandExcludesTaskAlreadyApprovedByUser(t *testing.T) {
 	assert.Equal(t, ":white_check_mark: あなたへの未完了レビュー依頼はありません。", response.Text)
 }
 
-func TestReviewsCommandDoesNotShadowReviewsLabelSubcommands(t *testing.T) {
+func TestReviewsLabelStillShowsItsConfiguration(t *testing.T) {
 	db := setupCommandIntegrationTestDB(t)
 	config := models.ChannelConfig{
 		ID:             "reviews-label-config",
@@ -150,7 +150,7 @@ func TestReviewsCommandDoesNotShadowReviewsLabelSubcommands(t *testing.T) {
 	router := gin.New()
 	router.POST("/slack/command", HandleSlackCommand(db))
 
-	req := setupHTTPRequest(t, "reviews show", "C_COMMAND")
+	req := setupHTTPRequest(t, "reviews", "C_COMMAND")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 

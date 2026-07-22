@@ -68,7 +68,7 @@ func TestHandleSlackCommand_Help(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "リポジトリが未設定の場合、通知は送信されません")
 	assert.Contains(t, w.Body.String(), "このチャンネルの全ラベル設定を表示")
 	assert.Contains(t, w.Body.String(), "指定ラベルの詳細設定を表示")
-	assert.Contains(t, w.Body.String(), "/slack-review-notify reviews")
+	assert.Contains(t, w.Body.String(), "/slack-review-notify show-my-reviews")
 }
 
 func TestHandleSlackCommand_Show(t *testing.T) {

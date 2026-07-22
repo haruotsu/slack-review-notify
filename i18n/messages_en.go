@@ -43,7 +43,7 @@ Specify multiple labels separated by commas to notify only when all labels are p
 *Basic Operations:*
 • /slack-review-notify show - Show all label settings for this channel
 • /slack-review-notify [label-name] show - Show detailed settings for specified label
-• /slack-review-notify reviews - Show your unfinished review requests across all channels
+• /slack-review-notify show-my-reviews - Show your unfinished review requests across all channels
 
 *Required Settings:*
 • /slack-review-notify [label-name] add-repo owner/repo1,owner/repo2 - Add target repositories (required)
@@ -81,7 +81,7 @@ Specify multiple labels separated by commas to notify only when all labels are p
 
 Omitting [label-name] uses the default label "needs-review"`,
 
-	// ==================== Command: reviews ====================
+	// ==================== Command: show-my-reviews ====================
 	"cmd.reviews.header":                        ":clipboard: *Your unfinished review requests (%d)*\n_Oldest requests are shown first_",
 	"cmd.reviews.empty":                         ":white_check_mark: You have no unfinished review requests.",
 	"cmd.reviews.truncated":                     ":information_source: %d more review request(s) not shown.",
