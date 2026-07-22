@@ -89,7 +89,6 @@ var messagesJa = map[string]string{
 	"cmd.reviews.status.pending":                "登録処理中",
 	"cmd.reviews.status.in_review":              "レビュー中",
 	"cmd.reviews.status.waiting_business_hours": "営業時間待ち",
-	"cmd.reviews.status.paused":                 "リマインド停止中",
 	"cmd.reviews.status.snoozed":                "スヌーズ中",
 
 	// ==================== Command: set-language ====================

@@ -89,7 +89,6 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"cmd.reviews.status.pending":                "Processing",
 	"cmd.reviews.status.in_review":              "In review",
 	"cmd.reviews.status.waiting_business_hours": "Waiting for business hours",
-	"cmd.reviews.status.paused":                 "Reminders stopped",
 	"cmd.reviews.status.snoozed":                "Snoozed",
 
 	// ==================== Command: set-language ====================

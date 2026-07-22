@@ -354,10 +354,12 @@ const maxAssignedReviews = 50
 
 func showAssignedReviews(c *gin.Context, db *gorm.DB, userID, lang string) {
 	t := i18n.L(lang)
+	userID = strings.TrimSpace(userID)
 	var tasks []models.ReviewTask
 	result := db.Where("status IN ?", []string{
-		"pending", "in_review", "waiting_business_hours", "paused", "snoozed",
-	}).Order("created_at ASC").Order("id ASC").Find(&tasks)
+		"pending", "in_review", "waiting_business_hours", "snoozed",
+	}).Where("(reviewers LIKE ? OR TRIM(reviewer) = ?)", "%"+userID+"%", userID).
+		Order("created_at ASC").Order("id ASC").Find(&tasks)
 	if result.Error != nil {
 		log.Printf("assigned review list query error: %v", result.Error)
 		respondEphemeral(c, t("cmd.reviews.error"))
@@ -401,6 +403,11 @@ func isAssignedReview(task models.ReviewTask, userID string) bool {
 	if userID == "" {
 		return false
 	}
+	for _, reviewer := range strings.Split(task.ApprovedBy, ",") {
+		if strings.TrimSpace(reviewer) == userID {
+			return false
+		}
+	}
 	if strings.TrimSpace(task.Reviewer) == userID {
 		return true
 	}
@@ -430,8 +437,6 @@ func assignedReviewStatusPresentation(status, lang string) (string, string) {
 		return ":large_blue_circle:", t("cmd.reviews.status.in_review")
 	case "waiting_business_hours":
 		return ":crescent_moon:", t("cmd.reviews.status.waiting_business_hours")
-	case "paused":
-		return ":double_vertical_bar:", t("cmd.reviews.status.paused")
 	case "snoozed":
 		return ":zzz:", t("cmd.reviews.status.snoozed")
 	default:

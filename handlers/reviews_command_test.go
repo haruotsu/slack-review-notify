@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -64,27 +65,72 @@ func TestReviewsCommandShowsAssignedActiveTasksAcrossChannels(t *testing.T) {
 
 	response := runReviewsCommand(t, db, "C_COMMAND")
 	assert.Equal(t, "ephemeral", response.ResponseType)
-	assert.Contains(t, response.Text, ":clipboard: *あなたへの未完了レビュー依頼 (5件)*")
+	assert.Contains(t, response.Text, ":clipboard: *あなたへの未完了レビュー依頼 (4件)*")
 	assert.Contains(t, response.Text, ":large_blue_circle: <https://github.com/example/api/pull/101|example/api #101>")
 	assert.Contains(t, response.Text, "Fix &lt;auth&gt; &amp; login")
 	assert.Contains(t, response.Text, "<#C_BACKEND> | レビュー中")
 	assert.Contains(t, response.Text, ":crescent_moon:")
-	assert.Contains(t, response.Text, ":double_vertical_bar:")
 	assert.Contains(t, response.Text, ":hourglass_flowing_sand:")
 	assert.Contains(t, response.Text, ":zzz:")
 
-	expectedOrder := []string{"pull/101", "pull/102", "pull/103", "pull/104", "pull/105"}
+	expectedOrder := []string{"pull/101", "pull/102", "pull/104", "pull/105"}
 	lastIndex := -1
 	for _, fragment := range expectedOrder {
 		index := strings.Index(response.Text, fragment)
 		assert.Greater(t, index, lastIndex, "expected %s after the previous PR", fragment)
 		lastIndex = index
 	}
+	assert.NotContains(t, response.Text, "pull/103")
 	assert.NotContains(t, response.Text, "pull/106")
 	assert.NotContains(t, response.Text, "pull/107")
 	assert.NotContains(t, response.Text, "pull/108")
 	assert.NotContains(t, response.Text, "pull/109")
 	assert.NotContains(t, response.Text, "pull/110")
+}
+
+func TestReviewsCommandFiltersUnrelatedTasksBeforeLoading(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+	assigned := models.ReviewTask{
+		ID: "assigned", PRURL: "https://github.com/example/assigned/pull/1", Repo: "example/assigned",
+		PRNumber: 1, Title: "Assigned", SlackChannel: "C_ASSIGNED", Reviewers: "U12345", Status: "in_review",
+	}
+	unrelated := models.ReviewTask{
+		ID: "unrelated", PRURL: "https://github.com/example/unrelated/pull/2", Repo: "example/unrelated",
+		PRNumber: 2, Title: "Unrelated", SlackChannel: "C_UNRELATED", Reviewers: "U99999", Status: "in_review",
+	}
+	require.NoError(t, db.Create(&assigned).Error)
+	require.NoError(t, db.Create(&unrelated).Error)
+
+	const callbackName = "test:reject_unrelated_review_load"
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		tasks, ok := tx.Statement.Dest.(*[]models.ReviewTask)
+		if !ok {
+			return
+		}
+		for _, task := range *tasks {
+			if task.ID == unrelated.ID {
+				_ = tx.AddError(errors.New("unrelated review task was loaded"))
+				return
+			}
+		}
+	}))
+
+	response := runReviewsCommand(t, db, "C_COMMAND")
+	assert.Contains(t, response.Text, "pull/1|example/assigned #1")
+	assert.NotContains(t, response.Text, "レビュー依頼の取得に失敗しました")
+}
+
+func TestReviewsCommandExcludesTaskAlreadyApprovedByUser(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+	task := models.ReviewTask{
+		ID: "already-approved", PRURL: "https://github.com/example/approved/pull/1", Repo: "example/approved",
+		PRNumber: 1, Title: "Already approved", SlackChannel: "C_APPROVED",
+		Reviewers: "U12345,U67890", ApprovedBy: "U12345", Status: "in_review",
+	}
+	require.NoError(t, db.Create(&task).Error)
+
+	response := runReviewsCommand(t, db, "C_COMMAND")
+	assert.Equal(t, ":white_check_mark: あなたへの未完了レビュー依頼はありません。", response.Text)
 }
 
 func TestReviewsCommandDoesNotShadowReviewsLabelSubcommands(t *testing.T) {

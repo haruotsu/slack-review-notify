@@ -13,7 +13,9 @@
 - コマンドは `/slack-review-notify reviews` とする。
 - 検索対象は全Slackチャンネルの `ReviewTask` とし、チャンネルでは絞り込まない。
 - 実行者のSlack User IDが `Reviewers` のカンマ区切り要素または旧形式の `Reviewer` に完全一致するタスクだけを表示する。
-- 未完了ステータスは `pending`、`in_review`、`waiting_business_hours`、`paused`、`snoozed` の5種類とする。
+- 実行者のSlack User IDが `ApprovedBy` に完全一致する承認済みタスクは表示しない。
+- 未完了ステータスは `pending`、`in_review`、`waiting_business_hours`、`snoozed` の4種類とする。
+- DB側で担当者候補を前絞りし、完全一致はGo側で担保する。
 - 応答は成功、該当なし、DBエラーのすべてでHTTP 200かつ `response_type: "ephemeral"` とする。
 - `CreatedAt` 昇順、同時刻は `ID` 昇順で並べ、最大50件を表示する。
 - 51件以上の場合は全一致件数をヘッダーへ出し、末尾に残件数を表示する。
@@ -109,22 +111,22 @@ func TestReviewsCommandShowsAssignedActiveTasksAcrossChannels(t *testing.T) {
 
 	response := runReviewsCommand(t, db, "C_COMMAND")
 	assert.Equal(t, "ephemeral", response.ResponseType)
-	assert.Contains(t, response.Text, ":clipboard: *あなたへの未完了レビュー依頼 (5件)*")
+	assert.Contains(t, response.Text, ":clipboard: *あなたへの未完了レビュー依頼 (4件)*")
 	assert.Contains(t, response.Text, ":large_blue_circle: <https://github.com/example/api/pull/101|example/api #101>")
 	assert.Contains(t, response.Text, "Fix &lt;auth&gt; &amp; login")
 	assert.Contains(t, response.Text, "<#C_BACKEND> | レビュー中")
 	assert.Contains(t, response.Text, ":crescent_moon:")
-	assert.Contains(t, response.Text, ":double_vertical_bar:")
 	assert.Contains(t, response.Text, ":hourglass_flowing_sand:")
 	assert.Contains(t, response.Text, ":zzz:")
 
-	expectedOrder := []string{"pull/101", "pull/102", "pull/103", "pull/104", "pull/105"}
+	expectedOrder := []string{"pull/101", "pull/102", "pull/104", "pull/105"}
 	lastIndex := -1
 	for _, fragment := range expectedOrder {
 		index := strings.Index(response.Text, fragment)
 		assert.Greater(t, index, lastIndex, "expected %s after the previous PR", fragment)
 		lastIndex = index
 	}
+	assert.NotContains(t, response.Text, "pull/103")
 	assert.NotContains(t, response.Text, "pull/106")
 	assert.NotContains(t, response.Text, "pull/107")
 	assert.NotContains(t, response.Text, "pull/108")
@@ -241,10 +243,12 @@ const maxAssignedReviews = 50
 
 func showAssignedReviews(c *gin.Context, db *gorm.DB, userID, lang string) {
 	t := i18n.L(lang)
+	userID = strings.TrimSpace(userID)
 	var tasks []models.ReviewTask
 	result := db.Where("status IN ?", []string{
-		"pending", "in_review", "waiting_business_hours", "paused", "snoozed",
-	}).Order("created_at ASC").Order("id ASC").Find(&tasks)
+		"pending", "in_review", "waiting_business_hours", "snoozed",
+	}).Where("(reviewers LIKE ? OR TRIM(reviewer) = ?)", "%"+userID+"%", userID).
+		Order("created_at ASC").Order("id ASC").Find(&tasks)
 	if result.Error != nil {
 		log.Printf("assigned review list query error: %v", result.Error)
 		respondEphemeral(c, t("cmd.reviews.error"))
@@ -288,6 +292,11 @@ func isAssignedReview(task models.ReviewTask, userID string) bool {
 	if userID == "" {
 		return false
 	}
+	for _, reviewer := range strings.Split(task.ApprovedBy, ",") {
+		if strings.TrimSpace(reviewer) == userID {
+			return false
+		}
+	}
 	if strings.TrimSpace(task.Reviewer) == userID {
 		return true
 	}
@@ -317,8 +326,6 @@ func assignedReviewStatusPresentation(status, lang string) (string, string) {
 		return ":large_blue_circle:", t("cmd.reviews.status.in_review")
 	case "waiting_business_hours":
 		return ":crescent_moon:", t("cmd.reviews.status.waiting_business_hours")
-	case "paused":
-		return ":double_vertical_bar:", t("cmd.reviews.status.paused")
 	case "snoozed":
 		return ":zzz:", t("cmd.reviews.status.snoozed")
 	default:
@@ -351,7 +358,6 @@ func respondEphemeral(c *gin.Context, text string) {
 "cmd.reviews.status.pending":                "登録処理中",
 "cmd.reviews.status.in_review":              "レビュー中",
 "cmd.reviews.status.waiting_business_hours": "営業時間待ち",
-"cmd.reviews.status.paused":                 "リマインド停止中",
 "cmd.reviews.status.snoozed":                "スヌーズ中",
 ```
 
@@ -372,7 +378,6 @@ func respondEphemeral(c *gin.Context, text string) {
 "cmd.reviews.status.pending":                "Processing",
 "cmd.reviews.status.in_review":              "In review",
 "cmd.reviews.status.waiting_business_hours": "Waiting for business hours",
-"cmd.reviews.status.paused":                 "Reminders stopped",
 "cmd.reviews.status.snoozed":                "Snoozed",
 ```
 
