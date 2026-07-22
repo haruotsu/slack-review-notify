@@ -88,7 +88,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 
 			isSubCommand := false
 			for _, cmd := range potentialSubCommands {
-				if parts[0] == cmd {
+				if parts[0] == cmd && (cmd != "reviews" || len(parts) == 1) {
 					isSubCommand = true
 					break
 				}

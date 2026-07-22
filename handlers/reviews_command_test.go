@@ -45,8 +45,8 @@ func TestReviewsCommandShowsAssignedActiveTasksAcrossChannels(t *testing.T) {
 	db := setupCommandIntegrationTestDB(t)
 	base := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	tasks := []models.ReviewTask{
-		{ID: "01", PRURL: "https://github.com/example/api/pull/101", Repo: "example/api", PRNumber: 101, Title: "  Fix  <auth> &\n login ", SlackChannel: "C_BACKEND", Reviewers: "U999, U12345", Status: "in_review", CreatedAt: base},
 		{ID: "02", PRURL: "https://github.com/example/web/pull/102", Repo: "example/web", PRNumber: 102, Title: "Web fix", SlackChannel: "C_FRONTEND", Reviewer: " U12345 ", Status: "waiting_business_hours", CreatedAt: base},
+		{ID: "01", PRURL: "https://github.com/example/api/pull/101", Repo: "example/api", PRNumber: 101, Title: "  Fix  <auth> &\n login ", SlackChannel: "C_BACKEND", Reviewers: "U999, U12345", Status: "in_review", CreatedAt: base},
 		{ID: "03", PRURL: "https://github.com/example/app/pull/103", Repo: "example/app", PRNumber: 103, Title: "App fix", SlackChannel: "C_APP", Reviewer: "U12345", Reviewers: "U12345", Status: "paused", CreatedAt: base.Add(2 * time.Minute)},
 		{ID: "04", PRURL: "https://github.com/example/job/pull/104", Repo: "example/job", PRNumber: 104, Title: "Job fix", SlackChannel: "C_JOB", Reviewers: "U12345", Status: "pending", CreatedAt: base.Add(3 * time.Minute)},
 		{ID: "05", PRURL: "https://github.com/example/legacy/pull/105", Repo: "example/legacy", PRNumber: 105, Title: "Legacy fix", SlackChannel: "C_LEGACY", Reviewers: "U12345", Status: "snoozed", CreatedAt: base.Add(4 * time.Minute)},
@@ -85,6 +85,33 @@ func TestReviewsCommandShowsAssignedActiveTasksAcrossChannels(t *testing.T) {
 	assert.NotContains(t, response.Text, "pull/108")
 	assert.NotContains(t, response.Text, "pull/109")
 	assert.NotContains(t, response.Text, "pull/110")
+}
+
+func TestReviewsCommandDoesNotShadowReviewsLabelSubcommands(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+	config := models.ChannelConfig{
+		ID:             "reviews-label-config",
+		SlackChannelID: "C_COMMAND",
+		LabelName:      "reviews",
+		RepositoryList: "example/reviews",
+		IsActive:       true,
+	}
+	require.NoError(t, db.Create(&config).Error)
+
+	services.IsTestMode = true
+	t.Cleanup(func() { services.IsTestMode = false })
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	req := setupHTTPRequest(t, "reviews show", "C_COMMAND")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "reviews")
+	assert.Contains(t, w.Body.String(), "example/reviews")
+	assert.NotContains(t, w.Body.String(), `"response_type":"ephemeral"`)
 }
 
 func TestReviewsCommandReturnsLocalizedEmptyState(t *testing.T) {
