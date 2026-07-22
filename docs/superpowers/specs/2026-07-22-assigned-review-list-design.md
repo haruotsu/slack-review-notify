@@ -1,59 +1,59 @@
-# Assigned Review List Command Design
+# 自分宛てレビュー依頼一覧コマンド 設計仕様書
 
-## Context
+## 背景
 
-Review notifications arrive in multiple Slack channels, but the application has no command that consolidates outstanding requests. Existing `show` and `show-reviewers` commands display configuration and reviewer-pool data, not review tasks.
+レビュー依頼通知は複数のSlackチャンネルに届くが、現在のアプリケーションには未完了の依頼をまとめて確認するコマンドがない。既存の `show` と `show-reviewers` は通知設定とレビュアー候補を表示するものであり、レビュータスクの一覧ではない。
 
-## Goal
+## 目的
 
-Add `/slack-review-notify reviews` so a Slack user can see every unfinished review request assigned to them across all channels. The response must be visible only to the command sender and make each pull request easy to open.
+Slackユーザーが、全チャンネルを対象に、自分へ割り当てられた未完了のレビュー依頼を確認できる `/slack-review-notify reviews` を追加する。応答はコマンド実行者本人だけに表示し、各Pull Requestをすぐ開けるようにする。
 
-## Non-goals
+## 対象外
 
-- Do not add a dashboard, Slack App Home, direct messages, Block Kit actions, or pagination.
-- Do not change the database schema or task lifecycle.
-- Do not list tasks assigned only to other users.
-- Do not add filtering by channel, label, repository, or status.
-- Do not change existing review notifications or reminder behavior.
+- ダッシュボード、Slack App Home、DM、Block Kitの操作ボタン、ページングは追加しない。
+- データベーススキーマやタスクの状態遷移は変更しない。
+- 他のユーザーだけに割り当てられたタスクは表示しない。
+- チャンネル、ラベル、リポジトリ、ステータスによる絞り込みは追加しない。
+- 既存のレビュー通知やリマインド動作は変更しない。
 
-## Command and visibility
+## コマンドと可視性
 
-- Command: `/slack-review-notify reviews`
-- Scope: all `ReviewTask` records in every Slack channel stored by this application.
-- Viewer: only the Slack user whose `user_id` is included in the slash-command request.
-- Response: HTTP 200 JSON with `response_type: "ephemeral"` and a Slack mrkdwn `text` value for success, empty results, and database errors.
-- The command does not call the Slack Web API and does not post to a channel or direct message.
-- Language follows the existing command-handler behavior: use the `needs-review` configuration for the channel where the command is invoked and otherwise default to Japanese.
+- コマンド: `/slack-review-notify reviews`
+- 検索範囲: このアプリケーションが保持する全Slackチャンネルの `ReviewTask`
+- 閲覧者: slash commandリクエストの `user_id` に該当する実行者本人のみ
+- 応答: 成功、該当なし、DBエラーのすべてで、HTTP 200のJSONを返す。JSONには `response_type: "ephemeral"` とSlack mrkdwn形式の `text` を含める。
+- Slack Web APIは呼び出さず、チャンネル投稿やDM送信も行わない。
+- 言語は既存コマンドハンドラーと同じく、コマンドを実行したチャンネルの `needs-review` 設定を使用し、設定がなければ日本語を使用する。
 
-## Task selection
+## タスクの抽出条件
 
-A task is included only when both conditions below are true.
+次の2条件を両方満たすタスクだけを表示する。
 
-1. Its status is one of:
+1. ステータスが次のいずれかである。
    - `pending`
    - `in_review`
    - `waiting_business_hours`
    - `paused`
    - `snoozed`
-2. The command sender's Slack user ID exactly matches:
-   - one comma-separated entry in `Reviewers`, after trimming surrounding whitespace; or
-   - the legacy `Reviewer` field, after trimming surrounding whitespace.
+2. コマンド実行者のSlack User IDが次のいずれかに完全一致する。
+   - `Reviewers` のカンマ区切り要素。各要素の前後の空白は除去して比較する。
+   - 旧形式の `Reviewer`。前後の空白は除去して比較する。
 
-Exact comparison is required so a user such as `U123` does not match `U1234`. A task that matches both fields is displayed once. `completed`, `done`, `archived`, deleted tasks, and tasks assigned only to other users are excluded.
+`U123` が `U1234` に誤一致しないよう、部分一致は使用しない。両方のフィールドに一致しても、同じタスクは1回だけ表示する。`completed`、`done`、`archived`、論理削除済みのタスク、他のユーザーだけに割り当てられたタスクは除外する。
 
-## Ordering and limits
+## 並び順と件数制限
 
-- Sort matching tasks by `CreatedAt` ascending so the oldest outstanding request appears first.
-- Use `ID` ascending as the deterministic tie-breaker.
-- Display at most 50 tasks.
-- The header count is the total number of matching tasks, including tasks beyond the display limit.
-- When more than 50 tasks match, append `:information_source:` text stating how many additional tasks exist.
+- `CreatedAt` の昇順で並べ、古い未完了依頼を先頭に表示する。
+- 同時刻の場合は `ID` の昇順を使用し、順序を固定する。
+- 表示件数は最大50件とする。
+- ヘッダーの件数には、50件を超えて表示されなかったタスクも含めた全一致件数を表示する。
+- 51件以上一致した場合だけ、末尾に `:information_source:` 付きで残りの件数を表示する。
 
-## Slack presentation
+## Slackでの表示
 
-Use Slack ASCII emoji aliases in source text. Do not embed Unicode emoji.
+ソース文字列にはSlackのASCII emoji aliasを使用し、Unicode絵文字は埋め込まない。
 
-Japanese example:
+日本語の表示例:
 
 ```text
 :clipboard: *あなたへの未完了レビュー依頼 (3件)*
@@ -72,18 +72,18 @@ _古い依頼から表示しています_
 <#C_APP> | リマインド停止中
 ```
 
-English uses the same layout with translated header, empty, truncation, error, and status text.
+英語も同じレイアウトを使い、ヘッダー、該当なし、件数超過、エラー、ステータスの文言を英訳する。
 
-Each task entry contains, in order:
+各タスクは次の順で表示する。
 
-1. A status-specific ASCII emoji.
-2. A clickable PR link whose label is `<repo> #<PR number>`.
-3. The PR title on its own line.
-4. A clickable Slack channel mention and localized status label.
+1. ステータスに対応するASCII emoji
+2. `<リポジトリ名> #<PR番号>` をラベルとするクリック可能なPRリンク
+3. 独立した行にPRタイトル
+4. クリック可能なSlackチャンネルメンションと、ローカライズしたステータス名
 
-Status presentation:
+ステータス表示:
 
-| Status | ASCII emoji | Japanese label | English label |
+| ステータス | ASCII emoji | 日本語 | 英語 |
 | --- | --- | --- | --- |
 | `pending` | `:hourglass_flowing_sand:` | 登録処理中 | Processing |
 | `in_review` | `:large_blue_circle:` | レビュー中 | In review |
@@ -91,62 +91,62 @@ Status presentation:
 | `paused` | `:double_vertical_bar:` | リマインド停止中 | Reminders stopped |
 | `snoozed` | `:zzz:` | スヌーズ中 | Snoozed |
 
-Before interpolation, collapse title whitespace to single spaces and escape Slack-sensitive `&`, `<`, and `>` characters. Repository, PR number, channel ID, and PR URL come from existing task fields. Entries are separated by one blank line for scanability.
+PRタイトルを埋め込む前に、連続する空白や改行を1個の半角スペースへまとめ、Slackで特別扱いされる `&`、`<`、`>` をエスケープする。リポジトリ名、PR番号、チャンネルID、PR URLには既存タスクの値を使用する。読み取りやすいよう、各タスクの間には空行を1行入れる。
 
-Empty-result presentation:
+該当なしの表示:
 
 ```text
 :white_check_mark: あなたへの未完了レビュー依頼はありません。
 ```
 
-Database-error presentation:
+DBエラー時の表示:
 
 ```text
 :warning: レビュー依頼の取得に失敗しました。
 ```
 
-## Implementation shape
+## 実装範囲
 
-Keep the change within the existing slash-command architecture:
+既存のslash command構成を維持し、次の変更だけを行う。
 
-- Register `reviews` in `potentialSubCommands` and the command switch in `handlers/command.go`.
-- Add small private helpers in `handlers/command.go` for assignment matching, Slack-safe title formatting, status presentation, and response construction.
-- Add Japanese and English command/help strings in the existing i18n message maps.
-- Add handler-level tests using the existing in-memory SQLite and Slack test-mode setup.
-- Update the built-in Japanese and English help output so users can discover the command.
+- `handlers/command.go` の `potentialSubCommands` とコマンド分岐に `reviews` を登録する。
+- `handlers/command.go` に、担当者判定、Slack向けタイトル整形、ステータス表示、レスポンス構築を担う小さな非公開ヘルパーを追加する。
+- 既存のi18nメッセージマップに日本語と英語のヘルプ・応答文を追加する。
+- 既存のインメモリSQLiteとSlackテストモードを使用したハンドラーレベルのテストを追加する。
+- 組み込みの日本語・英語ヘルプにコマンドを追加し、利用者が発見できるようにする。
 
-Do not introduce a new package, dependency, database migration, public interface, or Slack API call.
+新しいパッケージ、依存関係、DBマイグレーション、公開インターフェース、Slack API呼び出しは追加しない。
 
-## Error handling
+## エラーハンドリング
 
-- A database query failure returns the localized `:warning:` ephemeral response with HTTP 200 so Slack can render the message to the sender.
-- An empty result returns the localized `:white_check_mark:` ephemeral response with HTTP 200.
-- A task with an unexpected status cannot appear because the query only selects the five specified active statuses.
+- DB検索に失敗した場合は、Slackが実行者本人へ表示できるよう、ローカライズした `:warning:` 付きephemeral応答をHTTP 200で返す。
+- 該当タスクがない場合は、ローカライズした `:white_check_mark:` 付きephemeral応答をHTTP 200で返す。
+- 想定外のステータスは、検索時に上記5種類だけへ限定するため表示されない。
 
-## TDD coverage
+## TDDで確認する内容
 
-Tests must be written and observed failing before production code is added. Handler-level tests cover:
+本番コードを追加する前にテストを書き、意図した理由で失敗することを確認する。ハンドラーレベルのテストで次を検証する。
 
-1. Assigned active tasks from multiple channels are returned in oldest-first order.
-2. `Reviewers` CSV matching is exact and whitespace-tolerant.
-3. Legacy `Reviewer` matching works.
-4. Tasks assigned only to other users are excluded.
-5. `completed`, `done`, `archived`, and deleted tasks are excluded.
-6. The response is explicitly ephemeral and contains clickable PR and channel links plus ASCII emoji status markers.
-7. PR title whitespace and Slack-sensitive characters are rendered safely.
-8. An empty result returns the localized success message.
-9. More than 50 matches displays the oldest 50, reports the total count, and states the remaining count.
-10. A database failure returns the localized warning response.
+1. 複数チャンネルの自分宛て未完了タスクが古い順で表示される。
+2. `Reviewers` のCSVが、前後の空白を許容しつつ完全一致で判定される。
+3. 旧形式の `Reviewer` でも一致する。
+4. 他のユーザーだけに割り当てられたタスクは除外される。
+5. `completed`、`done`、`archived`、論理削除済みタスクは除外される。
+6. 応答が明示的にephemeralであり、クリック可能なPR・チャンネルリンクとASCII emojiのステータス表示を含む。
+7. PRタイトルの空白とSlackの特殊文字が安全に整形される。
+8. 該当タスクがない場合にローカライズした正常メッセージを返す。
+9. 51件以上一致した場合、古い50件だけを表示し、全件数と残件数を正しく表示する。
+10. DB検索に失敗した場合にローカライズした警告メッセージを返す。
 
-After the focused tests pass, run `go test ./...`, `make lint`, and `make build` before review and PR creation.
+対象テストが通過した後、レビューとPR作成の前に `go test ./...`、`make lint`、`make build` を実行する。
 
-## Acceptance criteria
+## 受け入れ条件
 
-- `/slack-review-notify reviews` works without a channel configuration.
-- Only unfinished tasks assigned to the command sender are included.
-- Matching tasks from all stored Slack channels can appear.
-- Only the command sender can see the response.
-- Every displayed task has a clickable GitHub PR link and clickable Slack channel mention.
-- The response uses ASCII emoji aliases and remains readable as a compact Slack command result.
-- At most 50 task entries are rendered, with an accurate remaining count.
-- Existing commands, notifications, database schema, and dependencies remain unchanged.
+- `/slack-review-notify reviews` はチャンネル設定がなくても動作する。
+- コマンド実行者へ割り当てられた未完了タスクだけが表示される。
+- 保存されている全Slackチャンネルの一致タスクを表示できる。
+- 応答を閲覧できるのはコマンド実行者本人だけである。
+- 表示されたすべてのタスクに、クリック可能なGitHub PRリンクとSlackチャンネルメンションがある。
+- ASCII emoji aliasを使い、Slackコマンド結果として簡潔で読み取りやすい。
+- 最大50件を表示し、超過時は残件数を正しく案内する。
+- 既存コマンド、通知、DBスキーマ、依存関係を変更しない。
