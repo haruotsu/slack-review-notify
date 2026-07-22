@@ -43,6 +43,7 @@ var messagesJa = map[string]string{
 *基本操作:*
 • /slack-review-notify show - このチャンネルの全ラベル設定を表示
 • /slack-review-notify [ラベル名] show - 指定ラベルの詳細設定を表示
+• /slack-review-notify show-my-reviews - 全チャンネルから自分宛ての未完了レビュー依頼を表示
 
 *必須設定:*
 • /slack-review-notify [ラベル名] add-repo owner/repo1,owner/repo2 - 対象リポジトリを追加（必須）
@@ -79,6 +80,16 @@ var messagesJa = map[string]string{
 • /slack-review-notify show-availability - 休暇中・予約中のユーザー一覧を表示
 
 [ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します`,
+
+	// ==================== Command: show-my-reviews ====================
+	"cmd.reviews.header":                        ":clipboard: *あなたへの未完了レビュー依頼 (%d件)*\n_古い依頼から表示しています_",
+	"cmd.reviews.empty":                         ":white_check_mark: あなたへの未完了レビュー依頼はありません。",
+	"cmd.reviews.truncated":                     ":information_source: ほか%d件あります。",
+	"cmd.reviews.error":                         ":warning: レビュー依頼の取得に失敗しました。",
+	"cmd.reviews.status.pending":                "登録処理中",
+	"cmd.reviews.status.in_review":              "レビュー中",
+	"cmd.reviews.status.waiting_business_hours": "営業時間待ち",
+	"cmd.reviews.status.snoozed":                "スヌーズ中",
 
 	// ==================== Command: set-language ====================
 	"cmd.set_language.usage":   "言語を指定してください。対応言語: ja (日本語), en (English)\n例: /slack-review-notify %s set-language en",

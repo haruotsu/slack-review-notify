@@ -43,6 +43,7 @@ Specify multiple labels separated by commas to notify only when all labels are p
 *Basic Operations:*
 • /slack-review-notify show - Show all label settings for this channel
 • /slack-review-notify [label-name] show - Show detailed settings for specified label
+• /slack-review-notify show-my-reviews - Show your unfinished review requests across all channels
 
 *Required Settings:*
 • /slack-review-notify [label-name] add-repo owner/repo1,owner/repo2 - Add target repositories (required)
@@ -79,6 +80,16 @@ Specify multiple labels separated by commas to notify only when all labels are p
 • /slack-review-notify show-availability - Show users on leave or scheduled
 
 Omitting [label-name] uses the default label "needs-review"`,
+
+	// ==================== Command: show-my-reviews ====================
+	"cmd.reviews.header":                        ":clipboard: *Your unfinished review requests (%d)*\n_Oldest requests are shown first_",
+	"cmd.reviews.empty":                         ":white_check_mark: You have no unfinished review requests.",
+	"cmd.reviews.truncated":                     ":information_source: %d more review request(s) not shown.",
+	"cmd.reviews.error":                         ":warning: Failed to retrieve review requests.",
+	"cmd.reviews.status.pending":                "Processing",
+	"cmd.reviews.status.in_review":              "In review",
+	"cmd.reviews.status.waiting_business_hours": "Waiting for business hours",
+	"cmd.reviews.status.snoozed":                "Snoozed",
 
 	// ==================== Command: set-language ====================
 	"cmd.set_language.usage":   "Please specify a language. Supported: ja (Japanese), en (English)\nExample: /slack-review-notify %s set-language en",

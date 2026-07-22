@@ -78,7 +78,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			// Determine whether the first argument is a subcommand or a label name
-			potentialSubCommands := []string{"show", "help", "set-mention", "add-reviewer",
+			potentialSubCommands := []string{"show", "help", "show-my-reviews", "set-mention", "add-reviewer",
 				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
 				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
 				"set-business-hours-start", "set-business-hours-end", "set-timezone",
@@ -158,6 +158,9 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 					// Show settings for a specific label
 					showConfig(c, db, channelID, labelName, lang)
 				}
+
+			case "show-my-reviews":
+				showAssignedReviews(c, db, userID, lang)
 
 			case "set-mention":
 				if params == "" {
@@ -345,6 +348,107 @@ func getLang(config *models.ChannelConfig) string {
 		return config.Language
 	}
 	return "ja"
+}
+
+const maxAssignedReviews = 50
+
+func showAssignedReviews(c *gin.Context, db *gorm.DB, userID, lang string) {
+	t := i18n.L(lang)
+	userID = strings.TrimSpace(userID)
+	var tasks []models.ReviewTask
+	result := db.Where("status IN ?", []string{
+		"pending", "in_review", "waiting_business_hours", "snoozed",
+	}).Where("(reviewers LIKE ? OR TRIM(reviewer) = ?)", "%"+userID+"%", userID).
+		Order("created_at ASC").Order("id ASC").Find(&tasks)
+	if result.Error != nil {
+		log.Printf("assigned review list query error: %v", result.Error)
+		respondEphemeral(c, t("cmd.reviews.error"))
+		return
+	}
+
+	assigned := make([]models.ReviewTask, 0, len(tasks))
+	for _, task := range tasks {
+		if isAssignedReview(task, userID) {
+			assigned = append(assigned, task)
+		}
+	}
+
+	if len(assigned) == 0 {
+		respondEphemeral(c, t("cmd.reviews.empty"))
+		return
+	}
+
+	var response strings.Builder
+	response.WriteString(t("cmd.reviews.header", len(assigned)))
+	displayCount := len(assigned)
+	if displayCount > maxAssignedReviews {
+		displayCount = maxAssignedReviews
+	}
+	for _, task := range assigned[:displayCount] {
+		emoji, statusLabel := assignedReviewStatusPresentation(task.Status, lang)
+		fmt.Fprintf(&response, "\n\n%s <%s|%s #%d>\n%s\n<#%s> | %s",
+			emoji, task.PRURL, task.Repo, task.PRNumber,
+			slackSafeReviewTitle(task.Title), task.SlackChannel, statusLabel)
+	}
+	if len(assigned) > displayCount {
+		response.WriteString("\n\n")
+		response.WriteString(t("cmd.reviews.truncated", len(assigned)-displayCount))
+	}
+
+	respondEphemeral(c, response.String())
+}
+
+func isAssignedReview(task models.ReviewTask, userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	for _, reviewer := range strings.Split(task.ApprovedBy, ",") {
+		if strings.TrimSpace(reviewer) == userID {
+			return false
+		}
+	}
+	if strings.TrimSpace(task.Reviewer) == userID {
+		return true
+	}
+	for _, reviewer := range strings.Split(task.Reviewers, ",") {
+		if strings.TrimSpace(reviewer) == userID {
+			return true
+		}
+	}
+	return false
+}
+
+func slackSafeReviewTitle(title string) string {
+	title = strings.Join(strings.Fields(title), " ")
+	return strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+	).Replace(title)
+}
+
+func assignedReviewStatusPresentation(status, lang string) (string, string) {
+	t := i18n.L(lang)
+	switch status {
+	case "pending":
+		return ":hourglass_flowing_sand:", t("cmd.reviews.status.pending")
+	case "in_review":
+		return ":large_blue_circle:", t("cmd.reviews.status.in_review")
+	case "waiting_business_hours":
+		return ":crescent_moon:", t("cmd.reviews.status.waiting_business_hours")
+	case "snoozed":
+		return ":zzz:", t("cmd.reviews.status.snoozed")
+	default:
+		return ":grey_question:", status
+	}
+}
+
+func respondEphemeral(c *gin.Context, text string) {
+	c.JSON(http.StatusOK, gin.H{
+		"response_type": "ephemeral",
+		"text":          text,
+	})
 }
 
 // showHelp displays the help message with per-label "edit" buttons and a
