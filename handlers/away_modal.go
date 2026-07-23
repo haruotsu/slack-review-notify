@@ -92,15 +92,22 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 			})
 			return
 		}
-		if !services.IsTestMode && meta.UserID != "" {
-			var msg string
+		if !services.IsTestMode {
 			if res.RowsAffected == 0 {
-				msg = i18n.TWithLang(lang, "modal.away.nothing_deleted", form.SlackUserID)
+				// "nothing to delete" is operator feedback, not a change worth
+				// broadcasting — keep it ephemeral to avoid channel noise.
+				if meta.UserID != "" {
+					msg := i18n.TWithLang(lang, "modal.away.nothing_deleted", form.SlackUserID)
+					if err := services.PostEphemeral(meta.ChannelID, meta.UserID, msg); err != nil {
+						log.Printf("away nothing-deleted notice failed: %v", err)
+					}
+				}
 			} else {
-				msg = i18n.TWithLang(lang, "modal.away.deleted", form.SlackUserID)
-			}
-			if err := services.PostEphemeral(meta.ChannelID, meta.UserID, msg); err != nil {
-				log.Printf("away delete confirmation post failed: %v", err)
+				// An actual change: post visibly so teammates see the leave was cleared.
+				msg := i18n.TWithLang(lang, "modal.away.deleted", form.SlackUserID)
+				if err := services.PostChannelMessage(meta.ChannelID, msg); err != nil {
+					log.Printf("away delete confirmation post failed: %v", err)
+				}
 			}
 		}
 		c.Status(http.StatusOK)
@@ -154,9 +161,11 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 		return
 	}
 
-	if !services.IsTestMode && meta.UserID != "" {
+	if !services.IsTestMode {
+		// Post visibly so teammates can see the leave was registered, not just
+		// the operator who opened the modal.
 		msg := i18n.TWithLang(lang, "modal.away.saved", form.SlackUserID)
-		if err := services.PostEphemeral(meta.ChannelID, meta.UserID, msg); err != nil {
+		if err := services.PostChannelMessage(meta.ChannelID, msg); err != nil {
 			log.Printf("away saved confirmation post failed: %v", err)
 		}
 	}

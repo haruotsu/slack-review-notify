@@ -125,6 +125,71 @@ func TestPostToThread(t *testing.T) {
 	assert.True(t, gock.IsDone(), "Not all mocks were used")
 }
 
+// TestPostChannelMessage: settings-change confirmations (leave saved, config
+// deleted, ...) must be visible to everyone in the channel, not only the
+// operator. So this posts a plain channel message via chat.postMessage with
+// just channel + text — no thread_ts (would bury it in a thread) and no user
+// (would make it ephemeral). The exact-body match pins that contract.
+func TestPostChannelMessage(t *testing.T) {
+	// IsTestMode is a package-global toggled by other tests; force it off here so
+	// the real HTTP path (mocked by gock) actually runs, regardless of order.
+	originalTestMode := IsTestMode
+	IsTestMode = false
+	defer func() { IsTestMode = originalTestMode }()
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+
+	// Success: posts to chat.postMessage with exactly {channel, text}.
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		MatchHeader("Authorization", "Bearer test-token").
+		MatchHeader("Content-Type", "application/json").
+		JSON(map[string]interface{}{
+			"channel": "C12345",
+			"text":    "<@U999> の休暇を保存しました 🌴",
+		}).
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	err := PostChannelMessage("C12345", "<@U999> の休暇を保存しました 🌴")
+	assert.NoError(t, err)
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
+
+	// Error: Slack returns ok:false → surfaced as an error.
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Reply(200).
+		JSON(map[string]interface{}{
+			"ok":    false,
+			"error": "channel_not_found",
+		})
+
+	err = PostChannelMessage("INVALID", "message")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "channel_not_found")
+	assert.True(t, gock.IsDone(), "Not all mocks were used")
+}
+
+// TestPostChannelMessage_TestMode: in test mode no network call is made and the
+// function returns nil, mirroring PostEphemeral's behavior.
+func TestPostChannelMessage_TestMode(t *testing.T) {
+	IsTestMode = true
+	defer func() { IsTestMode = false }()
+
+	defer gock.Off()
+	// No mock registered: if a request were made, gock would error out.
+
+	err := PostChannelMessage("C12345", "message")
+	assert.NoError(t, err)
+	assert.False(t, gock.HasUnmatchedRequest(), "no HTTP request should be made in test mode")
+}
+
 func TestIsChannelArchived(t *testing.T) {
 	// Save environment variables before test and restore after
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")

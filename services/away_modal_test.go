@@ -50,8 +50,9 @@ func TestBuildAwayManagementModalView_HasAllFields(t *testing.T) {
 }
 
 // TestBuildAwayManagementModalView_PrivateMetadata: channel ID and user ID
-// must round-trip through private_metadata so the submission handler can
-// post an ephemeral confirmation back into the same channel.
+// must round-trip through private_metadata so the submission handler can post
+// the confirmation back into the same channel — a visible channel message for
+// an actual change, or an ephemeral notice (to the user) when nothing changed.
 func TestBuildAwayManagementModalView_PrivateMetadata(t *testing.T) {
 	view := BuildAwayManagementModalView(AwayManagementModalInputs{
 		ChannelID: "C12345",

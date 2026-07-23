@@ -200,9 +200,10 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 				})
 				return
 			}
-			if !services.IsTestMode && meta.UserID != "" {
+			if !services.IsTestMode {
+				// Post visibly so the whole channel sees the config change.
 				msg := i18n.TWithLang(form.Language, "modal.deleted", form.LabelName)
-				if err := services.PostEphemeral(meta.ChannelID, meta.UserID, msg); err != nil {
+				if err := services.PostChannelMessage(meta.ChannelID, msg); err != nil {
 					log.Printf("settings deleted confirmation post failed: %v", err)
 				}
 			}
@@ -266,9 +267,10 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 		}
 	}
 
-	if !services.IsTestMode && meta.UserID != "" {
+	if !services.IsTestMode {
+		// Post visibly so the whole channel sees the config change.
 		msg := i18n.TWithLang(form.Language, "modal.saved", form.LabelName)
-		if err := services.PostEphemeral(meta.ChannelID, meta.UserID, msg); err != nil {
+		if err := services.PostChannelMessage(meta.ChannelID, msg); err != nil {
 			log.Printf("settings saved confirmation post failed: %v", err)
 		}
 	}
