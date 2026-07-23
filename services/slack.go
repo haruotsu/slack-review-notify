@@ -646,6 +646,50 @@ func PostEphemeral(channel, user, message string) error {
 	return nil
 }
 
+// PostChannelMessage posts a plain message to the channel, visible to everyone
+// (not a thread reply, not ephemeral). Used for settings-change confirmations
+// that are worth surfacing to the whole channel — e.g. "so-and-so's leave was
+// saved" — so teammates can see the change rather than only the operator.
+// Returns nil immediately in test mode.
+func PostChannelMessage(channel, message string) error {
+	if IsTestMode {
+		log.Printf("test mode: would post channel message to channel=%s", channel)
+		return nil
+	}
+
+	body := map[string]any{
+		"channel": channel,
+		"text":    message,
+	}
+
+	jsonData, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.postMessage", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBytes, _ := io.ReadAll(resp.Body)
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(respBytes, &result); err != nil {
+		return fmt.Errorf("slack API response parse error: %v (body: %s)", err, string(respBytes))
+	}
+	if !result.OK {
+		return fmt.Errorf("slack chat.postMessage error: %s", result.Error)
+	}
+	return nil
+}
+
 // PostToThreadWithButtons posts a message with buttons to a thread
 func PostToThreadWithButtons(channel, ts, message string, taskID, lang string) error {
 	t := i18n.L(lang)

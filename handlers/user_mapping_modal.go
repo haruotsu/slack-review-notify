@@ -88,6 +88,8 @@ func handleUserMappingModalSubmission(c *gin.Context, db *gorm.DB, payload Slack
 		var existing models.UserMapping
 		res := db.Where("github_username = ?", form.GithubUsername).First(&existing)
 		if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+			// "nothing to delete" is operator feedback, not a change worth
+			// broadcasting — keep it ephemeral to avoid channel noise.
 			if !services.IsTestMode && meta.UserID != "" {
 				msg := i18n.TWithLang(lang, "modal.user_mapping.delete_not_found", form.GithubUsername)
 				if err := services.PostEphemeral(meta.ChannelID, meta.UserID, msg); err != nil {
@@ -115,9 +117,10 @@ func handleUserMappingModalSubmission(c *gin.Context, db *gorm.DB, payload Slack
 			})
 			return
 		}
-		if !services.IsTestMode && meta.UserID != "" {
+		if !services.IsTestMode {
+			// Post visibly so the whole channel sees the mapping change.
 			msg := i18n.TWithLang(lang, "modal.user_mapping.deleted", form.GithubUsername)
-			if err := services.PostEphemeral(meta.ChannelID, meta.UserID, msg); err != nil {
+			if err := services.PostChannelMessage(meta.ChannelID, msg); err != nil {
 				log.Printf("user-mapping deleted notice failed: %v", err)
 			}
 		}
@@ -165,9 +168,10 @@ func handleUserMappingModalSubmission(c *gin.Context, db *gorm.DB, payload Slack
 		return
 	}
 
-	if !services.IsTestMode && meta.UserID != "" {
+	if !services.IsTestMode {
+		// Post visibly so the whole channel sees the mapping change.
 		msg := i18n.TWithLang(lang, "modal.user_mapping.saved", form.GithubUsername)
-		if err := services.PostEphemeral(meta.ChannelID, meta.UserID, msg); err != nil {
+		if err := services.PostChannelMessage(meta.ChannelID, msg); err != nil {
 			log.Printf("user-mapping saved notice failed: %v", err)
 		}
 	}
