@@ -16,6 +16,7 @@ type ReviewerAvailability struct {
 	AwayFrom    *time.Time // If nil, away starts immediately
 	AwayUntil   *time.Time // If nil, the user is away indefinitely
 	Reason      string     // Reason for being away (optional)
+	LeaveType   string     // "" = full day, "am" = morning half, "pm" = afternoon half
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	DeletedAt   gorm.DeletedAt `gorm:"index"`

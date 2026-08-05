@@ -253,6 +253,114 @@ func TestParseAwayModalSubmission_SameDayAllowed(t *testing.T) {
 	}
 }
 
+// TestParseAwayModalSubmission_HalfDayAM: selecting AM overrides from/until
+// to the morning half-day boundary (06:00–14:00 in the channel timezone).
+func TestParseAwayModalSubmission_HalfDayAM(t *testing.T) {
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("load JST: %v", err)
+	}
+	v := minimalAwayValues()
+	v["away_leave_type"] = map[string]ViewStateValue{
+		"away_leave_type": {SelectedOption: &ViewSelectedOption{Value: "am"}},
+	}
+	v["away_from"] = map[string]ViewStateValue{
+		"away_from": {Value: "2030-04-05"},
+	}
+	form, err := ParseAwayModalSubmission(v, jst, "ja")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if form.LeaveType != "am" {
+		t.Errorf("LeaveType = %q, want am", form.LeaveType)
+	}
+	wantFrom := time.Date(2030, 4, 5, 6, 0, 0, 0, jst)
+	if form.AwayFrom == nil || !form.AwayFrom.Equal(wantFrom) {
+		t.Errorf("AwayFrom = %v, want %v", form.AwayFrom, wantFrom)
+	}
+	wantUntil := time.Date(2030, 4, 5, 14, 0, 0, 0, jst)
+	if form.AwayUntil == nil || !form.AwayUntil.Equal(wantUntil) {
+		t.Errorf("AwayUntil = %v, want %v", form.AwayUntil, wantUntil)
+	}
+}
+
+// TestParseAwayModalSubmission_HalfDayPM: selecting PM overrides to 14:00–00:00+1.
+func TestParseAwayModalSubmission_HalfDayPM(t *testing.T) {
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("load JST: %v", err)
+	}
+	v := minimalAwayValues()
+	v["away_leave_type"] = map[string]ViewStateValue{
+		"away_leave_type": {SelectedOption: &ViewSelectedOption{Value: "pm"}},
+	}
+	v["away_from"] = map[string]ViewStateValue{
+		"away_from": {Value: "2030-04-05"},
+	}
+	form, err := ParseAwayModalSubmission(v, jst, "ja")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if form.LeaveType != "pm" {
+		t.Errorf("LeaveType = %q, want pm", form.LeaveType)
+	}
+	wantFrom := time.Date(2030, 4, 5, 14, 0, 0, 0, jst)
+	if form.AwayFrom == nil || !form.AwayFrom.Equal(wantFrom) {
+		t.Errorf("AwayFrom = %v, want %v", form.AwayFrom, wantFrom)
+	}
+	wantUntil := time.Date(2030, 4, 6, 0, 0, 0, 0, jst)
+	if form.AwayUntil == nil || !form.AwayUntil.Equal(wantUntil) {
+		t.Errorf("AwayUntil = %v, want %v", form.AwayUntil, wantUntil)
+	}
+}
+
+// TestParseAwayModalSubmission_HalfDayMultiDayRejected: half-day leave spanning
+// multiple days is rejected with a validation error.
+func TestParseAwayModalSubmission_HalfDayMultiDayRejected(t *testing.T) {
+	v := minimalAwayValues()
+	v["away_leave_type"] = map[string]ViewStateValue{
+		"away_leave_type": {SelectedOption: &ViewSelectedOption{Value: "am"}},
+	}
+	v["away_from"] = map[string]ViewStateValue{
+		"away_from": {Value: "2030-04-05"},
+	}
+	v["away_until"] = map[string]ViewStateValue{
+		"away_until": {Value: "2030-04-07"},
+	}
+	_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+	if err == nil {
+		t.Fatalf("expected validation error for multi-day half-day leave")
+	}
+	ve, ok := err.(*ModalValidationError)
+	if !ok {
+		t.Fatalf("want *ModalValidationError, got %T", err)
+	}
+	if _, has := ve.Errors["away_until"]; !has {
+		t.Errorf("want error on away_until, got %+v", ve.Errors)
+	}
+}
+
+// TestBuildAwayManagementModalView_HasLeaveTypeBlock: the leave type selector
+// must be present in the view so users can pick AM/PM.
+func TestBuildAwayManagementModalView_HasLeaveTypeBlock(t *testing.T) {
+	view := BuildAwayManagementModalView(AwayManagementModalInputs{
+		ChannelID: "C12345",
+		UserID:    "U777",
+		Lang:      "ja",
+	})
+	blocks := view["blocks"].([]map[string]any)
+	found := false
+	for _, b := range blocks {
+		if id, ok := b["block_id"].(string); ok && id == "away_leave_type" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("missing block_id: away_leave_type")
+	}
+}
+
 // TestParseAwayModalSubmission_DeleteAll: checkbox checked → DeleteAll=true.
 // Per the field semantics (slash command `unset-away @user` without dates),
 // this wipes every record for the user, so we don't require the date fields.

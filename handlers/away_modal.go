@@ -124,6 +124,7 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 	switch {
 	case err == nil:
 		existing.Reason = form.Reason
+		existing.LeaveType = form.LeaveType
 		existing.UpdatedAt = now
 		if err := db.Save(&existing).Error; err != nil {
 			log.Printf("away upsert update failed: user=%s err=%v", form.SlackUserID, err)
@@ -140,6 +141,7 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 			AwayFrom:    form.AwayFrom,
 			AwayUntil:   form.AwayUntil,
 			Reason:      form.Reason,
+			LeaveType:   form.LeaveType,
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}

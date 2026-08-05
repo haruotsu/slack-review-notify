@@ -60,6 +60,7 @@ type AwayForm struct {
 	AwayFrom    *time.Time
 	AwayUntil   *time.Time
 	Reason      string
+	LeaveType   string // "" = full day, "am" = morning half, "pm" = afternoon half
 	DeleteAll   bool
 }
 
@@ -129,6 +130,35 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 		true,
 	)
 
+	leaveTypeBlock := inputBlock(
+		"away_leave_type",
+		t("modal.away.leave_type"),
+		t("modal.away.leave_type.hint"),
+		map[string]any{
+			"type":      "static_select",
+			"action_id": "away_leave_type",
+			"initial_option": map[string]any{
+				"text":  plainText(t("modal.away.leave_type.full_day")),
+				"value": "full_day",
+			},
+			"options": []map[string]any{
+				{
+					"text":  plainText(t("modal.away.leave_type.full_day")),
+					"value": "full_day",
+				},
+				{
+					"text":  plainText(t("modal.away.leave_type.am")),
+					"value": "am",
+				},
+				{
+					"text":  plainText(t("modal.away.leave_type.pm")),
+					"value": "pm",
+				},
+			},
+		},
+		true,
+	)
+
 	reasonBlock := inputBlock(
 		"away_reason",
 		t("modal.away.reason"),
@@ -167,6 +197,7 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 			},
 		},
 		userBlock,
+		leaveTypeBlock,
 		fromBlock,
 		untilBlock,
 		reasonBlock,
@@ -297,15 +328,69 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 		return &ts
 	}
 
+	// Parse leave type from static_select
+	selectedOption := func(blockID string) string {
+		actions, ok := values[blockID]
+		if !ok {
+			return ""
+		}
+		v, ok := actions[blockID]
+		if !ok {
+			for _, x := range actions {
+				v = x
+				break
+			}
+		}
+		if v.SelectedOption != nil {
+			return v.SelectedOption.Value
+		}
+		return ""
+	}
+
+	leaveTypeRaw := selectedOption("away_leave_type")
+	if leaveTypeRaw == "am" || leaveTypeRaw == "pm" {
+		form.LeaveType = leaveTypeRaw
+	}
+
 	form.AwayFrom = parseDate("away_from", false)
 	form.AwayUntil = parseDate("away_until", true)
 	form.Reason = field("away_reason")
 
-	// Same-day leave is legitimate (from=00:00 +loc, until=23:59:59 +loc), so
-	// only reject when start is strictly after end. The slash command's
-	// `on YYYY-MM-DD` form expresses the same intent.
-	if form.AwayFrom != nil && form.AwayUntil != nil && form.AwayFrom.After(*form.AwayUntil) {
-		errs["away_until"] = t("modal.away.error.until_before_from")
+	// For half-day leave, from and until must be on the same day (or use from only).
+	// Override the times to match the half-day boundaries.
+	if form.LeaveType == "am" || form.LeaveType == "pm" {
+		if form.AwayFrom != nil && form.AwayUntil != nil {
+			if form.AwayFrom.Year() != form.AwayUntil.Year() || form.AwayFrom.YearDay() != form.AwayUntil.YearDay() {
+				errs["away_until"] = t("modal.away.error.half_day_multi_day")
+			}
+		}
+		ref := form.AwayFrom
+		if ref == nil {
+			ref = form.AwayUntil
+		}
+		if ref == nil && len(errs) == 0 {
+			now := time.Now().In(loc)
+			ref = &now
+		}
+		if ref != nil && len(errs) == 0 {
+			if form.LeaveType == "am" {
+				from := time.Date(ref.Year(), ref.Month(), ref.Day(), 6, 0, 0, 0, loc)
+				until := time.Date(ref.Year(), ref.Month(), ref.Day(), 14, 0, 0, 0, loc)
+				form.AwayFrom = &from
+				form.AwayUntil = &until
+			} else {
+				from := time.Date(ref.Year(), ref.Month(), ref.Day(), 14, 0, 0, 0, loc)
+				until := time.Date(ref.Year(), ref.Month(), ref.Day()+1, 0, 0, 0, 0, loc)
+				form.AwayFrom = &from
+				form.AwayUntil = &until
+			}
+		}
+	} else {
+		// Same-day leave is legitimate (from=00:00 +loc, until=23:59:59 +loc), so
+		// only reject when start is strictly after end.
+		if form.AwayFrom != nil && form.AwayUntil != nil && form.AwayFrom.After(*form.AwayUntil) {
+			errs["away_until"] = t("modal.away.error.until_before_from")
+		}
 	}
 
 	if len(errs) > 0 {

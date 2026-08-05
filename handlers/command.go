@@ -290,12 +290,12 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		// Try to get language from channel config for fallback message
-	var fallbackConfig models.ChannelConfig
-	fallbackLang := "ja"
-	if err := db.Where("slack_channel_id = ?", channelID).First(&fallbackConfig).Error; err == nil {
-		fallbackLang = getLang(&fallbackConfig)
-	}
-	c.String(200, i18n.TWithLang(fallbackLang, "cmd.unknown"))
+		var fallbackConfig models.ChannelConfig
+		fallbackLang := "ja"
+		if err := db.Where("slack_channel_id = ?", channelID).First(&fallbackConfig).Error; err == nil {
+			fallbackLang = getLang(&fallbackConfig)
+		}
+		c.String(200, i18n.TWithLang(fallbackLang, "cmd.unknown"))
 	}
 }
 
@@ -1310,9 +1310,10 @@ func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername, lang string)
 
 // awayPeriod holds the parsed leave period and reason from a set-away/unset-away command.
 type awayPeriod struct {
-	from   *time.Time
-	until  *time.Time
-	reason string
+	from      *time.Time
+	until     *time.Time
+	reason    string
+	leaveType string // "" = full day, "am" = morning half, "pm" = afternoon half
 }
 
 // Named values for parseAwayPeriod's rejectPast argument, so call sites read
@@ -1396,13 +1397,37 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 			if err != nil {
 				return p, "cmd.set_away.invalid_date"
 			}
-			startOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
-			endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
-			if rejectPast && endOfDay.Before(now) {
-				return p, "cmd.set_away.past_date"
+
+			// Check for optional am/pm modifier after the date
+			if i+1 < len(parts) && (parts[i+1] == "am" || parts[i+1] == "pm") {
+				i++
+				p.leaveType = parts[i]
+				if p.leaveType == "am" {
+					from := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 6, 0, 0, 0, loc)
+					until := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 14, 0, 0, 0, loc)
+					if rejectPast && until.Before(now) {
+						return p, "cmd.set_away.half_day_expired"
+					}
+					p.from = &from
+					p.until = &until
+				} else {
+					from := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 14, 0, 0, 0, loc)
+					until := time.Date(parsed.Year(), parsed.Month(), parsed.Day()+1, 0, 0, 0, 0, loc)
+					if rejectPast && until.Before(now) {
+						return p, "cmd.set_away.half_day_expired"
+					}
+					p.from = &from
+					p.until = &until
+				}
+			} else {
+				startOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
+				endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
+				if rejectPast && endOfDay.Before(now) {
+					return p, "cmd.set_away.past_date"
+				}
+				p.from = &startOfDay
+				p.until = &endOfDay
 			}
-			p.from = &startOfDay
-			p.until = &endOfDay
 			hasOn = true
 		case "reason":
 			if i+1 < len(parts) {
@@ -1442,7 +1467,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 		c.String(200, t(errKey))
 		return
 	}
-	awayFrom, awayUntil, reason := period.from, period.until, period.reason
+	awayFrom, awayUntil, reason, leaveType := period.from, period.until, period.reason, period.leaveType
 
 	// Validate from < until when both are specified
 	if awayFrom != nil && awayUntil != nil && !awayFrom.Before(*awayUntil) {
@@ -1459,6 +1484,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 	switch {
 	case err == nil:
 		existing.Reason = reason
+		existing.LeaveType = leaveType
 		existing.UpdatedAt = time.Now()
 		if err := db.Save(&existing).Error; err != nil {
 			log.Printf("failed to update reviewer availability: slackUserID=%s channelID=%s err=%v", slackUserID, channelID, err)
@@ -1472,6 +1498,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 			AwayFrom:    awayFrom,
 			AwayUntil:   awayUntil,
 			Reason:      reason,
+			LeaveType:   leaveType,
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
 		}
@@ -1494,7 +1521,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 		openParen, closeParen = " (", ")"
 	}
 	response := t("cmd.set_away.success", slackUserID)
-	response += openParen + formatDateRange(awayFrom, awayUntil, t)
+	response += openParen + formatDateRangeWithType(awayFrom, awayUntil, leaveType, t)
 
 	if reason != "" {
 		response += t("common.reason", reason) + closeParen
@@ -1569,7 +1596,17 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 }
 
 // formatDateRange returns a human-readable date range string for away periods.
-func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface{}) string) string {
+func formatDateRangeWithType(awayFrom, awayUntil *time.Time, leaveType string, t func(string, ...interface{}) string) string {
+	if leaveType == "am" || leaveType == "pm" {
+		date := ""
+		if awayFrom != nil {
+			date = awayFrom.Format("2006-01-02")
+		} else if awayUntil != nil {
+			date = awayUntil.Format("2006-01-02")
+		}
+		return t("common.on_date", date) + " " + t("common.leave_type."+leaveType)
+	}
+
 	isSameDay := awayFrom != nil && awayUntil != nil &&
 		awayFrom.Year() == awayUntil.Year() && awayFrom.YearDay() == awayUntil.YearDay()
 
@@ -1616,7 +1653,7 @@ func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
 		}
 
 		line := fmt.Sprintf("• <@%s> [%s] ", r.SlackUserID, statusLabel)
-		line += formatDateRange(r.AwayFrom, r.AwayUntil, t)
+		line += formatDateRangeWithType(r.AwayFrom, r.AwayUntil, r.LeaveType, t)
 
 		if r.Reason != "" {
 			line += t("common.reason_paren", r.Reason)
@@ -1680,7 +1717,7 @@ func setLanguage(c *gin.Context, db *gorm.DB, channelID, labelName, newLang stri
 			ID:             uuid.NewString(),
 			SlackChannelID: channelID,
 			LabelName:      labelName,
-			Language:        newLang,
+			Language:       newLang,
 			IsActive:       true,
 			CreatedAt:      time.Now(),
 			UpdatedAt:      time.Now(),

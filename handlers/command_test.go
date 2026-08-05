@@ -3,6 +3,7 @@ package handlers
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestParseCommand(t *testing.T) {
@@ -110,6 +111,97 @@ func TestCleanUserID(t *testing.T) {
 			got := cleanUserID(tt.input)
 			if got != tt.expected {
 				t.Errorf("cleanUserID(%q) = %q, expected %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseAwayPeriod_HalfDay(t *testing.T) {
+	jst := time.FixedZone("Asia/Tokyo", 9*60*60)
+	now := time.Date(2026, 8, 5, 8, 0, 0, 0, jst)
+
+	tests := []struct {
+		name          string
+		parts         []string
+		wantFromHour  int
+		wantUntilHour int
+		wantUntilDay  int
+		wantLeaveType string
+		wantReason    string
+		wantErr       string
+	}{
+		{
+			name:          "on date am",
+			parts:         []string{"@user", "on", "2026-08-05", "am"},
+			wantFromHour:  6,
+			wantUntilHour: 14,
+			wantUntilDay:  5,
+			wantLeaveType: "am",
+		},
+		{
+			name:          "on date pm",
+			parts:         []string{"@user", "on", "2026-08-05", "pm"},
+			wantFromHour:  14,
+			wantUntilHour: 0,
+			wantUntilDay:  6,
+			wantLeaveType: "pm",
+		},
+		{
+			name:          "on date without modifier (full day)",
+			parts:         []string{"@user", "on", "2026-08-05"},
+			wantFromHour:  0,
+			wantUntilHour: 23,
+			wantUntilDay:  5,
+			wantLeaveType: "",
+		},
+		{
+			name:          "on date am reason text",
+			parts:         []string{"@user", "on", "2026-08-05", "am", "reason", "有給休暇"},
+			wantFromHour:  6,
+			wantUntilHour: 14,
+			wantUntilDay:  5,
+			wantLeaveType: "am",
+			wantReason:    "有給休暇",
+		},
+		{
+			name:    "on past date am (expired)",
+			parts:   []string{"@user", "on", "2026-08-04", "am"},
+			wantErr: "cmd.set_away.half_day_expired",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			period, errKey := parseAwayPeriod(tt.parts, jst, now, rejectPastDates)
+			if tt.wantErr != "" {
+				if errKey != tt.wantErr {
+					t.Errorf("expected error key %q, got %q", tt.wantErr, errKey)
+				}
+				return
+			}
+			if errKey != "" {
+				t.Fatalf("unexpected error key: %s", errKey)
+			}
+			if period.leaveType != tt.wantLeaveType {
+				t.Errorf("leaveType = %q, want %q", period.leaveType, tt.wantLeaveType)
+			}
+			if period.from == nil {
+				t.Fatal("from is nil")
+			}
+			if period.from.Hour() != tt.wantFromHour {
+				t.Errorf("from.Hour() = %d, want %d", period.from.Hour(), tt.wantFromHour)
+			}
+			if period.until == nil {
+				t.Fatal("until is nil")
+			}
+			if period.until.Hour() != tt.wantUntilHour {
+				t.Errorf("until.Hour() = %d, want %d", period.until.Hour(), tt.wantUntilHour)
+			}
+			if period.until.Day() != tt.wantUntilDay {
+				t.Errorf("until.Day() = %d, want %d", period.until.Day(), tt.wantUntilDay)
+			}
+			if period.reason != tt.wantReason {
+				t.Errorf("reason = %q, want %q", period.reason, tt.wantReason)
 			}
 		})
 	}

@@ -1140,6 +1140,63 @@ func TestGetAwayUserIDs_DeduplicatesMultiplePeriods(t *testing.T) {
 	assert.Equal(t, 1, count, "a user with multiple active periods must appear exactly once")
 }
 
+func TestGetAwayUserIDs_HalfDayBoundary(t *testing.T) {
+	db := setupTestDB(t)
+
+	jst := time.FixedZone("Asia/Tokyo", 9*60*60)
+	baseDate := time.Date(2026, 8, 5, 0, 0, 0, 0, jst)
+
+	// AM half-day: 06:00–14:00 JST
+	amFrom := time.Date(2026, 8, 5, 6, 0, 0, 0, jst)
+	amUntil := time.Date(2026, 8, 5, 14, 0, 0, 0, jst)
+	db.Create(&models.ReviewerAvailability{
+		ID: "half-am", SlackUserID: "U_AM", LeaveType: "am",
+		AwayFrom: &amFrom, AwayUntil: &amUntil,
+		CreatedAt: baseDate, UpdatedAt: baseDate,
+	})
+
+	// PM half-day: 14:00–00:00+1 JST
+	pmFrom := time.Date(2026, 8, 5, 14, 0, 0, 0, jst)
+	pmUntil := time.Date(2026, 8, 6, 0, 0, 0, 0, jst)
+	db.Create(&models.ReviewerAvailability{
+		ID: "half-pm", SlackUserID: "U_PM", LeaveType: "pm",
+		AwayFrom: &pmFrom, AwayUntil: &pmUntil,
+		CreatedAt: baseDate, UpdatedAt: baseDate,
+	})
+
+	tests := []struct {
+		name   string
+		now    time.Time
+		wantAM bool
+		wantPM bool
+	}{
+		{"05:59 before AM start", time.Date(2026, 8, 5, 5, 59, 0, 0, jst), false, false},
+		{"06:00 AM start boundary", time.Date(2026, 8, 5, 6, 0, 0, 0, jst), true, false},
+		{"10:00 mid AM", time.Date(2026, 8, 5, 10, 0, 0, 0, jst), true, false},
+		{"13:59 last minute of AM", time.Date(2026, 8, 5, 13, 59, 0, 0, jst), true, false},
+		{"14:00 AM ends PM starts", time.Date(2026, 8, 5, 14, 0, 0, 0, jst), false, true},
+		{"15:00 mid PM", time.Date(2026, 8, 5, 15, 0, 0, 0, jst), false, true},
+		{"23:59 last minute of PM", time.Date(2026, 8, 5, 23, 59, 0, 0, jst), false, true},
+		{"00:00+1 PM end boundary", time.Date(2026, 8, 6, 0, 0, 0, 0, jst), false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ids := getAwayUserIDsAt(db, tt.now)
+			if tt.wantAM {
+				assert.Contains(t, ids, "U_AM")
+			} else {
+				assert.NotContains(t, ids, "U_AM")
+			}
+			if tt.wantPM {
+				assert.Contains(t, ids, "U_PM")
+			} else {
+				assert.NotContains(t, ids, "U_PM")
+			}
+		})
+	}
+}
+
 func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
 	db := setupTestDB(t)
 
