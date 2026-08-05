@@ -1027,7 +1027,8 @@ func TestFormatDateRange_WithTimeRange(t *testing.T) {
 		templates := map[string]string{
 			"common.on_date":      "%s",
 			"common.on_date_time": "%s %s-%s",
-			"common.from_until":   "%s ~ %s",
+			"common.from_until":      "%s ~ %s",
+			"common.from_until_time": "%s ~ %s",
 			"common.until":        "%s まで",
 			"common.indefinite":   "無期限",
 		}
@@ -1049,4 +1050,38 @@ func TestFormatDateRange_WithTimeRange(t *testing.T) {
 	untilFull := time.Date(2099, 8, 5, 23, 59, 59, 0, jst)
 	resultFull := formatDateRange(&fromFull, &untilFull, tr)
 	assert.Equal(t, "2099-08-05", resultFull)
+
+	fromMulti := time.Date(2099, 8, 5, 6, 0, 0, 0, jst)
+	untilMulti := time.Date(2099, 8, 6, 14, 0, 0, 0, jst)
+	resultMulti := formatDateRange(&fromMulti, &untilMulti, tr)
+	assert.Equal(t, "2099-08-05 06:00 ~ 2099-08-06 14:00", resultMulti)
+}
+
+func TestParseTimeRange(t *testing.T) {
+	tests := []struct {
+		input string
+		wantF [2]int
+		wantU [2]int
+		ok    bool
+	}{
+		{"06:00-14:00", [2]int{6, 0}, [2]int{14, 0}, true},
+		{"0:00-23:59", [2]int{0, 0}, [2]int{23, 59}, true},
+		{"9:30-17:00", [2]int{9, 30}, [2]int{17, 0}, true},
+		{"25:00-14:00", [2]int{}, [2]int{}, false},
+		{"06:00-25:00", [2]int{}, [2]int{}, false},
+		{"06:60-14:00", [2]int{}, [2]int{}, false},
+		{"abc-14:00", [2]int{}, [2]int{}, false},
+		{"06:00", [2]int{}, [2]int{}, false},
+		{"", [2]int{}, [2]int{}, false},
+	}
+	for _, tt := range tests {
+		f, u, ok := parseTimeRange(tt.input)
+		if ok != tt.ok {
+			t.Errorf("parseTimeRange(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			continue
+		}
+		if ok && (f != tt.wantF || u != tt.wantU) {
+			t.Errorf("parseTimeRange(%q) = %v, %v; want %v, %v", tt.input, f, u, tt.wantF, tt.wantU)
+		}
+	}
 }

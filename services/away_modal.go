@@ -355,7 +355,12 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 	// only reject when start is strictly after end. The slash command's
 	// `on YYYY-MM-DD` form expresses the same intent.
 	if form.AwayFrom != nil && form.AwayUntil != nil && form.AwayFrom.After(*form.AwayUntil) {
-		errs["away_until"] = t("modal.away.error.until_before_from")
+		isSameDay := form.AwayFrom.Year() == form.AwayUntil.Year() && form.AwayFrom.YearDay() == form.AwayUntil.YearDay()
+		if isSameDay {
+			errs["away_until_time"] = t("modal.away.error.until_time_before_from")
+		} else {
+			errs["away_until"] = t("modal.away.error.until_before_from")
+		}
 	}
 
 	if len(errs) > 0 {

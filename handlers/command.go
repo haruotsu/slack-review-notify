@@ -1596,8 +1596,9 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 		// Extra tokens without a date keyword (e.g. a stray "reason") must not
 		// silently restrict the match to indefinite records.
 		if period.from != nil || period.until != nil {
-			if period.from != nil && period.until != nil && !period.hasTimeRange &&
-				period.from.Year() == period.until.Year() && period.from.YearDay() == period.until.YearDay() {
+			isSingleDayWithoutTime := period.from != nil && period.until != nil && !period.hasTimeRange &&
+				period.from.Year() == period.until.Year() && period.from.YearDay() == period.until.YearDay()
+			if isSingleDayWithoutTime {
 				dayStart := time.Date(period.from.Year(), period.from.Month(), period.from.Day(), 0, 0, 0, 0, loc)
 				nextDayStart := dayStart.AddDate(0, 0, 1)
 				query = query.Where("away_from >= ? AND away_from < ? AND away_until >= ? AND away_until < ?",
@@ -1632,6 +1633,8 @@ func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface
 		return t("common.on_date_time", awayFrom.Format("2006-01-02"), awayFrom.Format("15:04"), awayUntil.Format("15:04"))
 	case isSameDay:
 		return t("common.on_date", awayFrom.Format("2006-01-02"))
+	case awayFrom != nil && awayUntil != nil && !isFullDay(awayFrom, awayUntil):
+		return t("common.from_until_time", awayFrom.Format("2006-01-02 15:04"), awayUntil.Format("2006-01-02 15:04"))
 	case awayFrom != nil && awayUntil != nil:
 		return t("common.from_until", awayFrom.Format("2006-01-02"), awayUntil.Format("2006-01-02"))
 	case awayFrom != nil:

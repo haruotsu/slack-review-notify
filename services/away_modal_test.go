@@ -320,3 +320,30 @@ func TestParseAwayModalSubmission_TimeWithoutDateIgnored(t *testing.T) {
 		t.Errorf("AwayFrom = %v, want nil (time without date should be ignored)", form.AwayFrom)
 	}
 }
+
+func TestParseAwayModalSubmission_SameDayFromTimeAfterUntilTime(t *testing.T) {
+	v := minimalAwayValues()
+	v["away_from"] = map[string]ViewStateValue{
+		"away_from": {Value: "2030-04-01"},
+	}
+	v["away_from_time"] = map[string]ViewStateValue{
+		"away_from_time": {SelectedTime: "14:00"},
+	}
+	v["away_until"] = map[string]ViewStateValue{
+		"away_until": {Value: "2030-04-01"},
+	}
+	v["away_until_time"] = map[string]ViewStateValue{
+		"away_until_time": {SelectedTime: "06:00"},
+	}
+	_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+	if err == nil {
+		t.Fatalf("expected validation error for from_time > until_time on same day")
+	}
+	ve, ok := err.(*ModalValidationError)
+	if !ok {
+		t.Fatalf("want *ModalValidationError, got %T", err)
+	}
+	if _, has := ve.Errors["away_until_time"]; !has {
+		t.Errorf("want error on away_until_time, got %+v", ve.Errors)
+	}
+}
