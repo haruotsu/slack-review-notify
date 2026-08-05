@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"slack-review-notify/i18n"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -118,6 +119,17 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 		true,
 	)
 
+	fromTimeBlock := inputBlock(
+		"away_from_time",
+		t("modal.away.from_time"),
+		t("modal.away.from_time.hint"),
+		map[string]any{
+			"type":      "timepicker",
+			"action_id": "away_from_time",
+		},
+		true,
+	)
+
 	untilBlock := inputBlock(
 		"away_until",
 		t("modal.away.until"),
@@ -125,6 +137,17 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 		map[string]any{
 			"type":      "datepicker",
 			"action_id": "away_until",
+		},
+		true,
+	)
+
+	untilTimeBlock := inputBlock(
+		"away_until_time",
+		t("modal.away.until_time"),
+		t("modal.away.until_time.hint"),
+		map[string]any{
+			"type":      "timepicker",
+			"action_id": "away_until_time",
 		},
 		true,
 	)
@@ -168,7 +191,9 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 		},
 		userBlock,
 		fromBlock,
+		fromTimeBlock,
 		untilBlock,
+		untilTimeBlock,
 		reasonBlock,
 		deleteAllBlock,
 	}
@@ -250,6 +275,20 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 		return false
 	}
 
+	selectedTime := func(blockID string) string {
+		actions, ok := values[blockID]
+		if !ok {
+			return ""
+		}
+		if v, ok := actions[blockID]; ok {
+			return v.SelectedTime
+		}
+		for _, v := range actions {
+			return v.SelectedTime
+		}
+		return ""
+	}
+
 	form := &AwayForm{}
 
 	form.SlackUserID = selectedUser("away_user")
@@ -268,7 +307,7 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 	// so the leave covers the entire selected day, matching the slash-command
 	// behavior. Without this, an `until` of 2030-04-05 would expire at midnight
 	// the same day instead of at the end of it.
-	parseDate := func(blockID string, endOfDay bool) *time.Time {
+	parseDate := func(blockID, timeBlockID string, endOfDay bool) *time.Time {
 		actions, ok := values[blockID]
 		if !ok {
 			return nil
@@ -293,12 +332,23 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 		if endOfDay {
 			hh, mm, ss = 23, 59, 59
 		}
+		timeVal := selectedTime(timeBlockID)
+		if timeVal != "" {
+			tp := strings.SplitN(timeVal, ":", 2)
+			if len(tp) == 2 {
+				if h, err := strconv.Atoi(tp[0]); err == nil && h >= 0 && h <= 23 {
+					if m, err := strconv.Atoi(tp[1]); err == nil && m >= 0 && m <= 59 {
+						hh, mm, ss = h, m, 0
+					}
+				}
+			}
+		}
 		ts := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), hh, mm, ss, 0, loc)
 		return &ts
 	}
 
-	form.AwayFrom = parseDate("away_from", false)
-	form.AwayUntil = parseDate("away_until", true)
+	form.AwayFrom = parseDate("away_from", "away_from_time", false)
+	form.AwayUntil = parseDate("away_until", "away_until_time", true)
 	form.Reason = field("away_reason")
 
 	// Same-day leave is legitimate (from=00:00 +loc, until=23:59:59 +loc), so

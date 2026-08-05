@@ -1310,9 +1310,10 @@ func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername, lang string)
 
 // awayPeriod holds the parsed leave period and reason from a set-away/unset-away command.
 type awayPeriod struct {
-	from   *time.Time
-	until  *time.Time
-	reason string
+	from         *time.Time
+	until        *time.Time
+	reason       string
+	hasTimeRange bool
 }
 
 // Named values for parseAwayPeriod's rejectPast argument, so call sites read
@@ -1337,6 +1338,33 @@ func resolveTimezone(db *gorm.DB, channelID, labelName string) *time.Location {
 		return time.UTC
 	}
 	return loc
+}
+
+var timeRangeRe = regexp.MustCompile(`^\d{1,2}:\d{2}-\d{1,2}:\d{2}$`)
+
+func parseTimeRange(s string) (from [2]int, until [2]int, ok bool) {
+	parts := strings.SplitN(s, "-", 2)
+	if len(parts) != 2 {
+		return from, until, false
+	}
+	parse := func(t string) ([2]int, bool) {
+		hm := strings.SplitN(t, ":", 2)
+		if len(hm) != 2 {
+			return [2]int{}, false
+		}
+		h, err1 := strconv.Atoi(hm[0])
+		m, err2 := strconv.Atoi(hm[1])
+		if err1 != nil || err2 != nil || h < 0 || h > 23 || m < 0 || m > 59 {
+			return [2]int{}, false
+		}
+		return [2]int{h, m}, true
+	}
+	f, ok1 := parse(parts[0])
+	u, ok2 := parse(parts[1])
+	if !ok1 || !ok2 {
+		return from, until, false
+	}
+	return f, u, true
 }
 
 // parseAwayPeriod parses the "from"/"until"/"on"/"reason" keywords from parts.
@@ -1400,6 +1428,19 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 			endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
 			if rejectPast && endOfDay.Before(now) {
 				return p, "cmd.set_away.past_date"
+			}
+			if i+1 < len(parts) && timeRangeRe.MatchString(parts[i+1]) {
+				i++
+				fromTime, untilTime, ok := parseTimeRange(parts[i])
+				if !ok {
+					return p, "cmd.set_away.invalid_time_range"
+				}
+				startOfDay = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), fromTime[0], fromTime[1], 0, 0, loc)
+				endOfDay = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), untilTime[0], untilTime[1], 0, 0, loc)
+				if !startOfDay.Before(endOfDay) {
+					return p, "cmd.set_away.from_after_until"
+				}
+				p.hasTimeRange = true
 			}
 			p.from = &startOfDay
 			p.until = &endOfDay
@@ -1555,7 +1596,15 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 		// Extra tokens without a date keyword (e.g. a stray "reason") must not
 		// silently restrict the match to indefinite records.
 		if period.from != nil || period.until != nil {
-			query = models.MatchPeriod(query, period.from, period.until)
+			if period.from != nil && period.until != nil && !period.hasTimeRange &&
+				period.from.Year() == period.until.Year() && period.from.YearDay() == period.until.YearDay() {
+				dayStart := time.Date(period.from.Year(), period.from.Month(), period.from.Day(), 0, 0, 0, 0, loc)
+				nextDayStart := dayStart.AddDate(0, 0, 1)
+				query = query.Where("away_from >= ? AND away_from < ? AND away_until >= ? AND away_until < ?",
+					dayStart, nextDayStart, dayStart, nextDayStart)
+			} else {
+				query = models.MatchPeriod(query, period.from, period.until)
+			}
 		}
 	}
 
@@ -1573,7 +1622,14 @@ func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface
 	isSameDay := awayFrom != nil && awayUntil != nil &&
 		awayFrom.Year() == awayUntil.Year() && awayFrom.YearDay() == awayUntil.YearDay()
 
+	isFullDay := func(from, until *time.Time) bool {
+		return from.Hour() == 0 && from.Minute() == 0 && from.Second() == 0 &&
+			until.Hour() == 23 && until.Minute() == 59 && until.Second() == 59
+	}
+
 	switch {
+	case isSameDay && !isFullDay(awayFrom, awayUntil):
+		return t("common.on_date_time", awayFrom.Format("2006-01-02"), awayFrom.Format("15:04"), awayUntil.Format("15:04"))
 	case isSameDay:
 		return t("common.on_date", awayFrom.Format("2006-01-02"))
 	case awayFrom != nil && awayUntil != nil:

@@ -1175,3 +1175,33 @@ func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
 		}
 	}
 }
+
+func TestGetAwayUserIDsAt_TimeSpecificLeave(t *testing.T) {
+	db := setupTestDB(t)
+
+	jst, _ := time.LoadLocation("Asia/Tokyo")
+	from := time.Date(2099, 8, 5, 6, 0, 0, 0, jst)
+	until := time.Date(2099, 8, 5, 14, 0, 0, 0, jst)
+
+	db.Create(&models.ReviewerAvailability{
+		ID:          "time-1",
+		SlackUserID: "U_HALFDAY",
+		AwayFrom:    &from,
+		AwayUntil:   &until,
+		Reason:      "午前休",
+		CreatedAt:   from,
+		UpdatedAt:   from,
+	})
+
+	duringLeave := time.Date(2099, 8, 5, 10, 0, 0, 0, jst)
+	ids := getAwayUserIDsAt(db, duringLeave)
+	assert.Contains(t, ids, "U_HALFDAY")
+
+	afterLeave := time.Date(2099, 8, 5, 15, 0, 0, 0, jst)
+	ids2 := getAwayUserIDsAt(db, afterLeave)
+	assert.NotContains(t, ids2, "U_HALFDAY")
+
+	beforeLeave := time.Date(2099, 8, 5, 5, 0, 0, 0, jst)
+	ids3 := getAwayUserIDsAt(db, beforeLeave)
+	assert.NotContains(t, ids3, "U_HALFDAY")
+}

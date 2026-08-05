@@ -32,7 +32,9 @@ func TestBuildAwayManagementModalView_HasAllFields(t *testing.T) {
 	required := []string{
 		"away_user",
 		"away_from",
+		"away_from_time",
 		"away_until",
+		"away_until_time",
 		"away_reason",
 		"away_delete_all",
 	}
@@ -76,7 +78,9 @@ func minimalAwayValues() map[string]map[string]ViewStateValue {
 	return map[string]map[string]ViewStateValue{
 		"away_user":       {"away_user": {SelectedUser: "U999"}},
 		"away_from":       {"away_from": {Value: ""}},
+		"away_from_time":  {"away_from_time": {SelectedTime: ""}},
 		"away_until":      {"away_until": {Value: ""}},
+		"away_until_time": {"away_until_time": {SelectedTime: ""}},
 		"away_reason":     {"away_reason": {Value: ""}},
 		"away_delete_all": {"away_delete_all": {SelectedOptions: nil}},
 	}
@@ -270,5 +274,49 @@ func TestParseAwayModalSubmission_DeleteAll(t *testing.T) {
 	}
 	if form.SlackUserID != "U999" {
 		t.Errorf("SlackUserID = %q, want U999", form.SlackUserID)
+	}
+}
+
+func TestParseAwayModalSubmission_WithTimePicker(t *testing.T) {
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("load JST: %v", err)
+	}
+	v := minimalAwayValues()
+	v["away_from"] = map[string]ViewStateValue{
+		"away_from": {Value: "2030-04-01"},
+	}
+	v["away_from_time"] = map[string]ViewStateValue{
+		"away_from_time": {SelectedTime: "06:00"},
+	}
+	v["away_until"] = map[string]ViewStateValue{
+		"away_until": {Value: "2030-04-01"},
+	}
+	v["away_until_time"] = map[string]ViewStateValue{
+		"away_until_time": {SelectedTime: "14:00"},
+	}
+	form, err := ParseAwayModalSubmission(v, jst, "ja")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if form.AwayFrom == nil || form.AwayFrom.Hour() != 6 || form.AwayFrom.Minute() != 0 {
+		t.Errorf("AwayFrom = %v, want 06:00", form.AwayFrom)
+	}
+	if form.AwayUntil == nil || form.AwayUntil.Hour() != 14 || form.AwayUntil.Minute() != 0 {
+		t.Errorf("AwayUntil = %v, want 14:00", form.AwayUntil)
+	}
+}
+
+func TestParseAwayModalSubmission_TimeWithoutDateIgnored(t *testing.T) {
+	v := minimalAwayValues()
+	v["away_from_time"] = map[string]ViewStateValue{
+		"away_from_time": {SelectedTime: "09:00"},
+	}
+	form, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if form.AwayFrom != nil {
+		t.Errorf("AwayFrom = %v, want nil (time without date should be ignored)", form.AwayFrom)
 	}
 }

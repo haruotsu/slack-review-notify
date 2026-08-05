@@ -74,6 +74,7 @@ type ViewStateValue struct {
 	SelectedUser    string               `json:"selected_user,omitempty"`
 	SelectedUsers   []string             `json:"selected_users,omitempty"`
 	SelectedDate    string               `json:"selected_date,omitempty"`
+	SelectedTime    string               `json:"selected_time,omitempty"`
 }
 
 // ModalValidationError carries per-field error messages for views.update / response_action: errors.

@@ -76,6 +76,7 @@ Specify multiple labels separated by commas to notify only when all labels are p
 *Leave Management:*
 • /slack-review-notify set-away @user from [YYYY-MM-DD] until [YYYY-MM-DD] reason [description] - Set user as away
 • /slack-review-notify set-away @user on [YYYY-MM-DD] reason [description] - Set away for a single day
+• /slack-review-notify set-away @user on [YYYY-MM-DD] [HH:MM-HH:MM] reason [description] - Set away for a time range
 • /slack-review-notify unset-away @user - Remove user's away status
 • /slack-review-notify show-availability - Show users on leave or scheduled
 
@@ -229,19 +230,20 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"cmd.remove_user_mapping.success":   "Deleted mapping for GitHub user `%s`.",
 
 	// ==================== Command: set-away ====================
-	"cmd.set_away.usage":        "Please specify a user to set as away.\nExamples:\n  set-away @user\n  set-away @user until 2025-06-01\n  set-away @user from 2025-05-28 until 2025-06-01\n  set-away @user on 2025-06-01\n  set-away @user on 2025-06-01 reason Day off",
+	"cmd.set_away.usage":        "Please specify a user to set as away.\nExamples:\n  set-away @user\n  set-away @user until 2025-06-01\n  set-away @user from 2025-05-28 until 2025-06-01\n  set-away @user on 2025-06-01\n  set-away @user on 2025-06-01 06:00-14:00\n  set-away @user on 2025-06-01 reason Day off",
 	"cmd.set_away.from_after_until":  "The start date (from) must be before the end date (until).",
 	"cmd.set_away.missing_date":     "Please specify a date after the keyword. Example: from 2025-06-01",
 	"cmd.set_away.conflicting_keywords": "Cannot combine `on` with `from`/`until`. Use either `on YYYY-MM-DD` or `from YYYY-MM-DD until YYYY-MM-DD`.",
 	"cmd.set_away.no_user":      "Please specify a user to set as away.",
-	"cmd.set_away.invalid_date": "Invalid date format. Please use YYYY-MM-DD format (e.g., 2025-06-01).",
+	"cmd.set_away.invalid_date":       "Invalid date format. Please use YYYY-MM-DD format (e.g., 2025-06-01).",
+	"cmd.set_away.invalid_time_range": "Invalid time range format. Please use HH:MM-HH:MM format (e.g., 06:00-14:00).",
 	"cmd.set_away.past_date":    "Cannot specify a past date. Please specify today or a future date.",
 	"cmd.set_away.update_error": "Failed to update away status.",
 	"cmd.set_away.create_error": "Failed to create away status.",
 	"cmd.set_away.success":      "Set <@%s> as away",
 
 	// ==================== Command: unset-away ====================
-	"cmd.unset_away.usage":   "Please specify a user to remove away status.\nExamples:\n  unset-away @user (remove all leave periods)\n  unset-away @user on 2025-06-01 (remove only that day's leave)\n  unset-away @user from 2025-05-28 until 2025-06-01 (remove only that period)",
+	"cmd.unset_away.usage":   "Please specify a user to remove away status.\nExamples:\n  unset-away @user (remove all leave periods)\n  unset-away @user on 2025-06-01 (remove all leave on that day)\n  unset-away @user on 2025-06-01 06:00-14:00 (remove only that time slot)\n  unset-away @user from 2025-05-28 until 2025-06-01 (remove only that period)",
 	"cmd.unset_away.not_set": "<@%s> is not set as away.",
 	"cmd.unset_away.success": "Removed away status for <@%s>",
 
@@ -260,6 +262,7 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"common.until":              "until %s",
 	"common.from_until":         "%s ~ %s",
 	"common.on_date":            "on %s",
+	"common.on_date_time":       "on %s %s-%s",
 	"common.indefinite":         "Indefinite",
 	"common.reason":             ", reason: %s",
 	"common.reason_paren":       " (%s)",
@@ -317,8 +320,12 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"modal.away.user.hint":        "Pick from Slack's user picker.",
 	"modal.away.from":             "Start date",
 	"modal.away.from.hint":        "Leave empty for \"starts immediately\".",
+	"modal.away.from_time":        "Start time",
+	"modal.away.from_time.hint":   "Leave empty for 0:00. Use for hourly leave.",
 	"modal.away.until":            "End date",
 	"modal.away.until.hint":       "Leave empty for \"indefinite\".",
+	"modal.away.until_time":       "End time",
+	"modal.away.until_time.hint":  "Leave empty for 23:59. Use for hourly leave.",
 	"modal.away.reason":           "Reason (optional)",
 	"modal.away.reason.hint":      "e.g. vacation, business trip, sick leave.",
 	"modal.away.delete_all":       "Remove all leave for this user",

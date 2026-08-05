@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -8,6 +9,7 @@ import (
 	"slack-review-notify/services"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -865,4 +867,186 @@ func TestMapUserCommand_AcceptsEscapedMentionWithName(t *testing.T) {
 		t.Fatalf("expected user mapping to be created, got: %v", err)
 	}
 	assert.Equal(t, "U01ABCDE234", mapping.SlackUserID)
+}
+
+func TestSetAway_WithTimeRange(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	w := send("set-away <@UTIME1> on 2099-08-05 06:00-14:00 reason 午前休")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇に設定しました")
+	assert.Contains(t, w.Body.String(), "06:00-14:00")
+
+	var rec models.ReviewerAvailability
+	err := db.Where("slack_user_id = ?", "UTIME1").First(&rec).Error
+	assert.NoError(t, err)
+	assert.NotNil(t, rec.AwayFrom)
+	assert.NotNil(t, rec.AwayUntil)
+	assert.Equal(t, 6, rec.AwayFrom.Hour())
+	assert.Equal(t, 0, rec.AwayFrom.Minute())
+	assert.Equal(t, 14, rec.AwayUntil.Hour())
+	assert.Equal(t, 0, rec.AwayUntil.Minute())
+}
+
+func TestSetAway_FullDayStillWorks(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	w := send("set-away <@UFULL1> on 2099-08-10")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "2099-08-10")
+	assert.NotContains(t, w.Body.String(), "00:00")
+
+	var rec models.ReviewerAvailability
+	err := db.Where("slack_user_id = ?", "UFULL1").First(&rec).Error
+	assert.NoError(t, err)
+	assert.Equal(t, 0, rec.AwayFrom.Hour())
+	assert.Equal(t, 23, rec.AwayUntil.Hour())
+	assert.Equal(t, 59, rec.AwayUntil.Minute())
+}
+
+func TestSetAway_InvalidTimeRange(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	w := send("set-away <@UBAD1> on 2099-08-05 14:00-06:00")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "開始日（from）は終了日（until）より前")
+}
+
+func TestUnsetAway_OnDateRemovesTimeSpecificRecords(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	send("set-away <@UDAY1> on 2099-09-01 06:00-14:00 reason 午前休")
+	send("set-away <@UDAY1> on 2099-09-02 reason 全休")
+
+	w := send("unset-away <@UDAY1> on 2099-09-01")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇を解除しました")
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UDAY1").Count(&count)
+	assert.Equal(t, int64(1), count, "only the 09-01 record should be removed")
+}
+
+func TestUnsetAway_OnDateWithTimeRange(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	send("set-away <@UEXACT1> on 2099-09-01 06:00-14:00 reason 午前休")
+	send("set-away <@UEXACT1> on 2099-09-01 14:00-18:00 reason 午後休")
+
+	w := send("unset-away <@UEXACT1> on 2099-09-01 06:00-14:00")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇を解除しました")
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UEXACT1").Count(&count)
+	assert.Equal(t, int64(1), count, "only the matching time slot should be removed")
+}
+
+func TestFormatDateRange_WithTimeRange(t *testing.T) {
+	tr := func(key string, args ...interface{}) string {
+		templates := map[string]string{
+			"common.on_date":      "%s",
+			"common.on_date_time": "%s %s-%s",
+			"common.from_until":   "%s ~ %s",
+			"common.until":        "%s まで",
+			"common.indefinite":   "無期限",
+		}
+		tmpl, ok := templates[key]
+		if !ok {
+			return key
+		}
+		return fmt.Sprintf(tmpl, args...)
+	}
+
+	jst, _ := time.LoadLocation("Asia/Tokyo")
+
+	from := time.Date(2099, 8, 5, 6, 0, 0, 0, jst)
+	until := time.Date(2099, 8, 5, 14, 0, 0, 0, jst)
+	result := formatDateRange(&from, &until, tr)
+	assert.Equal(t, "2099-08-05 06:00-14:00", result)
+
+	fromFull := time.Date(2099, 8, 5, 0, 0, 0, 0, jst)
+	untilFull := time.Date(2099, 8, 5, 23, 59, 59, 0, jst)
+	resultFull := formatDateRange(&fromFull, &untilFull, tr)
+	assert.Equal(t, "2099-08-05", resultFull)
 }
