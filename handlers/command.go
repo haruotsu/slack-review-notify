@@ -1426,6 +1426,11 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 				p.reason = strings.Join(parts[i+1:], " ")
 				i = len(parts) // End loop
 			}
+		default:
+			lower := strings.ToLower(parts[i])
+			if lower == "am" || lower == "pm" {
+				return p, "cmd.set_away.am_pm_requires_on"
+			}
 		}
 	}
 	return p, ""

@@ -90,7 +90,7 @@ func TestParseAwayModalSubmission_UserRequired(t *testing.T) {
 	v["away_user"] = map[string]ViewStateValue{
 		"away_user": {SelectedUser: ""},
 	}
-	_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+	_, err := ParseAwayModalSubmission(v, time.UTC, "ja", time.Now())
 	if err == nil {
 		t.Fatalf("expected validation error")
 	}
@@ -107,7 +107,7 @@ func TestParseAwayModalSubmission_UserRequired(t *testing.T) {
 // no checkbox. This is the analogue of `/slack-review-notify set-away @user`
 // with no period — an immediate, indefinite leave.
 func TestParseAwayModalSubmission_SetIndefinite(t *testing.T) {
-	form, err := ParseAwayModalSubmission(minimalAwayValues(), time.UTC, "ja")
+	form, err := ParseAwayModalSubmission(minimalAwayValues(), time.UTC, "ja", time.Now())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestParseAwayModalSubmission_SetWithDatesAndReason(t *testing.T) {
 	v["away_reason"] = map[string]ViewStateValue{
 		"away_reason": {Value: "  vacation  "},
 	}
-	form, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+	form, err := ParseAwayModalSubmission(v, time.UTC, "ja", time.Now())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestParseAwayModalSubmission_FromAfterUntil(t *testing.T) {
 	v["away_until"] = map[string]ViewStateValue{
 		"away_until": {Value: "2030-02-01"},
 	}
-	_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+	_, err := ParseAwayModalSubmission(v, time.UTC, "ja", time.Now())
 	if err == nil {
 		t.Fatalf("expected validation error")
 	}
@@ -181,7 +181,7 @@ func TestParseAwayModalSubmission_InvalidDate(t *testing.T) {
 	v["away_from"] = map[string]ViewStateValue{
 		"away_from": {Value: "not-a-date"},
 	}
-	_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+	_, err := ParseAwayModalSubmission(v, time.UTC, "ja", time.Now())
 	if err == nil {
 		t.Fatalf("expected validation error")
 	}
@@ -211,7 +211,7 @@ func TestParseAwayModalSubmission_TimezoneAware(t *testing.T) {
 	v["away_until"] = map[string]ViewStateValue{
 		"away_until": {Value: "2030-04-05"},
 	}
-	form, err := ParseAwayModalSubmission(v, jst, "ja")
+	form, err := ParseAwayModalSubmission(v, jst, "ja", time.Now())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestParseAwayModalSubmission_SameDayAllowed(t *testing.T) {
 	v["away_until"] = map[string]ViewStateValue{
 		"away_until": {Value: "2030-04-05"},
 	}
-	form, err := ParseAwayModalSubmission(v, jst, "ja")
+	form, err := ParseAwayModalSubmission(v, jst, "ja", time.Now())
 	if err != nil {
 		t.Fatalf("expected success on same-day leave, got: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestParseAwayModalSubmission_HalfDayAM(t *testing.T) {
 	v["away_from"] = map[string]ViewStateValue{
 		"away_from": {Value: "2030-04-05"},
 	}
-	form, err := ParseAwayModalSubmission(v, jst, "ja")
+	form, err := ParseAwayModalSubmission(v, jst, "ja", time.Now())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestParseAwayModalSubmission_HalfDayPM(t *testing.T) {
 	v["away_from"] = map[string]ViewStateValue{
 		"away_from": {Value: "2030-04-05"},
 	}
-	form, err := ParseAwayModalSubmission(v, jst, "ja")
+	form, err := ParseAwayModalSubmission(v, jst, "ja", time.Now())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestParseAwayModalSubmission_HalfDayMultiDayRejected(t *testing.T) {
 	v["away_until"] = map[string]ViewStateValue{
 		"away_until": {Value: "2030-04-07"},
 	}
-	_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+	_, err := ParseAwayModalSubmission(v, time.UTC, "ja", time.Now())
 	if err == nil {
 		t.Fatalf("expected validation error for multi-day half-day leave")
 	}
@@ -369,7 +369,7 @@ func TestParseAwayModalSubmission_DeleteAll(t *testing.T) {
 	v["away_delete_all"] = map[string]ViewStateValue{
 		"away_delete_all": {SelectedOptions: []ViewSelectedOption{{Value: "yes"}}},
 	}
-	form, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+	form, err := ParseAwayModalSubmission(v, time.UTC, "ja", time.Now())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

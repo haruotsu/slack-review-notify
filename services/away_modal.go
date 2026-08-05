@@ -229,7 +229,7 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 // the slash command writes (00:00:00 +tz / 23:59:59 +tz). nil falls back to
 // UTC, used by unit tests that don't care about tz semantics. lang chooses
 // the i18n locale for the validation messages Slack renders inside the modal.
-func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *time.Location, lang string) (*AwayForm, error) {
+func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *time.Location, lang string, now time.Time) (*AwayForm, error) {
 	if loc == nil {
 		loc = time.UTC
 	}
@@ -365,18 +365,22 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 				errs["away_until"] = t("modal.away.error.half_day_multi_day")
 			}
 		}
-		ref := form.AwayFrom
-		if ref == nil {
-			ref = form.AwayUntil
+		halfDayDate := form.AwayFrom
+		if halfDayDate == nil {
+			halfDayDate = form.AwayUntil
 		}
-		if ref == nil && len(errs) == 0 {
-			now := time.Now().In(loc)
-			ref = &now
+		if halfDayDate == nil && len(errs) == 0 {
+			nowLocal := now.In(loc)
+			halfDayDate = &nowLocal
 		}
-		if ref != nil && len(errs) == 0 {
-			from, until := models.HalfDayBounds(ref.Year(), ref.Month(), ref.Day(), form.LeaveType, loc)
-			form.AwayFrom = &from
-			form.AwayUntil = &until
+		if halfDayDate != nil && len(errs) == 0 {
+			from, until := models.HalfDayBounds(halfDayDate.Year(), halfDayDate.Month(), halfDayDate.Day(), form.LeaveType, loc)
+			if until.Before(now) {
+				errs["away_leave_type"] = t("modal.away.error.half_day_expired")
+			} else {
+				form.AwayFrom = &from
+				form.AwayUntil = &until
+			}
 		}
 	} else {
 		// Same-day leave is legitimate (from=00:00 +loc, until=23:59:59 +loc), so
