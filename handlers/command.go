@@ -1398,27 +1398,19 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 				return p, "cmd.set_away.invalid_date"
 			}
 
-			// Check for optional am/pm modifier after the date
-			if i+1 < len(parts) && (parts[i+1] == "am" || parts[i+1] == "pm") {
+			modifier := ""
+			if i+1 < len(parts) {
+				modifier = strings.ToLower(parts[i+1])
+			}
+			if modifier == "am" || modifier == "pm" {
 				i++
-				p.leaveType = parts[i]
-				if p.leaveType == "am" {
-					from := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 6, 0, 0, 0, loc)
-					until := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 14, 0, 0, 0, loc)
-					if rejectPast && until.Before(now) {
-						return p, "cmd.set_away.half_day_expired"
-					}
-					p.from = &from
-					p.until = &until
-				} else {
-					from := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 14, 0, 0, 0, loc)
-					until := time.Date(parsed.Year(), parsed.Month(), parsed.Day()+1, 0, 0, 0, 0, loc)
-					if rejectPast && until.Before(now) {
-						return p, "cmd.set_away.half_day_expired"
-					}
-					p.from = &from
-					p.until = &until
+				p.leaveType = modifier
+				from, until := models.HalfDayBounds(parsed.Year(), parsed.Month(), parsed.Day(), modifier, loc)
+				if rejectPast && until.Before(now) {
+					return p, "cmd.set_away.half_day_expired"
 				}
+				p.from = &from
+				p.until = &until
 			} else {
 				startOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
 				endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
@@ -1521,7 +1513,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 		openParen, closeParen = " (", ")"
 	}
 	response := t("cmd.set_away.success", slackUserID)
-	response += openParen + formatDateRangeWithType(awayFrom, awayUntil, leaveType, t)
+	response += openParen + formatDateRange(awayFrom, awayUntil, leaveType, t)
 
 	if reason != "" {
 		response += t("common.reason", reason) + closeParen
@@ -1596,7 +1588,7 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 }
 
 // formatDateRange returns a human-readable date range string for away periods.
-func formatDateRangeWithType(awayFrom, awayUntil *time.Time, leaveType string, t func(string, ...interface{}) string) string {
+func formatDateRange(awayFrom, awayUntil *time.Time, leaveType string, t func(string, ...interface{}) string) string {
 	if leaveType == "am" || leaveType == "pm" {
 		date := ""
 		if awayFrom != nil {
@@ -1653,7 +1645,7 @@ func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
 		}
 
 		line := fmt.Sprintf("• <@%s> [%s] ", r.SlackUserID, statusLabel)
-		line += formatDateRangeWithType(r.AwayFrom, r.AwayUntil, r.LeaveType, t)
+		line += formatDateRange(r.AwayFrom, r.AwayUntil, r.LeaveType, t)
 
 		if r.Reason != "" {
 			line += t("common.reason_paren", r.Reason)

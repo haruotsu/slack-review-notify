@@ -176,6 +176,12 @@ func GetAwayUserIDs(db *gorm.DB) []string {
 	return getAwayUserIDsAt(db, time.Now())
 }
 
+// getAwayUserIDsAt retrieves the IDs of users with a currently active period:
+//  1. AwayFrom is nil (immediate) or in the past/present AND
+//  2. AwayUntil is nil (indefinite) or in the future
+//
+// A user may have several active periods at once, so SELECT DISTINCT to
+// return each ID once and avoid fetching unneeded columns.
 func getAwayUserIDsAt(db *gorm.DB, now time.Time) []string {
 	var ids []string
 	result := db.Model(&models.ReviewerAvailability{}).

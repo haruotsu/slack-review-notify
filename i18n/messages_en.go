@@ -242,7 +242,7 @@ Omitting [label-name] uses the default label "needs-review"`,
 	"cmd.set_away.success":              "Set <@%s> as away",
 
 	// ==================== Command: unset-away ====================
-	"cmd.unset_away.usage":   "Please specify a user to remove away status.\nExamples:\n  unset-away @user (remove all leave periods)\n  unset-away @user on 2025-06-01 (remove only that day's leave)\n  unset-away @user from 2025-05-28 until 2025-06-01 (remove only that period)",
+	"cmd.unset_away.usage":   "Please specify a user to remove away status.\nExamples:\n  unset-away @user (remove all leave periods)\n  unset-away @user on 2025-06-01 (remove only that day's leave)\n  unset-away @user on 2025-06-01 am (remove only that day's morning half-day)\n  unset-away @user on 2025-06-01 pm (remove only that day's afternoon half-day)\n  unset-away @user from 2025-05-28 until 2025-06-01 (remove only that period)",
 	"cmd.unset_away.not_set": "<@%s> is not set as away.",
 	"cmd.unset_away.success": "Removed away status for <@%s>",
 

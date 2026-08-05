@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"slack-review-notify/i18n"
+	"slack-review-notify/models"
 	"strings"
 	"time"
 )
@@ -373,17 +374,9 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 			ref = &now
 		}
 		if ref != nil && len(errs) == 0 {
-			if form.LeaveType == "am" {
-				from := time.Date(ref.Year(), ref.Month(), ref.Day(), 6, 0, 0, 0, loc)
-				until := time.Date(ref.Year(), ref.Month(), ref.Day(), 14, 0, 0, 0, loc)
-				form.AwayFrom = &from
-				form.AwayUntil = &until
-			} else {
-				from := time.Date(ref.Year(), ref.Month(), ref.Day(), 14, 0, 0, 0, loc)
-				until := time.Date(ref.Year(), ref.Month(), ref.Day()+1, 0, 0, 0, 0, loc)
-				form.AwayFrom = &from
-				form.AwayUntil = &until
-			}
+			from, until := models.HalfDayBounds(ref.Year(), ref.Month(), ref.Day(), form.LeaveType, loc)
+			form.AwayFrom = &from
+			form.AwayUntil = &until
 		}
 	} else {
 		// Same-day leave is legitimate (from=00:00 +loc, until=23:59:59 +loc), so
