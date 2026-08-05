@@ -1579,7 +1579,19 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 		// Extra tokens without a date keyword (e.g. a stray "reason") must not
 		// silently restrict the match to indefinite records.
 		if period.from != nil || period.until != nil {
-			query = models.MatchPeriod(query, period.from, period.until)
+			if period.leaveType != "" {
+				// Half-day: exact match on the computed from/until.
+				query = models.MatchPeriod(query, period.from, period.until)
+			} else if period.from != nil && period.until != nil &&
+				period.from.Year() == period.until.Year() && period.from.YearDay() == period.until.YearDay() {
+				// "on DATE" without am/pm: match any record overlapping that day
+				// (full-day, AM, or PM) so half-day records can also be removed.
+				dayStart := time.Date(period.from.Year(), period.from.Month(), period.from.Day(), 0, 0, 0, 0, period.from.Location())
+				dayEnd := dayStart.AddDate(0, 0, 1)
+				query = query.Where("away_from >= ? AND away_from < ?", dayStart, dayEnd)
+			} else {
+				query = models.MatchPeriod(query, period.from, period.until)
+			}
 		}
 	}
 

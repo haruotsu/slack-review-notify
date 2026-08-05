@@ -359,7 +359,8 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 
 	// For half-day leave, from and until must be on the same day (or use from only).
 	// Override the times to match the half-day boundaries.
-	if form.LeaveType == "am" || form.LeaveType == "pm" {
+	// Skip when DeleteAll is set — the delete path ignores dates entirely.
+	if !form.DeleteAll && (form.LeaveType == "am" || form.LeaveType == "pm") {
 		if form.AwayFrom != nil && form.AwayUntil != nil {
 			if form.AwayFrom.Year() != form.AwayUntil.Year() || form.AwayFrom.YearDay() != form.AwayUntil.YearDay() {
 				errs["away_until"] = t("modal.away.error.half_day_multi_day")

@@ -76,6 +76,8 @@ Specify multiple labels separated by commas to notify only when all labels are p
 *Leave Management:*
 • /slack-review-notify set-away @user from [YYYY-MM-DD] until [YYYY-MM-DD] reason [description] - Set user as away
 • /slack-review-notify set-away @user on [YYYY-MM-DD] reason [description] - Set away for a single day
+• /slack-review-notify set-away @user on [YYYY-MM-DD] am - Set morning half-day leave
+• /slack-review-notify set-away @user on [YYYY-MM-DD] pm - Set afternoon half-day leave
 • /slack-review-notify unset-away @user - Remove user's away status
 • /slack-review-notify show-availability - Show users on leave or scheduled
 

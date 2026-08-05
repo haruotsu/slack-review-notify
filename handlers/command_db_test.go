@@ -549,9 +549,43 @@ func TestUnsetAway_FromUntilPeriod(t *testing.T) {
 	}
 }
 
-// TestUnsetAway_NoMatchKeepsPeriods verifies that a date that does not exactly
-// match any stored period removes nothing and reports "not set", leaving the
-// existing periods intact.
+// TestUnsetAway_OnDateDeletesOverlapping verifies that "unset-away @user on DATE"
+// removes any record whose away_from falls on that day, including multi-day periods
+// and half-day records. This ensures half-day records can be removed without
+// specifying am/pm.
+func TestUnsetAway_OnDateDeletesOverlapping(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	send("set-away <@UNOMATCH> from 2099-06-01 until 2099-06-05")
+
+	// "on 2099-06-01" matches records whose away_from falls on that day.
+	w := send("unset-away <@UNOMATCH> on 2099-06-01")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇を解除しました")
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UNOMATCH").Count(&count)
+	assert.Equal(t, int64(0), count, "on DATE should delete records starting on that day")
+}
+
+// TestUnsetAway_NoMatchKeepsPeriods verifies that a date that does not overlap
+// any stored period removes nothing and reports "not set".
 func TestUnsetAway_NoMatchKeepsPeriods(t *testing.T) {
 	db := setupCommandIntegrationTestDB(t)
 
@@ -573,15 +607,14 @@ func TestUnsetAway_NoMatchKeepsPeriods(t *testing.T) {
 
 	send("set-away <@UNOMATCH> from 2099-06-01 until 2099-06-05")
 
-	// "on 2099-06-01" sets until=end-of-day, which does not match the stored
-	// until=2099-06-05, so nothing should be deleted.
-	w := send("unset-away <@UNOMATCH> on 2099-06-01")
+	// "on 2099-06-10" does not overlap the stored period (away_from=2099-06-01).
+	w := send("unset-away <@UNOMATCH> on 2099-06-10")
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "休暇に設定されていません")
 
 	var count int64
 	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UNOMATCH").Count(&count)
-	assert.Equal(t, int64(1), count, "a non-matching date must not delete any period")
+	assert.Equal(t, int64(1), count, "a non-overlapping date must not delete any period")
 }
 
 func TestUnsetAway_Integration(t *testing.T) {
@@ -787,8 +820,8 @@ func TestShowAvailability_Integration(t *testing.T) {
 	assert.Contains(t, body, "休暇中・予約中のユーザー")
 	assert.Contains(t, body, "USHOW1")
 	assert.Contains(t, body, "USHOW2")
-	assert.Contains(t, body, "休暇中")   // status label for currently away
-	assert.Contains(t, body, "予約中")   // status label for scheduled
+	assert.Contains(t, body, "休暇中") // status label for currently away
+	assert.Contains(t, body, "予約中") // status label for scheduled
 	assert.Contains(t, body, "USHOW3")
 	assert.Contains(t, body, "予定休暇")
 }

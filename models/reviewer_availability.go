@@ -22,10 +22,9 @@ type ReviewerAvailability struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index"`
 }
 
-// Half-day boundaries: AM starts at 06:00 (not 00:00) because the intended
-// use case is "morning half-day off" where 00:00–06:00 is outside working
-// hours and the reviewer is not expected to be available anyway. The user
-// explicitly requested AM=06:00–13:59, PM=14:00–24:00.
+// Half-day boundaries (half-open intervals):
+//   - AM = [06:00, 14:00)  — 00:00–06:00 is outside working hours
+//   - PM = [14:00, 00:00+1)
 const (
 	HalfDayAMStartHour = 6
 	HalfDayAMEndHour   = 14
@@ -36,10 +35,11 @@ const (
 // HalfDayBounds returns the from/until timestamps for a half-day leave on
 // the given date. leaveType must be "am" or "pm".
 func HalfDayBounds(year int, month time.Month, day int, leaveType string, loc *time.Location) (from, until time.Time) {
-	if leaveType == "am" {
+	switch leaveType {
+	case "am":
 		from = time.Date(year, month, day, HalfDayAMStartHour, 0, 0, 0, loc)
 		until = time.Date(year, month, day, HalfDayAMEndHour, 0, 0, 0, loc)
-	} else {
+	case "pm":
 		from = time.Date(year, month, day, HalfDayPMStartHour, 0, 0, 0, loc)
 		until = time.Date(year, month, day+1, HalfDayPMEndHour, 0, 0, 0, loc)
 	}

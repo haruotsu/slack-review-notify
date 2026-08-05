@@ -76,6 +76,8 @@ var messagesJa = map[string]string{
 *休暇管理:*
 • /slack-review-notify set-away @user from [YYYY-MM-DD] until [YYYY-MM-DD] reason [理由] - ユーザーを休暇に設定
 • /slack-review-notify set-away @user on [YYYY-MM-DD] reason [理由] - 単一日の休暇を設定
+• /slack-review-notify set-away @user on [YYYY-MM-DD] am - 午前休を設定
+• /slack-review-notify set-away @user on [YYYY-MM-DD] pm - 午後休を設定
 • /slack-review-notify unset-away @user - ユーザーの休暇を解除
 • /slack-review-notify show-availability - 休暇中・予約中のユーザー一覧を表示
 
