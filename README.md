@@ -48,6 +48,7 @@ SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
 SLACK_SIGNING_SECRET=your-slack-signing-secret
 GITHUB_WEBHOOK_SECRET=your-github-webhook-secret
 DB_PATH=review_tasks.db  # Default: review_tasks.db (optional)
+TZ=Asia/Tokyo            # Required: SQLite time comparisons assume a single TZ (optional, Docker image defaults to Asia/Tokyo)
 ```
 
 ### Required Slack Bot OAuth Scopes

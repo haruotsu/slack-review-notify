@@ -957,7 +957,15 @@ func TestSetAway_InvalidTimeRange(t *testing.T) {
 
 	w := send("set-away <@UBAD1> on 2099-08-05 14:00-06:00")
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "開始日（from）は終了日（until）より前")
+	assert.Contains(t, w.Body.String(), "開始時刻は終了時刻より前")
+
+	wMalformed := send("set-away <@UBAD1> on 2099-08-05 06:00〜14:00")
+	assert.Equal(t, 200, wMalformed.Code)
+	assert.Contains(t, wMalformed.Body.String(), "HH:MM-HH:MM")
+
+	wAbc := send("set-away <@UBAD1> on 2099-08-05 abc:def")
+	assert.Equal(t, 200, wAbc.Code)
+	assert.Contains(t, wAbc.Body.String(), "HH:MM-HH:MM")
 }
 
 func TestUnsetAway_OnDateRemovesTimeSpecificRecords(t *testing.T) {

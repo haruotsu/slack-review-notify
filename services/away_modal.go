@@ -354,7 +354,7 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 	// Same-day leave is legitimate (from=00:00 +loc, until=23:59:59 +loc), so
 	// only reject when start is strictly after end. The slash command's
 	// `on YYYY-MM-DD` form expresses the same intent.
-	if form.AwayFrom != nil && form.AwayUntil != nil && form.AwayFrom.After(*form.AwayUntil) {
+	if form.AwayFrom != nil && form.AwayUntil != nil && !form.AwayFrom.Before(*form.AwayUntil) {
 		isSameDay := form.AwayFrom.Year() == form.AwayUntil.Year() && form.AwayFrom.YearDay() == form.AwayUntil.YearDay()
 		if isSameDay {
 			errs["away_until_time"] = t("modal.away.error.until_time_before_from")

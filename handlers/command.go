@@ -1314,6 +1314,7 @@ type awayPeriod struct {
 	until        *time.Time
 	reason       string
 	hasTimeRange bool
+	hasOn        bool
 }
 
 // Named values for parseAwayPeriod's rejectPast argument, so call sites read
@@ -1438,13 +1439,19 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 				startOfDay = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), fromTime[0], fromTime[1], 0, 0, loc)
 				endOfDay = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), untilTime[0], untilTime[1], 0, 0, loc)
 				if !startOfDay.Before(endOfDay) {
-					return p, "cmd.set_away.from_after_until"
+					return p, "cmd.set_away.from_time_after_until_time"
+				}
+				if rejectPast && endOfDay.Before(now) {
+					return p, "cmd.set_away.past_date"
 				}
 				p.hasTimeRange = true
+			} else if i+1 < len(parts) && strings.Contains(parts[i+1], ":") {
+				return p, "cmd.set_away.invalid_time_range"
 			}
 			p.from = &startOfDay
 			p.until = &endOfDay
 			hasOn = true
+			p.hasOn = true
 		case "reason":
 			if i+1 < len(parts) {
 				p.reason = strings.Join(parts[i+1:], " ")
@@ -1596,8 +1603,8 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 		// Extra tokens without a date keyword (e.g. a stray "reason") must not
 		// silently restrict the match to indefinite records.
 		if period.from != nil || period.until != nil {
-			isSingleDayWithoutTime := period.from != nil && period.until != nil && !period.hasTimeRange &&
-				period.from.Year() == period.until.Year() && period.from.YearDay() == period.until.YearDay()
+			isSingleDayWithoutTime := period.hasOn && !period.hasTimeRange &&
+				period.from != nil && period.until != nil
 			if isSingleDayWithoutTime {
 				dayStart := time.Date(period.from.Year(), period.from.Month(), period.from.Day(), 0, 0, 0, 0, loc)
 				nextDayStart := dayStart.AddDate(0, 0, 1)
@@ -1627,6 +1634,10 @@ func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface
 		return from.Hour() == 0 && from.Minute() == 0 && from.Second() == 0 &&
 			until.Hour() == 23 && until.Minute() == 59 && until.Second() == 59
 	}
+	isDayBoundary := func(t *time.Time) bool {
+		return (t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0) ||
+			(t.Hour() == 23 && t.Minute() == 59 && t.Second() == 59)
+	}
 
 	switch {
 	case isSameDay && !isFullDay(awayFrom, awayUntil):
@@ -1637,8 +1648,12 @@ func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface
 		return t("common.from_until_time", awayFrom.Format("2006-01-02 15:04"), awayUntil.Format("2006-01-02 15:04"))
 	case awayFrom != nil && awayUntil != nil:
 		return t("common.from_until", awayFrom.Format("2006-01-02"), awayUntil.Format("2006-01-02"))
+	case awayFrom != nil && !isDayBoundary(awayFrom):
+		return t("common.from_until", awayFrom.Format("2006-01-02 15:04"), t("common.indefinite"))
 	case awayFrom != nil:
 		return t("common.from_until", awayFrom.Format("2006-01-02"), t("common.indefinite"))
+	case awayUntil != nil && !isDayBoundary(awayUntil):
+		return t("common.until", awayUntil.Format("2006-01-02 15:04"))
 	case awayUntil != nil:
 		return t("common.until", awayUntil.Format("2006-01-02"))
 	default:
