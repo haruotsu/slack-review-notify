@@ -70,7 +70,7 @@ DB_PATH=review_tasks.db  # デフォルト: review_tasks.db（省略可能）
 TZ=Asia/Tokyo            # SQLite の時刻比較に使用（Docker イメージは設定済み。バイナリ運用では明示指定が必要）
 ```
 
-> **注意:** 休暇の時刻判定はプロセスの `TZ` を使います。チャンネルの `set-timezone` が `TZ` と異なる場合、休暇判定がずれることがあります。将来のリリースで内部 UTC 正規化を予定しています。
+> **注意:** 休暇の時刻判定はプロセスの `TZ` を使います。チャンネルの `set-timezone` が `TZ` と異なる場合、休暇判定がずれることがあります。UTC 正規化の計画は [#114](https://github.com/haruotsu/slack-review-notify/issues/114) を参照してください。
 
 ### 必要な Slack Bot OAuth スコープ
 Slack App の *OAuth & Permissions* で以下のスコープを付与してください:

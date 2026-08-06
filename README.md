@@ -51,7 +51,7 @@ DB_PATH=review_tasks.db  # Default: review_tasks.db (optional)
 TZ=Asia/Tokyo            # Timezone for SQLite time comparisons (Docker image defaults to Asia/Tokyo; set explicitly for binary deploys)
 ```
 
-> **Note:** Leave time comparisons use the process-level `TZ`. If a channel's `set-timezone` differs from `TZ`, leave judgments for that channel may be off. A future release will normalise all times to UTC internally.
+> **Note:** Leave time comparisons use the process-level `TZ`. If a channel's `set-timezone` differs from `TZ`, leave judgments for that channel may be off. See [#114](https://github.com/haruotsu/slack-review-notify/issues/114) for the UTC normalisation plan.
 
 ### Required Slack Bot OAuth Scopes
 The bot needs the following scopes (configure in your Slack app's *OAuth & Permissions*):

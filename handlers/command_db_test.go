@@ -1094,28 +1094,16 @@ func TestParseTimeRange(t *testing.T) {
 	}
 }
 
-func TestSetAway_PastTimeRange(t *testing.T) {
-	db := setupCommandIntegrationTestDB(t)
+func TestParseAwayPeriod_PastTimeRange(t *testing.T) {
+	jst, _ := time.LoadLocation("Asia/Tokyo")
+	now := time.Date(2026, 8, 6, 15, 0, 0, 0, jst)
 
-	services.IsTestMode = true
-	defer func() { services.IsTestMode = false }()
-
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.POST("/slack/command", HandleSlackCommand(db))
-
-	today := time.Now().Format("2006-01-02")
-	text := fmt.Sprintf("set-away <@UPAST1> on %s 00:00-00:01", today)
-
-	req := setupHTTPRequest(t, text, "C12345")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "過去の日付")
+	parts := []string{"_", "on", "2026-08-06", "06:00-14:00"}
+	_, errKey := parseAwayPeriod(parts, jst, now, rejectPastDates)
+	assert.Equal(t, "cmd.set_away.past_date", errKey)
 }
 
-func TestUnsetAway_FromUntilExactMatch(t *testing.T) {
+func TestUnsetAway_FromUntilSameDayExactMatch(t *testing.T) {
 	db := setupCommandIntegrationTestDB(t)
 
 	services.IsTestMode = true
@@ -1132,16 +1120,16 @@ func TestUnsetAway_FromUntilExactMatch(t *testing.T) {
 		return w
 	}
 
-	send("set-away <@UEXACT2> from 2099-09-01 until 2099-09-03 reason 旅行")
-	send("set-away <@UEXACT2> from 2099-09-05 until 2099-09-06 reason 別件")
+	send("set-away <@USAMEDAY> from 2099-09-01 until 2099-09-01 reason 全休")
+	send("set-away <@USAMEDAY> on 2099-09-01 06:00-14:00 reason 午前休")
 
-	w := send("unset-away <@UEXACT2> from 2099-09-01 until 2099-09-03")
+	w := send("unset-away <@USAMEDAY> from 2099-09-01 until 2099-09-01")
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "休暇を解除しました")
 
 	var count int64
-	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UEXACT2").Count(&count)
-	assert.Equal(t, int64(1), count, "from/until should use exact match, not day-range deletion")
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "USAMEDAY").Count(&count)
+	assert.Equal(t, int64(1), count, "from/until same-day should use exact match, not day-range deletion")
 }
 
 func TestFormatDateRange_SingleEndedWithTime(t *testing.T) {
