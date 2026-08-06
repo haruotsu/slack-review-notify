@@ -70,7 +70,10 @@ SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
 SLACK_SIGNING_SECRET=your-slack-signing-secret
 GITHUB_WEBHOOK_SECRET=your-github-webhook-secret
 DB_PATH=review_tasks.db  # Default: review_tasks.db (optional)
+TZ=Asia/Tokyo            # Timezone for SQLite time comparisons (Docker image defaults to Asia/Tokyo; set explicitly for binary deploys)
 ```
+
+> **Note:** Leave time comparisons use the process-level `TZ`. If a channel's `set-timezone` differs from `TZ`, leave judgments for that channel may be off. A future release will normalise all times to UTC internally.
 
 ### Required Slack Bot OAuth Scopes
 Configure the following bot scopes in *OAuth & Permissions*:

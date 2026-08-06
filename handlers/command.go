@@ -1634,9 +1634,11 @@ func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface
 		return from.Hour() == 0 && from.Minute() == 0 && from.Second() == 0 &&
 			until.Hour() == 23 && until.Minute() == 59 && until.Second() == 59
 	}
-	isDayBoundary := func(t *time.Time) bool {
-		return (t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0) ||
-			(t.Hour() == 23 && t.Minute() == 59 && t.Second() == 59)
+	isFromBoundary := func(t *time.Time) bool {
+		return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0
+	}
+	isUntilBoundary := func(t *time.Time) bool {
+		return t.Hour() == 23 && t.Minute() == 59 && t.Second() == 59
 	}
 
 	switch {
@@ -1648,11 +1650,11 @@ func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface
 		return t("common.from_until_time", awayFrom.Format("2006-01-02 15:04"), awayUntil.Format("2006-01-02 15:04"))
 	case awayFrom != nil && awayUntil != nil:
 		return t("common.from_until", awayFrom.Format("2006-01-02"), awayUntil.Format("2006-01-02"))
-	case awayFrom != nil && !isDayBoundary(awayFrom):
+	case awayFrom != nil && !isFromBoundary(awayFrom):
 		return t("common.from_until", awayFrom.Format("2006-01-02 15:04"), t("common.indefinite"))
 	case awayFrom != nil:
 		return t("common.from_until", awayFrom.Format("2006-01-02"), t("common.indefinite"))
-	case awayUntil != nil && !isDayBoundary(awayUntil):
+	case awayUntil != nil && !isUntilBoundary(awayUntil):
 		return t("common.until", awayUntil.Format("2006-01-02 15:04"))
 	case awayUntil != nil:
 		return t("common.until", awayUntil.Format("2006-01-02"))

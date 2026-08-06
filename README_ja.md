@@ -67,7 +67,10 @@ SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
 SLACK_SIGNING_SECRET=your-slack-signing-secret
 GITHUB_WEBHOOK_SECRET=your-github-webhook-secret
 DB_PATH=review_tasks.db  # デフォルト: review_tasks.db（省略可能）
+TZ=Asia/Tokyo            # SQLite の時刻比較に使用（Docker イメージは設定済み。バイナリ運用では明示指定が必要）
 ```
+
+> **注意:** 休暇の時刻判定はプロセスの `TZ` を使います。チャンネルの `set-timezone` が `TZ` と異なる場合、休暇判定がずれることがあります。将来のリリースで内部 UTC 正規化を予定しています。
 
 ### 必要な Slack Bot OAuth スコープ
 Slack App の *OAuth & Permissions* で以下のスコープを付与してください:

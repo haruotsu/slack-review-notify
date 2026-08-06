@@ -1093,3 +1093,89 @@ func TestParseTimeRange(t *testing.T) {
 		}
 	}
 }
+
+func TestSetAway_PastTimeRange(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	today := time.Now().Format("2006-01-02")
+	text := fmt.Sprintf("set-away <@UPAST1> on %s 00:00-00:01", today)
+
+	req := setupHTTPRequest(t, text, "C12345")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "過去の日付")
+}
+
+func TestUnsetAway_FromUntilExactMatch(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	send("set-away <@UEXACT2> from 2099-09-01 until 2099-09-03 reason 旅行")
+	send("set-away <@UEXACT2> from 2099-09-05 until 2099-09-06 reason 別件")
+
+	w := send("unset-away <@UEXACT2> from 2099-09-01 until 2099-09-03")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇を解除しました")
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UEXACT2").Count(&count)
+	assert.Equal(t, int64(1), count, "from/until should use exact match, not day-range deletion")
+}
+
+func TestFormatDateRange_SingleEndedWithTime(t *testing.T) {
+	tr := func(key string, args ...interface{}) string {
+		templates := map[string]string{
+			"common.on_date":      "%s",
+			"common.on_date_time": "%s %s-%s",
+			"common.from_until":      "%s ~ %s",
+			"common.from_until_time": "%s ~ %s",
+			"common.until":        "%s まで",
+			"common.indefinite":   "無期限",
+		}
+		tmpl, ok := templates[key]
+		if !ok {
+			return key
+		}
+		return fmt.Sprintf(tmpl, args...)
+	}
+
+	jst, _ := time.LoadLocation("Asia/Tokyo")
+
+	untilWithTime := time.Date(2099, 8, 5, 14, 0, 0, 0, jst)
+	result := formatDateRange(nil, &untilWithTime, tr)
+	assert.Equal(t, "2099-08-05 14:00 まで", result)
+
+	untilMidnight := time.Date(2099, 8, 5, 0, 0, 0, 0, jst)
+	resultMidnight := formatDateRange(nil, &untilMidnight, tr)
+	assert.Equal(t, "2099-08-05 00:00 まで", resultMidnight, "until=00:00 should show time, not collapse to date-only")
+
+	untilEndOfDay := time.Date(2099, 8, 5, 23, 59, 59, 0, jst)
+	resultEnd := formatDateRange(nil, &untilEndOfDay, tr)
+	assert.Equal(t, "2099-08-05 まで", resultEnd, "until=23:59:59 is a day boundary and should show date only")
+
+	fromWithTime := time.Date(2099, 8, 5, 9, 30, 0, 0, jst)
+	resultFrom := formatDateRange(&fromWithTime, nil, tr)
+	assert.Equal(t, "2099-08-05 09:30 ~ 無期限", resultFrom)
+}

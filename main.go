@@ -16,6 +16,7 @@ import (
 )
 
 func main() {
+	// TZ must be set before any time operation; do not add code above this line.
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("fail to load .env file")
