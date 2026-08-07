@@ -31,6 +31,22 @@ func setupCommandIntegrationTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+// awayBoundsInChannelTZ returns a record's leave bounds rendered in the
+// timezone resolveTimezone falls back to (Asia/Tokyo), which is what these
+// tests register periods in.
+//
+// Bounds are stored in UTC (see models.UTCTime), so a JST 06:00-14:00 period
+// comes back as 21:00 the previous day / 05:00. Asserting on the raw values
+// would assert on the storage encoding instead of on the registered period.
+func awayBoundsInChannelTZ(t *testing.T, rec models.ReviewerAvailability) (*time.Time, *time.Time) {
+	t.Helper()
+	loc, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("fail to load Asia/Tokyo: %v", err)
+	}
+	return models.InLocation(rec.AwayFrom, loc), models.InLocation(rec.AwayUntil, loc)
+}
+
 func setupHTTPRequest(t *testing.T, text, channelID string) *http.Request {
 	data := url.Values{}
 	data.Set("command", "/slack-review-notify")
@@ -445,7 +461,8 @@ func TestUnsetAway_SpecificPeriod(t *testing.T) {
 	db.Where("slack_user_id = ?", "UPART").Find(&records)
 	assert.Len(t, records, 1, "only the matching period should be removed")
 	if len(records) == 1 && assert.NotNil(t, records[0].AwayFrom) {
-		assert.Equal(t, "2099-06-10", records[0].AwayFrom.Format("2006-01-02"), "the other period must remain")
+		from, _ := awayBoundsInChannelTZ(t, records[0])
+		assert.Equal(t, "2099-06-10", from.Format("2006-01-02"), "the other period must remain")
 	}
 
 	// unset-away without a date removes all remaining leaves.
@@ -535,9 +552,11 @@ func TestUnsetAway_FromUntilPeriod(t *testing.T) {
 	assert.Len(t, remaining, 2, "only the matching range should be removed")
 	if assert.Len(t, remaining, 2) {
 		assert.NotNil(t, remaining[0].AwayFrom)
-		assert.Equal(t, "2099-07-01", remaining[0].AwayFrom.Format("2006-01-02"), "the 07 range must remain")
+		first, _ := awayBoundsInChannelTZ(t, remaining[0])
+		assert.Equal(t, "2099-07-01", first.Format("2006-01-02"), "the 07 range must remain")
 		assert.NotNil(t, remaining[1].AwayFrom)
-		assert.Equal(t, "2099-08-01", remaining[1].AwayFrom.Format("2006-01-02"), "the from-only period must remain")
+		second, _ := awayBoundsInChannelTZ(t, remaining[1])
+		assert.Equal(t, "2099-08-01", second.Format("2006-01-02"), "the from-only period must remain")
 	}
 
 	// Remove only the open-ended "from"-only period.
@@ -547,7 +566,8 @@ func TestUnsetAway_FromUntilPeriod(t *testing.T) {
 	db.Where("slack_user_id = ?", "URANGE").Find(&survivors)
 	assert.Len(t, survivors, 1, "the from-only period should be removable individually")
 	if assert.Len(t, survivors, 1) && assert.NotNil(t, survivors[0].AwayFrom) {
-		assert.Equal(t, "2099-07-01", survivors[0].AwayFrom.Format("2006-01-02"), "the 07 range must be the survivor")
+		from, _ := awayBoundsInChannelTZ(t, survivors[0])
+		assert.Equal(t, "2099-07-01", from.Format("2006-01-02"), "the 07 range must be the survivor")
 	}
 }
 
@@ -739,9 +759,45 @@ func TestUnsetAway_LegacyPipeFormat_SpecificPeriod(t *testing.T) {
 	db.Where("slack_user_id LIKE ?", "UPIPEP%").Find(&records)
 	assert.Len(t, records, 1, "only the matching legacy period should be removed")
 	if len(records) == 1 && assert.NotNil(t, records[0].AwayFrom) {
-		assert.Equal(t, "2099-06-10", records[0].AwayFrom.Format("2006-01-02"),
+		from, _ := awayBoundsInChannelTZ(t, records[0])
+		assert.Equal(t, "2099-06-10", from.Format("2006-01-02"),
 			"the non-matching legacy period must remain")
 	}
+}
+
+// TestShowAvailability_RendersChannelLocalTime guards the read side of UTC
+// normalization: bounds are stored in UTC, so show-availability must convert
+// them back to the channel's timezone. Without that conversion a JST
+// 06:00-14:00 leave would be listed as 2099-08-04 21:00-05:00, and a full-day
+// leave would lose its "no time shown" form because 00:00:00/23:59:59 only look
+// like day boundaries in the timezone the period was registered in.
+func TestShowAvailability_RendersChannelLocalTime(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) string {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w.Body.String()
+	}
+
+	send("set-away <@ULOCAL1> on 2099-08-05 06:00-14:00 reason 午前休")
+	send("set-away <@ULOCAL2> on 2099-08-10")
+
+	out := send("show-availability")
+	assert.Contains(t, out, "2099-08-05 06:00-14:00", "the time range must be shown in the channel timezone")
+	assert.NotContains(t, out, "2099-08-04", "the UTC start date must not leak into the listing")
+	assert.Contains(t, out, "2099-08-10", "a full-day leave must still be listed by date")
+	assert.NotContains(t, out, "2099-08-10 00:00", "a full-day leave must not gain a time range")
 }
 
 func TestShowAvailability_Integration(t *testing.T) {
@@ -898,10 +954,18 @@ func TestSetAway_WithTimeRange(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, rec.AwayFrom)
 	assert.NotNil(t, rec.AwayUntil)
-	assert.Equal(t, 6, rec.AwayFrom.Hour())
-	assert.Equal(t, 0, rec.AwayFrom.Minute())
-	assert.Equal(t, 14, rec.AwayUntil.Hour())
-	assert.Equal(t, 0, rec.AwayUntil.Minute())
+	from, until := awayBoundsInChannelTZ(t, rec)
+	assert.Equal(t, 6, from.Hour())
+	assert.Equal(t, 0, from.Minute())
+	assert.Equal(t, 14, until.Hour())
+	assert.Equal(t, 0, until.Minute())
+
+	// The stored representation must be UTC regardless of the channel timezone,
+	// so that lexicographic TEXT comparison in SQLite stays chronological.
+	_, offset := rec.AwayFrom.Zone()
+	assert.Equal(t, 0, offset, "away_from must be stored in UTC")
+	_, offset = rec.AwayUntil.Zone()
+	assert.Equal(t, 0, offset, "away_until must be stored in UTC")
 }
 
 func TestSetAway_FullDayStillWorks(t *testing.T) {
@@ -931,9 +995,10 @@ func TestSetAway_FullDayStillWorks(t *testing.T) {
 	var rec models.ReviewerAvailability
 	err := db.Where("slack_user_id = ?", "UFULL1").First(&rec).Error
 	assert.NoError(t, err)
-	assert.Equal(t, 0, rec.AwayFrom.Hour())
-	assert.Equal(t, 23, rec.AwayUntil.Hour())
-	assert.Equal(t, 59, rec.AwayUntil.Minute())
+	from, until := awayBoundsInChannelTZ(t, rec)
+	assert.Equal(t, 0, from.Hour())
+	assert.Equal(t, 23, until.Hour())
+	assert.Equal(t, 59, until.Minute())
 }
 
 func TestSetAway_InvalidTimeRange(t *testing.T) {

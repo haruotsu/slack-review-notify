@@ -280,7 +280,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				unsetAway(c, db, channelID, labelName, params, lang)
 
 			case "show-availability":
-				showAvailability(c, db, lang)
+				showAvailability(c, db, channelID, labelName, lang)
 
 			default:
 				c.String(200, t("cmd.unknown_with_help"))
@@ -1606,10 +1606,15 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 			isSingleDayWithoutTime := period.hasOn && !period.hasTimeRange &&
 				period.from != nil && period.until != nil
 			if isSingleDayWithoutTime {
+				// The window boundaries stay in the channel's timezone so that
+				// AddDate lands on the next local midnight (24h would be wrong
+				// across a DST transition), and are converted to UTC only at
+				// bind time, because that is how the bounds are stored (see
+				// models.UTCTime).
 				dayStart := time.Date(period.from.Year(), period.from.Month(), period.from.Day(), 0, 0, 0, 0, loc)
 				nextDayStart := dayStart.AddDate(0, 0, 1)
 				query = query.Where("away_from >= ? AND away_from < ? AND away_until >= ? AND away_until < ?",
-					dayStart, nextDayStart, dayStart, nextDayStart)
+					dayStart.UTC(), nextDayStart.UTC(), dayStart.UTC(), nextDayStart.UTC())
 			} else {
 				query = models.MatchPeriod(query, period.from, period.until)
 			}
@@ -1664,14 +1669,15 @@ func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface
 }
 
 // showAvailability displays a list of users currently on leave
-func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
+func showAvailability(c *gin.Context, db *gorm.DB, channelID, labelName, lang string) {
 	t := i18n.L(lang)
+	loc := resolveTimezone(db, channelID, labelName)
 	var records []models.ReviewerAvailability
 	now := time.Now()
 
 	// Get non-expired records (currently away or scheduled for the future).
 	// Order by user then start date so a user's multiple periods stay grouped.
-	db.Where("away_until IS NULL OR away_until > ?", now).
+	db.Where("away_until IS NULL OR away_until > ?", now.UTC()).
 		Order("slack_user_id, away_from").
 		Find(&records)
 
@@ -1682,8 +1688,15 @@ func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
 
 	response := t("cmd.show_availability.header")
 	for _, r := range records {
+		// Bounds come back from SQLite in UTC; render them in the channel's
+		// timezone so the wall-clock times match what was registered. This must
+		// happen before formatDateRange, whose 00:00:00 / 23:59:59 full-day
+		// checks only hold in the timezone the period was written in.
+		awayFrom := models.InLocation(r.AwayFrom, loc)
+		awayUntil := models.InLocation(r.AwayUntil, loc)
+
 		// Determine status: scheduled (AwayFrom is in the future) or currently away
-		isScheduled := r.AwayFrom != nil && r.AwayFrom.After(now)
+		isScheduled := awayFrom != nil && awayFrom.After(now)
 		var statusLabel string
 		if isScheduled {
 			statusLabel = t("cmd.show_availability.status_scheduled")
@@ -1692,7 +1705,7 @@ func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
 		}
 
 		line := fmt.Sprintf("• <@%s> [%s] ", r.SlackUserID, statusLabel)
-		line += formatDateRange(r.AwayFrom, r.AwayUntil, t)
+		line += formatDateRange(awayFrom, awayUntil, t)
 
 		if r.Reason != "" {
 			line += t("common.reason_paren", r.Reason)

@@ -178,10 +178,13 @@ func GetAwayUserIDs(db *gorm.DB) []string {
 
 func getAwayUserIDsAt(db *gorm.DB, now time.Time) []string {
 	var ids []string
+	// now is bound as UTC to match how the bounds are stored, so this returns
+	// the same set regardless of the process timezone (see models.UTCTime).
+	nowUTC := now.UTC()
 	result := db.Model(&models.ReviewerAvailability{}).
 		Where(
 			"(away_from IS NULL OR away_from <= ?) AND (away_until IS NULL OR away_until > ?)",
-			now, now,
+			nowUTC, nowUTC,
 		).
 		Distinct().
 		Pluck("slack_user_id", &ids)

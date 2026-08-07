@@ -16,7 +16,6 @@ import (
 )
 
 func main() {
-	// TZ must be set before any time operation; do not add code above this line.
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("fail to load .env file")
@@ -40,6 +39,19 @@ func main() {
 	// multiple away periods. AutoMigrate cannot change index uniqueness.
 	if err := models.MigrateReviewerAvailabilityIndex(db); err != nil {
 		log.Fatal("fail to migrate reviewer availability index:", err)
+	}
+
+	// Rewrite leave bounds an older version stored with the channel's offset
+	// into UTC. Must complete before any request is served: a half-migrated
+	// database mixes offsets and SQLite's TEXT comparison breaks across them.
+	//
+	// Must also run before MigrateNormalizeSlackUserIDs, whose dedup step
+	// compares periods through models.MatchPeriod (a UTC bind). Against
+	// not-yet-migrated rows that comparison never matches, so a legacy
+	// "ID|displayname" row would be renamed into a duplicate of an existing
+	// clean row instead of being dropped.
+	if err := models.MigrateAvailabilityTimestampsToUTC(db); err != nil {
+		log.Fatal("fail to normalize availability timestamps:", err)
 	}
 
 	// Normalize legacy slack_user_id values stored as "ID|displayname" by

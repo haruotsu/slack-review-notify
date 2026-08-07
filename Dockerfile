@@ -18,8 +18,6 @@ FROM alpine:latest
 # 必要なライブラリをインストール（SQLite実行に必要）
 RUN apk --no-cache add ca-certificates sqlite tzdata
 
-ENV TZ=Asia/Tokyo
-
 WORKDIR /app
 
 COPY --from=builder /app/slack-review-notify .
