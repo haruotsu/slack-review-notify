@@ -280,7 +280,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				unsetAway(c, db, channelID, labelName, params, lang)
 
 			case "show-availability":
-				showAvailability(c, db, channelID, labelName, lang)
+				showAvailability(c, db, channelID, lang)
 
 			default:
 				c.String(200, t("cmd.unknown_with_help"))
@@ -1482,6 +1482,16 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 				p.reason = strings.Join(parts[i+1:], " ")
 				i = len(parts) // End loop
 			}
+		default:
+			// Every token that reaches here sits where a keyword belongs, so it
+			// is a typo. Dropping it silently is how "unset-away @user
+			// 2099-08-05" (missing "on") turned into "delete every leave this
+			// user has": with no date parsed, unsetAway skips the period filter
+			// and hard-deletes the lot. The same silence swallowed the reason in
+			// "set-away @user on DATE 06:00-14:00 午前休", where "reason" was
+			// forgotten. Rejecting the command costs a retry; the alternative
+			// destroys records with no way back.
+			return p, "cmd.set_away.unknown_token"
 		}
 	}
 	return p, ""
@@ -1507,7 +1517,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 		return
 	}
 
-	loc := resolveTimezone(db, channelID, labelName)
+	loc := resolveAwayTimezone(db, channelID)
 	nowLocal := time.Now().In(loc)
 
 	period, errKey := parseAwayPeriod(parts, loc, nowLocal, rejectPastDates)
@@ -1617,7 +1627,7 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 
 	// If a date is specified, delete only the matching period; otherwise delete all.
 	if len(parts) > 1 {
-		loc := resolveTimezone(db, channelID, labelName)
+		loc := resolveAwayTimezone(db, channelID)
 		nowLocal := time.Now().In(loc)
 		period, errKey := parseAwayPeriod(parts, loc, nowLocal, allowPastDates)
 		if errKey != "" {
@@ -1703,9 +1713,9 @@ func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface
 }
 
 // showAvailability displays a list of users currently on leave
-func showAvailability(c *gin.Context, db *gorm.DB, channelID, labelName, lang string) {
+func showAvailability(c *gin.Context, db *gorm.DB, channelID, lang string) {
 	t := i18n.L(lang)
-	loc := resolveTimezone(db, channelID, labelName)
+	loc := resolveAwayTimezone(db, channelID)
 	var records []models.ReviewerAvailability
 	now := time.Now()
 

@@ -179,7 +179,7 @@ func TestAwayModal_ViewSubmission_UpsertMatchesSlashCommandRecord(t *testing.T) 
 	db := setupTestDB(t)
 	router := setupActionRouter(db)
 
-	// Configure the channel's timezone so pickModalTimezone selects JST.
+	// Configure the channel's timezone so resolveAwayTimezone selects JST.
 	db.Create(&models.ChannelConfig{
 		ID:             uuid.NewString(),
 		SlackChannelID: "C12345",

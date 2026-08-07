@@ -1092,6 +1092,73 @@ func TestSetAway_TimeRangeRejectedWithFromUntil(t *testing.T) {
 	assert.Contains(t, wOK.Body.String(), "休暇に設定しました")
 }
 
+// TestAwayPeriod_UnknownTokenRejected pins the parser's default branch. Tokens
+// sitting where a keyword belongs used to be dropped in silence, and the two
+// worst cases were destructive rather than merely wrong: "unset-away @user DATE"
+// (missing "on") parsed as "no period given", which makes unsetAway hard-delete
+// every leave the user has, and "on DATE HH:MM-HH:MM 午前休" (missing "reason")
+// registered the leave with an empty reason.
+func TestAwayPeriod_UnknownTokenRejected(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	countFor := func(user string) int64 {
+		var n int64
+		db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", user).Count(&n)
+		return n
+	}
+
+	send("set-away <@UUNK> on 2099-08-05")
+	send("set-away <@UUNK> on 2099-08-20")
+	assert.Equal(t, int64(2), countFor("UUNK"), "precondition: two leaves registered")
+
+	// A bare date without "on" must not wipe the user's whole schedule.
+	wBare := send("unset-away <@UUNK> 2099-08-05")
+	assert.Equal(t, 200, wBare.Code)
+	assert.Contains(t, wBare.Body.String(), "reason")
+	assert.Equal(t, int64(2), countFor("UUNK"), "a rejected command must delete nothing")
+
+	// Same token in set-away must not register an indefinite leave.
+	wSet := send("set-away <@UUNK2> 2099-08-05")
+	assert.Equal(t, 200, wSet.Code)
+	assert.Contains(t, wSet.Body.String(), "reason")
+	assert.Equal(t, int64(0), countFor("UUNK2"), "a rejected command must register nothing")
+
+	// A reason typed without the keyword must not be swallowed after a time range.
+	wReason := send("set-away <@UUNK3> on 2099-08-05 06:00-14:00 午前休")
+	assert.Equal(t, 200, wReason.Code)
+	assert.Contains(t, wReason.Body.String(), "reason")
+	assert.Equal(t, int64(0), countFor("UUNK3"), "a rejected command must register nothing")
+
+	// The correct form still works, and multi-word reasons survive.
+	wOK := send("set-away <@UUNK3> on 2099-08-05 06:00-14:00 reason 午前休 と 通院")
+	assert.Equal(t, 200, wOK.Code)
+	assert.Contains(t, wOK.Body.String(), "休暇に設定しました")
+	var rec models.ReviewerAvailability
+	assert.NoError(t, db.Where("slack_user_id = ?", "UUNK3").First(&rec).Error)
+	assert.Equal(t, "午前休 と 通院", rec.Reason)
+
+	// unset-away with no arguments beyond the user must still clear everything.
+	wClear := send("unset-away <@UUNK>")
+	assert.Equal(t, 200, wClear.Code)
+	assert.Equal(t, int64(0), countFor("UUNK"))
+}
+
 func TestUnsetAway_OnDateRemovesTimeSpecificRecords(t *testing.T) {
 	db := setupCommandIntegrationTestDB(t)
 

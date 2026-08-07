@@ -28,18 +28,21 @@ func loadChannelConfigs(db *gorm.DB, channelID string) []*models.ChannelConfig {
 	return configs
 }
 
-// pickModalTimezone returns the Location to use when interpreting date inputs
-// in a per-channel (not per-label) modal.
+// resolveAwayTimezone returns the Location the leave feature interprets and
+// renders every timestamp in, for one channel.
 //
-// It resolves the default label's timezone rather than "whichever label in this
-// channel happens to have one configured first". Leave records are per-user and
-// carry no timezone of their own, so the zone that writes them and the zone that
-// renders them in show-availability must be the same function of the channel —
-// otherwise a full-day leave registered through the modal is listed as a
-// cross-day time range. showAvailability and the label-less slash commands both
-// resolve through resolveTimezone with the default label, so the modal does too.
-// Falls back to Asia/Tokyo via resolveTimezone.
-func pickModalTimezone(db *gorm.DB, channelID string) *time.Location {
+// It is deliberately channel-scoped, not label-scoped. reviewer_availabilities
+// has no label_name column: a leave period belongs to a user, not to a label,
+// so there is no label whose timezone is the "right" one to read it through.
+// Resolving per label meant set-away, the away modal and show-availability could
+// each pick a different zone for the same record — a full-day leave registered
+// under one label was listed as a cross-day time range under another. Routing
+// every leave path through the default label's setting removes that split.
+//
+// Do not "fix" this back to taking a labelName. Making it label-aware
+// reintroduces the mismatch; giving each record its own stored timezone is the
+// only way to make per-label interpretation meaningful.
+func resolveAwayTimezone(db *gorm.DB, channelID string) *time.Location {
 	return resolveTimezone(db, channelID, defaultLabelName)
 }
 

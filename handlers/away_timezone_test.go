@@ -97,7 +97,7 @@ func TestAwayModal_TimezoneMatchesShowAvailability(t *testing.T) {
 		}).Error)
 	}
 
-	modalLoc := pickModalTimezone(db, "C12345")
+	modalLoc := resolveAwayTimezone(db, "C12345")
 	listingLoc := resolveTimezone(db, "C12345", defaultLabelName)
 	assert.Equal(t, listingLoc.String(), modalLoc.String(),
 		"the modal must write in the zone show-availability renders in")
@@ -133,6 +133,84 @@ func TestAwayModal_TimezoneMatchesShowAvailability(t *testing.T) {
 	assert.Contains(t, out, "2099-05-01", "the registered day must be listed")
 	assert.NotContains(t, out, "2099-05-02", "a full-day leave must not spill into the next day")
 	assert.NotContains(t, out, "13:00", "a full-day leave must not be listed as a time range")
+}
+
+// TestAwayTimezone_SameForEveryLabel pins that the leave feature resolves one
+// timezone per channel, whichever label the caller routes the command through.
+//
+// reviewer_availabilities has no label_name column, so reading a record through
+// a second label's timezone renders something nobody registered: with the zone
+// resolved per label, a full day written under one label was listed as
+// "2099-04-30 17:00 ~ 2099-05-01 16:59" under another. Both writers must land on
+// the zone the listing uses, and the listing must not change with the prefix.
+func TestAwayTimezone_SameForEveryLabel(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	for _, c := range []struct{ label, tz string }{
+		{defaultLabelName, "Asia/Tokyo"},
+		{"eu-team", "Europe/Berlin"},
+		{"aaa-label", "America/New_York"},
+	} {
+		assert.NoError(t, db.Create(&models.ChannelConfig{
+			ID:             uuid.NewString(),
+			SlackChannelID: "C12345",
+			LabelName:      c.label,
+			Timezone:       c.tz,
+			IsActive:       true,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}).Error)
+	}
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+	send := func(text string) string {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w.Body.String()
+	}
+
+	// Written through an explicit non-default label...
+	send("eu-team set-away <@ULABEL> on 2099-05-01 reason 全休")
+
+	// ...and through the modal.
+	modalLoc := resolveAwayTimezone(db, "C12345")
+	form, err := services.ParseAwayModalSubmission(map[string]map[string]services.ViewStateValue{
+		"away_user":  {"away_user": {SelectedUser: "UMODAL"}},
+		"away_from":  {"away_from": {SelectedDate: "2099-05-01"}},
+		"away_until": {"away_until": {SelectedDate: "2099-05-01"}},
+	}, modalLoc, "ja")
+	assert.NoError(t, err)
+	assert.NoError(t, db.Create(&models.ReviewerAvailability{
+		ID:          uuid.NewString(),
+		SlackUserID: form.SlackUserID,
+		AwayFrom:    form.AwayFrom,
+		AwayUntil:   form.AwayUntil,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}).Error)
+
+	// Both records must read back as a plain full day, under every label prefix.
+	for _, cmd := range []string{
+		"show-availability",
+		"eu-team show-availability",
+		"aaa-label show-availability",
+	} {
+		out := send(cmd)
+		assert.Contains(t, out, "ULABEL", "%q must list the slash-command record", cmd)
+		assert.Contains(t, out, "UMODAL", "%q must list the modal record", cmd)
+		assert.Contains(t, out, "2099-05-01", "%q must show the registered day", cmd)
+		assert.NotContains(t, out, "2099-04-30", "%q must not shift a full day backwards", cmd)
+		assert.NotContains(t, out, "2099-05-02", "%q must not spill a full day forwards", cmd)
+		assert.NotContains(t, out, ":00-", "%q must not turn a full day into a time range", cmd)
+	}
 }
 
 // TestShowAvailability_QueryBindIsUTC pins the "not expired yet" filter in
