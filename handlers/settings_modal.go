@@ -41,9 +41,9 @@ func loadChannelConfigs(db *gorm.DB, channelID string) []*models.ChannelConfig {
 //
 // The default label's setting wins, but it is not the only source. A channel
 // that has only ever used another label has no default-label row at all, and
-// dropping straight to Asia/Tokyo there would discard the one timezone that
-// channel did configure — shifting both the stored period and the reviewer
-// exclusion by its offset. So the remaining labels are scanned in label_name
+// dropping straight to resolveTimezone's fallback there would discard the one
+// timezone that channel did configure — shifting both the stored period and the
+// reviewer exclusion by its offset. So the remaining labels are scanned in label_name
 // order as a second step. The order is fixed, and every leave path calls this
 // one function, so the answer is still a single zone per channel.
 //

@@ -374,8 +374,14 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 		return &ts
 	}
 
-	form.AwayFrom = parseDate("away_from", "away_from_time", false)
-	form.AwayUntil = parseDate("away_until", "away_until_time", true)
+	// Only the set path reads the pickers. Parsing them under delete-all would
+	// let a leftover time selection raise date_required_for_time and block a
+	// deletion that does not use dates at all — the doc comment above promises
+	// the opposite.
+	if !form.DeleteAll {
+		form.AwayFrom = parseDate("away_from", "away_from_time", false)
+		form.AwayUntil = parseDate("away_until", "away_until_time", true)
+	}
 	form.Reason = field("away_reason")
 
 	// Reject zero-length (from == until) and reversed ranges to prevent

@@ -138,6 +138,51 @@ func TestAwayModal_ViewSubmission_DeleteAll(t *testing.T) {
 	assert.EqualValues(t, 0, count)
 }
 
+// TestAwayModal_ViewSubmission_DeleteAllIgnoresPickers: delete-all must not be
+// blocked by whatever the date and time pickers happen to hold. A time selected
+// without its date is a validation error on the set path, and running that check
+// under delete-all refused a deletion that uses no dates at all.
+func TestAwayModal_ViewSubmission_DeleteAllIgnoresPickers(t *testing.T) {
+	cases := []struct {
+		name      string
+		from      string
+		fromTime  string
+		untilTime string
+	}{
+		{name: "time without date", fromTime: "09:00"},
+		{name: "end time without date", untilTime: "17:00"},
+		{name: "malformed time", fromTime: "25:00"},
+		{name: "date and time", from: "2030-04-01", fromTime: "09:00"},
+	}
+
+	for _, tc := range cases {
+		db := setupTestDB(t)
+		router := setupActionRouter(db)
+
+		db.Create(&models.ReviewerAvailability{
+			ID: uuid.NewString(), SlackUserID: "U_TARGET",
+		})
+
+		payload := buildAwayViewSubmission(t, awaySubmission{
+			channelID: "C12345",
+			userID:    "U_ADMIN",
+			awayUser:  "U_TARGET",
+			from:      tc.from,
+			fromTime:  tc.fromTime,
+			untilTime: tc.untilTime,
+			deleteAll: true,
+		})
+		w := postPayload(t, router, payload)
+		assert.Equal(t, http.StatusOK, w.Code, "%s: body: %s", tc.name, w.Body.String())
+		assert.NotContains(t, w.Body.String(), "response_action",
+			"%s: delete-all must not be rejected", tc.name)
+
+		var count int64
+		db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "U_TARGET").Count(&count)
+		assert.EqualValues(t, 0, count, "%s: the record must be deleted", tc.name)
+	}
+}
+
 // TestAwayModal_ViewSubmission_FromAfterUntil: bad period → response_action
 // errors map with the offending block_id, no DB write.
 func TestAwayModal_ViewSubmission_FromAfterUntil(t *testing.T) {
@@ -230,6 +275,8 @@ type awaySubmission struct {
 	awayUser  string
 	from      string
 	until     string
+	fromTime  string
+	untilTime string
 	reason    string
 	deleteAll bool
 }
@@ -261,6 +308,8 @@ func buildAwayViewSubmission(t *testing.T, s awaySubmission) string {
 					"away_user":       {"away_user":       {"type": "users_select",     "selected_user": "` + s.awayUser + `"}},
 					"away_from":       {"away_from":       {"type": "datepicker",       "selected_date": "` + s.from + `", "value": "` + s.from + `"}},
 					"away_until":      {"away_until":      {"type": "datepicker",       "selected_date": "` + s.until + `", "value": "` + s.until + `"}},
+					"away_from_time":  {"away_from_time":  {"type": "timepicker",       "selected_time": "` + s.fromTime + `"}},
+					"away_until_time": {"away_until_time": {"type": "timepicker",       "selected_time": "` + s.untilTime + `"}},
 					"away_reason":     {"away_reason":     {"type": "plain_text_input", "value": "` + s.reason + `"}},
 					"away_delete_all": {"away_delete_all": {"type": "checkboxes",       "selected_options": ` + deleteOpts + `}}
 				}
