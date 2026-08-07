@@ -155,3 +155,37 @@ func TestAllEnKeysExistInJa(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatVerbsMatchAcrossLanguages pins that both translations of a message
+// take the same arguments. Callers pass one argument list for every language, so
+// a verb dropped from one side renders "%!s(MISSING)" or "%!(EXTRA string=...)"
+// to the users of that language only — invisible to anyone exercising the other.
+// Key parity alone does not catch this.
+func TestFormatVerbsMatchAcrossLanguages(t *testing.T) {
+	// Counts printf verbs, treating "%%" as a literal percent rather than a verb.
+	countVerbs := func(s string) int {
+		n := 0
+		for i := 0; i < len(s); i++ {
+			if s[i] != '%' {
+				continue
+			}
+			if i+1 < len(s) && s[i+1] == '%' {
+				i++
+				continue
+			}
+			n++
+		}
+		return n
+	}
+
+	for key, ja := range messagesJa {
+		en, ok := messagesEn[key]
+		if !ok {
+			continue // already reported by TestAllJaKeysExistInEn
+		}
+		if jaN, enN := countVerbs(ja), countVerbs(en); jaN != enN {
+			t.Errorf("key %q takes %d format verb(s) in ja but %d in en\n  ja: %q\n  en: %q",
+				key, jaN, enN, ja, en)
+		}
+	}
+}
