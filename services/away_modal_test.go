@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -307,17 +308,51 @@ func TestParseAwayModalSubmission_WithTimePicker(t *testing.T) {
 	}
 }
 
-func TestParseAwayModalSubmission_TimeWithoutDateIgnored(t *testing.T) {
-	v := minimalAwayValues()
-	v["away_from_time"] = map[string]ViewStateValue{
-		"away_from_time": {SelectedTime: "09:00"},
+// TestParseAwayModalSubmission_TimeWithoutDateRejected pins that a time picked
+// without its date is reported instead of dropped. Both pickers are optional, so
+// this is an ordinary slip; accepting it left away_until nil, which means "away
+// indefinitely" — the reviewer would stay excluded until somebody noticed.
+func TestParseAwayModalSubmission_TimeWithoutDateRejected(t *testing.T) {
+	for _, tc := range []struct{ name, timeBlock string }{
+		{"start", "away_from_time"},
+		{"end", "away_until_time"},
+	} {
+		v := minimalAwayValues()
+		v[tc.timeBlock] = map[string]ViewStateValue{
+			tc.timeBlock: {SelectedTime: "09:00"},
+		}
+		_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+		var ve *ModalValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("%s: want a validation error, got %v", tc.name, err)
+		}
+		if _, ok := ve.Errors[tc.timeBlock]; !ok {
+			t.Errorf("%s: want the error on %q, got %v", tc.name, tc.timeBlock, ve.Errors)
+		}
 	}
-	form, err := ParseAwayModalSubmission(v, time.UTC, "ja")
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if form.AwayFrom != nil {
-		t.Errorf("AwayFrom = %v, want nil (time without date should be ignored)", form.AwayFrom)
+}
+
+// TestParseAwayModalSubmission_MalformedTimeRejected pins the other half of the
+// same rule. Slack's timepicker always sends HH:MM, so these values only arrive
+// in a malformed payload — but falling through silently turned the requested
+// slot into a whole day.
+func TestParseAwayModalSubmission_MalformedTimeRejected(t *testing.T) {
+	for _, bad := range []string{"9", "25:00", "ab:cd", "12:60", ":30"} {
+		v := minimalAwayValues()
+		v["away_from"] = map[string]ViewStateValue{
+			"away_from": {Value: "2030-04-01"},
+		}
+		v["away_from_time"] = map[string]ViewStateValue{
+			"away_from_time": {SelectedTime: bad},
+		}
+		_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+		var ve *ModalValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("%q: want a validation error, got %v", bad, err)
+		}
+		if _, ok := ve.Errors["away_from_time"]; !ok {
+			t.Errorf("%q: want the error on away_from_time, got %v", bad, ve.Errors)
+		}
 	}
 }
 

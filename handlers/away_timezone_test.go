@@ -213,6 +213,79 @@ func TestAwayTimezone_SameForEveryLabel(t *testing.T) {
 	}
 }
 
+// TestAwayTimezone_FallsBackToTheChannelsOwnZone pins that resolving per
+// channel does not throw away the timezone a channel actually configured.
+//
+// A channel that has only ever used one label has no default-label row, and
+// resolving the default label alone drops straight to Asia/Tokyo there. That is
+// worse than the per-label resolution it replaced: the period is stored in the
+// wrong zone, so GetAwayUserIDs excludes the reviewer over the wrong hours while
+// show-availability renders the times the caller typed, hiding the shift.
+func TestAwayTimezone_FallsBackToTheChannelsOwnZone(t *testing.T) {
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	assert.NoError(t, err)
+
+	cases := []struct {
+		name string
+		// blankDefaultLabel adds a default-label row and then clears its
+		// timezone with a raw UPDATE. ChannelConfig.Timezone carries
+		// `default:'Asia/Tokyo'`, so a blank value cannot be written through
+		// Create — but rows predating that column can still hold one.
+		blankDefaultLabel bool
+	}{
+		{name: "default label row missing"},
+		{name: "default label row has a blank timezone", blankDefaultLabel: true},
+	}
+
+	for _, tc := range cases {
+		db := setupCommandIntegrationTestDB(t)
+		assert.NoError(t, db.Create(&models.ChannelConfig{
+			ID:             uuid.NewString(),
+			SlackChannelID: "C12345",
+			LabelName:      "eu-team",
+			Timezone:       "Europe/Berlin",
+			IsActive:       true,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}).Error)
+		if tc.blankDefaultLabel {
+			assert.NoError(t, db.Create(&models.ChannelConfig{
+				ID:             uuid.NewString(),
+				SlackChannelID: "C12345",
+				LabelName:      defaultLabelName,
+				IsActive:       true,
+				CreatedAt:      time.Now(),
+				UpdatedAt:      time.Now(),
+			}).Error)
+			assert.NoError(t, db.Model(&models.ChannelConfig{}).
+				Where("slack_channel_id = ? AND label_name = ?", "C12345", defaultLabelName).
+				Update("timezone", "").Error)
+		}
+
+		assert.Equal(t, "Europe/Berlin", resolveAwayTimezone(db, "C12345").String(),
+			"%s: the channel's only configured zone must win over the default", tc.name)
+
+		gin.SetMode(gin.TestMode)
+		router := gin.New()
+		router.POST("/slack/command", HandleSlackCommand(db))
+		req := setupHTTPRequest(t, "eu-team set-away <@UEU> on 2099-05-01 09:00-17:00", "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		var rec models.ReviewerAvailability
+		assert.NoError(t, db.Where("slack_user_id = ?", "UEU").First(&rec).Error)
+		if assert.NotNil(t, rec.AwayFrom) && assert.NotNil(t, rec.AwayUntil) {
+			assert.Equal(t, 9, rec.AwayFrom.In(berlin).Hour(), "%s: start must be 09:00 Berlin", tc.name)
+			assert.Equal(t, 17, rec.AwayUntil.In(berlin).Hour(), "%s: end must be 17:00 Berlin", tc.name)
+		}
+	}
+}
+
 // TestShowAvailability_QueryBindIsUTC pins the "not expired yet" filter in
 // show-availability. The cutoff is time.Now() in the *process* timezone, so
 // binding it unconverted shifts the comparison by the process offset and drops

@@ -39,11 +39,49 @@ func loadChannelConfigs(db *gorm.DB, channelID string) []*models.ChannelConfig {
 // under one label was listed as a cross-day time range under another. Routing
 // every leave path through the default label's setting removes that split.
 //
+// The default label's setting wins, but it is not the only source. A channel
+// that has only ever used another label has no default-label row at all, and
+// dropping straight to Asia/Tokyo there would discard the one timezone that
+// channel did configure — shifting both the stored period and the reviewer
+// exclusion by its offset. So the remaining labels are scanned in label_name
+// order as a second step. The order is fixed, and every leave path calls this
+// one function, so the answer is still a single zone per channel.
+//
 // Do not "fix" this back to taking a labelName. Making it label-aware
 // reintroduces the mismatch; giving each record its own stored timezone is the
 // only way to make per-label interpretation meaningful.
 func resolveAwayTimezone(db *gorm.DB, channelID string) *time.Location {
+	configs := loadChannelConfigs(db, channelID)
+
+	for _, c := range configs {
+		if c.LabelName == defaultLabelName {
+			if loc := parseTimezone(c.Timezone); loc != nil {
+				return loc
+			}
+			break
+		}
+	}
+	for _, c := range configs {
+		if loc := parseTimezone(c.Timezone); loc != nil {
+			return loc
+		}
+	}
 	return resolveTimezone(db, channelID, defaultLabelName)
+}
+
+// parseTimezone returns the Location for a ChannelConfig.Timezone value, or nil
+// when it is unset or unusable, so callers can fall through to the next source
+// instead of silently accepting a default.
+func parseTimezone(timezone string) *time.Location {
+	if timezone == "" {
+		return nil
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		log.Printf("resolveAwayTimezone: invalid timezone %q, skipping", timezone)
+		return nil
+	}
+	return loc
 }
 
 // pickModalLanguage returns the language for the modal, preferring the existing

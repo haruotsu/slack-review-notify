@@ -274,10 +274,10 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				setLanguage(c, db, channelID, labelName, strings.TrimSpace(params))
 
 			case "set-away":
-				setAway(c, db, channelID, labelName, params, lang)
+				setAway(c, db, channelID, params, lang)
 
 			case "unset-away":
-				unsetAway(c, db, channelID, labelName, params, lang)
+				unsetAway(c, db, channelID, params, lang)
 
 			case "show-availability":
 				showAvailability(c, db, channelID, lang)
@@ -1478,6 +1478,10 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 			hasOn = true
 			p.hasOn = true
 		case "reason":
+			// A trailing bare "reason" is accepted as an empty reason rather
+			// than rejected: unlike the cases the default branch catches, it
+			// loses no input and destroys nothing, and "reason with no text"
+			// means the same thing as no reason at all.
 			if i+1 < len(parts) {
 				p.reason = strings.Join(parts[i+1:], " ")
 				i = len(parts) // End loop
@@ -1498,7 +1502,7 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 }
 
 // setAway marks a user as away/on leave
-func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang string) {
+func setAway(c *gin.Context, db *gorm.DB, channelID, params, lang string) {
 	t := i18n.L(lang)
 	if params == "" {
 		c.String(200, t("cmd.set_away.usage"))
@@ -1591,7 +1595,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 // unsetAway removes a user's away/leave status.
 // Without a date, all leave periods for the user are removed.
 // With "on"/"from"/"until", only the period that exactly matches is removed.
-func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang string) {
+func unsetAway(c *gin.Context, db *gorm.DB, channelID, params, lang string) {
 	t := i18n.L(lang)
 	if params == "" {
 		c.String(200, t("cmd.unset_away.usage"))

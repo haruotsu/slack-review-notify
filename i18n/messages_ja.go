@@ -340,6 +340,8 @@ var messagesJa = map[string]string{
 	"modal.away.nothing_deleted":  "<@%s> には削除対象の休暇がありませんでした。",
 	"modal.away.error.user_required":    "対象ユーザーを選択してください。",
 	"modal.away.error.invalid_date":     "日付は YYYY-MM-DD 形式で指定してください。",
+	"modal.away.error.date_required_for_time": "時刻を指定する場合は日付も選択してください。",
+	"modal.away.error.invalid_time":           "時刻は HH:MM 形式で指定してください。",
 	"modal.away.error.until_before_from":      "終了日は開始日と同じか、それより後にしてください。",
 	"modal.away.error.until_time_before_from": "終了時刻は開始時刻より後にしてください。",
 	"modal.away.error.save_failed":      "保存に失敗しました。時間をおいて再度お試しください。",
