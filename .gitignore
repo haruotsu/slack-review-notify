@@ -22,3 +22,7 @@ e2e/thread-screenshot.ts
 
 # GIF generation temp
 docs/gifs/tmp/
+
+# Multi-agent review scratch output
+.agents/
+.agents-*/

@@ -1594,7 +1594,10 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, params, lang string) {
 
 // unsetAway removes a user's away/leave status.
 // Without a date, all leave periods for the user are removed.
-// With "on"/"from"/"until", only the period that exactly matches is removed.
+// "on DATE" removes every period that falls inside that day, including the
+// time-ranged ones, so a caller who does not remember the exact slot can still
+// clear the day. "on DATE HH:MM-HH:MM", "from" and "until" remove only the
+// period that matches exactly.
 func unsetAway(c *gin.Context, db *gorm.DB, channelID, params, lang string) {
 	t := i18n.L(lang)
 	if params == "" {

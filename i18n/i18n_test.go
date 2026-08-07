@@ -2,6 +2,10 @@ package i18n
 
 import (
 	"os"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -156,36 +160,37 @@ func TestAllEnKeysExistInJa(t *testing.T) {
 	}
 }
 
+// formatVerbRe matches a printf verb, skipping "%%" and allowing the explicit
+// argument index some messages use to reorder arguments (e.g. "%[2]s %[1]s").
+var formatVerbRe = regexp.MustCompile(`%(\[\d+\])?[-+# 0]*\d*(\.\d+)?([a-zA-Z])`)
+
+// formatVerbs returns the verb letters of s as a sorted multiset, so that a
+// translation reordering its arguments still compares equal.
+func formatVerbs(s string) []string {
+	var verbs []string
+	for _, m := range formatVerbRe.FindAllStringSubmatch(strings.ReplaceAll(s, "%%", ""), -1) {
+		verbs = append(verbs, m[3])
+	}
+	sort.Strings(verbs)
+	return verbs
+}
+
 // TestFormatVerbsMatchAcrossLanguages pins that both translations of a message
 // take the same arguments. Callers pass one argument list for every language, so
 // a verb dropped from one side renders "%!s(MISSING)" or "%!(EXTRA string=...)"
 // to the users of that language only — invisible to anyone exercising the other.
-// Key parity alone does not catch this.
+// A verb whose type differs (%s vs %d) misrenders the same way. Key parity alone
+// catches neither.
 func TestFormatVerbsMatchAcrossLanguages(t *testing.T) {
-	// Counts printf verbs, treating "%%" as a literal percent rather than a verb.
-	countVerbs := func(s string) int {
-		n := 0
-		for i := 0; i < len(s); i++ {
-			if s[i] != '%' {
-				continue
-			}
-			if i+1 < len(s) && s[i+1] == '%' {
-				i++
-				continue
-			}
-			n++
-		}
-		return n
-	}
-
 	for key, ja := range messagesJa {
 		en, ok := messagesEn[key]
 		if !ok {
 			continue // already reported by TestAllJaKeysExistInEn
 		}
-		if jaN, enN := countVerbs(ja), countVerbs(en); jaN != enN {
-			t.Errorf("key %q takes %d format verb(s) in ja but %d in en\n  ja: %q\n  en: %q",
-				key, jaN, enN, ja, en)
+		jaVerbs, enVerbs := formatVerbs(ja), formatVerbs(en)
+		if !slices.Equal(jaVerbs, enVerbs) {
+			t.Errorf("key %q takes %v in ja but %v in en\n  ja: %q\n  en: %q",
+				key, jaVerbs, enVerbs, ja, en)
 		}
 	}
 }
