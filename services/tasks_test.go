@@ -424,3 +424,39 @@ func TestCleanupExpiredAvailability(t *testing.T) {
 	db.Unscoped().Model(&models.ReviewerAvailability{}).Where("id = ?", "expired-away").Count(&count)
 	assert.Equal(t, int64(0), count)
 }
+
+// TestCleanupExpiredAvailabilityAt_NowInAnyTimezone pins that the cutoff is
+// bound as UTC. This is a hard delete, so binding the local-offset value would
+// shift the cutoff by the offset and destroy leave that is still running. The
+// margins are one hour so an offset error actually crosses them, and every now
+// below denotes the same instant expressed in a different Location.
+func TestCleanupExpiredAvailabilityAt_NowInAnyTimezone(t *testing.T) {
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	assert.NoError(t, err)
+	newYork, err := time.LoadLocation("America/New_York")
+	assert.NoError(t, err)
+
+	cutoff := time.Date(2099, 8, 5, 12, 0, 0, 0, time.UTC)
+	stillRunning := cutoff.Add(1 * time.Hour)
+	expired := cutoff.Add(-1 * time.Hour)
+
+	for _, loc := range []*time.Location{time.UTC, jst, newYork} {
+		db := setupTestDB(t)
+		assert.NoError(t, db.Create(&models.ReviewerAvailability{
+			ID: "running", SlackUserID: "U_RUNNING", AwayUntil: &stillRunning,
+			CreatedAt: cutoff, UpdatedAt: cutoff,
+		}).Error)
+		assert.NoError(t, db.Create(&models.ReviewerAvailability{
+			ID: "expired", SlackUserID: "U_EXPIRED", AwayUntil: &expired,
+			CreatedAt: cutoff, UpdatedAt: cutoff,
+		}).Error)
+
+		cleanupExpiredAvailabilityAt(db, cutoff.In(loc))
+
+		var count int64
+		db.Unscoped().Model(&models.ReviewerAvailability{}).Where("id = ?", "running").Count(&count)
+		assert.Equal(t, int64(1), count, "leave ending after now must survive with now in %s", loc)
+		db.Unscoped().Model(&models.ReviewerAvailability{}).Where("id = ?", "expired").Count(&count)
+		assert.Equal(t, int64(0), count, "leave that already ended must be deleted with now in %s", loc)
+	}
+}

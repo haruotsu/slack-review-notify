@@ -13,9 +13,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// defaultModalTimezone is the fallback when no channel config supplies one.
-// Matches the slash-command path's default in resolveTimezone.
-const defaultModalTimezone = "Asia/Tokyo"
+// defaultLabelName is the label the slash command assumes when the caller
+// omits one, and the label the channel-scoped modals resolve settings through.
+const defaultLabelName = "needs-review"
 
 // loadChannelConfigs returns every ChannelConfig row for a channel, used to
 // populate the modal's label dropdown.
@@ -29,25 +29,18 @@ func loadChannelConfigs(db *gorm.DB, channelID string) []*models.ChannelConfig {
 }
 
 // pickModalTimezone returns the Location to use when interpreting date inputs
-// in a per-channel (not per-label) modal. The away modal is channel-scoped, so
-// any configured label's timezone in the channel is acceptable; we pick the
-// first non-empty one for determinism (loadChannelConfigs orders by label_name).
-// Falls back to Asia/Tokyo, matching the slash-command default.
-func pickModalTimezone(configs []*models.ChannelConfig) *time.Location {
-	for _, c := range configs {
-		if c.Timezone == "" {
-			continue
-		}
-		if loc, err := time.LoadLocation(c.Timezone); err == nil {
-			return loc
-		}
-		log.Printf("pickModalTimezone: invalid timezone %q, skipping", c.Timezone)
-	}
-	loc, err := time.LoadLocation(defaultModalTimezone)
-	if err != nil {
-		return time.UTC
-	}
-	return loc
+// in a per-channel (not per-label) modal.
+//
+// It resolves the default label's timezone rather than "whichever label in this
+// channel happens to have one configured first". Leave records are per-user and
+// carry no timezone of their own, so the zone that writes them and the zone that
+// renders them in show-availability must be the same function of the channel —
+// otherwise a full-day leave registered through the modal is listed as a
+// cross-day time range. showAvailability and the label-less slash commands both
+// resolve through resolveTimezone with the default label, so the modal does too.
+// Falls back to Asia/Tokyo via resolveTimezone.
+func pickModalTimezone(db *gorm.DB, channelID string) *time.Location {
+	return resolveTimezone(db, channelID, defaultLabelName)
 }
 
 // pickModalLanguage returns the language for the modal, preferring the existing

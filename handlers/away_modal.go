@@ -60,7 +60,7 @@ func handleAwayModalSubmission(c *gin.Context, db *gorm.DB, payload SlackActionP
 
 	configs := loadChannelConfigs(db, meta.ChannelID)
 	lang := pickModalLanguage(configs, "")
-	loc := pickModalTimezone(configs)
+	loc := pickModalTimezone(db, meta.ChannelID)
 
 	form, err := services.ParseAwayModalSubmission(payload.View.State.Values, loc, lang)
 	if err != nil {

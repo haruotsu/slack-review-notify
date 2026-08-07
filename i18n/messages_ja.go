@@ -238,6 +238,7 @@ var messagesJa = map[string]string{
 	"cmd.set_away.invalid_date":       "日付形式が無効です。YYYY-MM-DD形式で指定してください（例: 2025-06-01）",
 	"cmd.set_away.invalid_time_range":          "時刻範囲の形式が無効です。HH:MM-HH:MM形式で指定してください（例: 06:00-14:00）",
 	"cmd.set_away.from_time_after_until_time": "開始時刻は終了時刻より前に指定してください。",
+	"cmd.set_away.time_range_needs_on":        "時刻の指定は `on YYYY-MM-DD HH:MM-HH:MM` の形式のみ対応しています。`from`/`until` には日付だけを指定してください。",
 	"cmd.set_away.past_date":    "過去の日付は指定できません。今日以降の日付を指定してください。",
 	"cmd.set_away.update_error": "休暇設定の更新に失敗しました。",
 	"cmd.set_away.create_error": "休暇設定の作成に失敗しました。",

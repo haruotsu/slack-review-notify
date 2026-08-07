@@ -97,7 +97,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			if isSubCommand {
 				// If the first argument is a subcommand, use the default label name
 				subCommand = parts[0]
-				labelName = "needs-review" // Default label name
+				labelName = defaultLabelName
 
 				if len(parts) > 1 {
 					params = strings.Join(parts[1:], " ")
@@ -1368,6 +1368,17 @@ func parseTimeRange(s string) (from [2]int, until [2]int, ok bool) {
 	return f, u, true
 }
 
+// isAwayKeyword reports whether s is one of the keywords parseAwayPeriod
+// recognizes. Any other token sitting where a keyword is expected is a typo,
+// and parseAwayPeriod's loop would otherwise drop it without a word.
+func isAwayKeyword(s string) bool {
+	switch s {
+	case "from", "until", "on", "reason":
+		return true
+	}
+	return false
+}
+
 // parseAwayPeriod parses the "from"/"until"/"on"/"reason" keywords from parts.
 // parts[0] is treated as the user token, so parsing starts at index 1.
 // now must be the current time in loc. When rejectPast is true, past dates are rejected.
@@ -1395,6 +1406,9 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 			if rejectPast && startOfDay.Before(todayStart) {
 				return p, "cmd.set_away.past_date"
 			}
+			if i+1 < len(parts) && !isAwayKeyword(parts[i+1]) {
+				return p, "cmd.set_away.time_range_needs_on"
+			}
 			p.from = &startOfDay
 		case "until":
 			if hasOn {
@@ -1411,6 +1425,12 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 			endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
 			if rejectPast && endOfDay.Before(now) {
 				return p, "cmd.set_away.past_date"
+			}
+			// Time ranges are only supported after "on". Rejecting the token
+			// here keeps "from DATE 06:00-14:00" from quietly registering a
+			// full day, now that the caller has a reason to expect times to work.
+			if i+1 < len(parts) && !isAwayKeyword(parts[i+1]) {
+				return p, "cmd.set_away.time_range_needs_on"
 			}
 			p.until = &endOfDay
 		case "on":
@@ -1445,7 +1465,12 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 					return p, "cmd.set_away.past_date"
 				}
 				p.hasTimeRange = true
-			} else if i+1 < len(parts) && strings.Contains(parts[i+1], ":") {
+			} else if i+1 < len(parts) && !isAwayKeyword(parts[i+1]) {
+				// The token after the date is neither a valid time range nor a
+				// keyword, so it is a typo: "6-14", "abc-14:00", or "06:00〜14:00"
+				// typed with a full-width tilde. Testing only for ":" let those
+				// through, and the loop's default case then dropped them without
+				// a word — registering a full-day leave when a half day was meant.
 				return p, "cmd.set_away.invalid_time_range"
 			}
 			p.from = &startOfDay
@@ -1606,13 +1631,22 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 			isSingleDayWithoutTime := period.hasOn && !period.hasTimeRange &&
 				period.from != nil && period.until != nil
 			if isSingleDayWithoutTime {
-				// The window boundaries stay in the channel's timezone so that
-				// AddDate lands on the next local midnight (24h would be wrong
-				// across a DST transition), and are converted to UTC only at
-				// bind time, because that is how the bounds are stored (see
-				// models.UTCTime).
-				dayStart := time.Date(period.from.Year(), period.from.Month(), period.from.Day(), 0, 0, 0, 0, loc)
-				nextDayStart := dayStart.AddDate(0, 0, 1)
+				// Both boundaries are built with time.Date in the channel's
+				// timezone and converted to UTC only at bind time, because that
+				// is how the bounds are stored (see models.UTCTime).
+				//
+				// The end boundary is built from the next calendar day rather
+				// than derived from dayStart. Neither AddDate(0,0,1) nor +24h is
+				// correct across a DST transition: where local midnight does not
+				// exist (Asia/Beirut springs 00:00 -> 01:00 on 2027-03-28)
+				// time.Date normalizes dayStart to 01:00, and AddDate carries
+				// that wall clock forward, stretching the window an hour into the
+				// next day — far enough to hard-delete a 00:00-00:30 leave
+				// registered for it. time.Date normalizes an out-of-range day, so
+				// day+1 also covers month and year rollover.
+				y, m, d := period.from.Year(), period.from.Month(), period.from.Day()
+				dayStart := time.Date(y, m, d, 0, 0, 0, 0, loc)
+				nextDayStart := time.Date(y, m, d+1, 0, 0, 0, 0, loc)
 				query = query.Where("away_from >= ? AND away_from < ? AND away_until >= ? AND away_until < ?",
 					dayStart.UTC(), nextDayStart.UTC(), dayStart.UTC(), nextDayStart.UTC())
 			} else {

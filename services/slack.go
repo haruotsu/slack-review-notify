@@ -177,6 +177,11 @@ func GetAwayUserIDs(db *gorm.DB) []string {
 }
 
 func getAwayUserIDsAt(db *gorm.DB, now time.Time) []string {
+	// Retrieve the IDs of users with a currently active period:
+	// 1. AwayFrom is nil (immediate) or in the past/present AND
+	// 2. AwayUntil is nil (indefinite) or in the future
+	// A user may have several active periods at once, so SELECT DISTINCT to
+	// return each ID once and avoid fetching unneeded columns.
 	var ids []string
 	// now is bound as UTC to match how the bounds are stored, so this returns
 	// the same set regardless of the process timezone (see models.UTCTime).

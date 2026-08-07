@@ -1031,6 +1031,65 @@ func TestSetAway_InvalidTimeRange(t *testing.T) {
 	wAbc := send("set-away <@UBAD1> on 2099-08-05 abc:def")
 	assert.Equal(t, 200, wAbc.Code)
 	assert.Contains(t, wAbc.Body.String(), "HH:MM-HH:MM")
+
+	// Tokens without a colon used to slip past the guard entirely and register
+	// a full-day leave without a word, so a mistyped half day became a day off.
+	for _, token := range []string{"6-14", "abc", "0600-1400", "午前休"} {
+		w := send("set-away <@UBAD1> on 2099-08-05 " + token)
+		assert.Equal(t, 200, w.Code)
+		assert.Contains(t, w.Body.String(), "HH:MM-HH:MM", "token %q must be rejected", token)
+	}
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UBAD1").Count(&count)
+	assert.Equal(t, int64(0), count, "no leave may be registered from a rejected command")
+
+	// "reason" must still be accepted right after the date.
+	wReason := send("set-away <@UBAD1> on 2099-08-05 reason 午前休")
+	assert.Equal(t, 200, wReason.Code)
+	assert.Contains(t, wReason.Body.String(), "休暇に設定しました")
+}
+
+// TestSetAway_TimeRangeRejectedWithFromUntil pins that a time range typed after
+// "from"/"until" is refused rather than dropped. Times are only supported after
+// "on", and silently ignoring the token would register a full day — a trap this
+// PR created by making callers expect times to work at all.
+func TestSetAway_TimeRangeRejectedWithFromUntil(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	for _, cmd := range []string{
+		"set-away <@UFU1> from 2099-08-05 06:00-14:00 until 2099-08-06",
+		"set-away <@UFU1> from 2099-08-05 until 2099-08-06 06:00-14:00",
+	} {
+		w := send(cmd)
+		assert.Equal(t, 200, w.Code)
+		assert.Contains(t, w.Body.String(), "on YYYY-MM-DD HH:MM-HH:MM", "%q must be rejected", cmd)
+	}
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UFU1").Count(&count)
+	assert.Equal(t, int64(0), count, "no leave may be registered from a rejected command")
+
+	// The plain date form and a trailing reason must keep working.
+	wOK := send("set-away <@UFU1> from 2099-08-05 until 2099-08-06 reason 帰省")
+	assert.Equal(t, 200, wOK.Code)
+	assert.Contains(t, wOK.Body.String(), "休暇に設定しました")
 }
 
 func TestUnsetAway_OnDateRemovesTimeSpecificRecords(t *testing.T) {
