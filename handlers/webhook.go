@@ -261,12 +261,12 @@ func handleLabeledEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent)
 
 					// Update task to its final state
 					updates := map[string]interface{}{
-						"slack_ts":          slackTs,
-						"reviewer":          reviewerID,
-						"reviewers":         reviewersStr,
+						"slack_ts":           slackTs,
+						"reviewer":           reviewerID,
+						"reviewers":          reviewersStr,
 						"pr_author_slack_id": creatorSlackID,
-						"status":            taskStatus,
-						"updated_at":        time.Now(),
+						"status":             taskStatus,
+						"updated_at":         time.Now(),
 					}
 
 					if err := db.Model(&models.ReviewTask{}).Where("id = ?", tempTask.ID).Updates(updates).Error; err != nil {
@@ -594,6 +594,14 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	}
 }
 
+// clearPendingReReview drops a re-review notification queued for the next business day.
+// Once the review has actually been done the queued notification is stale.
+func clearPendingReReview(task *models.ReviewTask) {
+	task.PendingReReviewNotify = false
+	task.PendingReReviewSender = ""
+	task.PendingReReviewReviewer = ""
+}
+
 // handleReviewSubmittedEvent handles the event when a review is submitted
 func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestReviewEvent) {
 	pr := e.PullRequest
@@ -722,6 +730,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					if task.Status != "completed" {
 						task.Status = "completed"
 						task.ApprovedBy = latestTask.ApprovedBy
+						clearPendingReReview(&task)
 						task.UpdatedAt = time.Now()
 						if err := db.Save(&task).Error; err != nil {
 							log.Printf("failed to update task status to completed: %v", err)
@@ -747,7 +756,12 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					Where("id = ? AND (approved_by = ? OR approved_by IS NULL OR approved_by = '')", latestTask.ID, oldApprovedBy).
 					Updates(map[string]interface{}{
 						"approved_by": latestTask.ApprovedBy,
-						"updated_at":  time.Now(),
+						// A review just happened, so any re-review notification queued for the
+						// next morning is stale and must not fire.
+						"pending_re_review_notify":   false,
+						"pending_re_review_sender":   "",
+						"pending_re_review_reviewer": "",
+						"updated_at":                 time.Now(),
 					})
 				if result.Error != nil {
 					log.Printf("failed to update approved_by: %v", result.Error)
@@ -784,6 +798,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 			for _, task := range channelTasks {
 				task.Status = "completed"
+				clearPendingReReview(&task)
 				task.UpdatedAt = time.Now()
 				if err := db.Save(&task).Error; err != nil {
 					log.Printf("failed to update task status to completed: %v", err)
