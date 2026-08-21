@@ -98,10 +98,15 @@ func activateBusinessHoursTask(db *gorm.DB, task models.ReviewTask, config model
 	result := db.Model(&models.ReviewTask{}).
 		Where("id = ? AND status = ?", task.ID, "waiting_business_hours").
 		Updates(map[string]interface{}{
-			"status":     "in_review",
-			"reviewer":   task.Reviewer,
-			"reviewers":  task.Reviewers,
-			"updated_at": time.Now(),
+			"status":    "in_review",
+			"reviewer":  task.Reviewer,
+			"reviewers": task.Reviewers,
+			// The morning greeting is itself the review request, so a re-review request
+			// queued while the task was waiting would only duplicate it.
+			"pending_re_review_notify":   false,
+			"pending_re_review_sender":   "",
+			"pending_re_review_reviewer": "",
+			"updated_at":                 time.Now(),
 		})
 	if result.Error != nil {
 		return fmt.Errorf("task status update error: %w", result.Error)

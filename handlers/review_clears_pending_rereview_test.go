@@ -34,7 +34,6 @@ func postReviewSubmitted(t *testing.T, db *gorm.DB, payload string) *httptest.Re
 func TestHandleReviewSubmittedEvent_PartialApprovalClearsPendingReReview(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
-	services.IsTestMode = true
 
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
@@ -103,7 +102,6 @@ func TestHandleReviewSubmittedEvent_PartialApprovalClearsPendingReReview(t *test
 func TestHandleReviewSubmittedEvent_FullApprovalClearsPendingReReview(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
-	services.IsTestMode = true
 
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
@@ -169,7 +167,6 @@ func TestHandleReviewSubmittedEvent_FullApprovalClearsPendingReReview(t *testing
 func TestHandleReviewSubmittedEvent_ChangesRequestedClearsPendingReReview(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
-	services.IsTestMode = true
 
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
@@ -241,7 +238,6 @@ func TestPartialApprovalThenBusinessHoursSweep_SendsNoReReviewNotification(t *te
 
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
-	services.IsTestMode = true
 
 	originalToken := os.Getenv("SLACK_BOT_TOKEN")
 	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
@@ -319,7 +315,6 @@ func TestPartialApprovalThenBusinessHoursSweep_SendsNoReReviewNotification(t *te
 func TestHandleReviewSubmittedEvent_DismissedKeepsPendingReReview(t *testing.T) {
 	db := setupTestDB(t)
 	gin.SetMode(gin.TestMode)
-	services.IsTestMode = true
 
 	config := models.ChannelConfig{
 		ID:                "config-dismiss-pending",

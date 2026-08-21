@@ -594,9 +594,11 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	}
 }
 
-// clearPendingReReview drops a re-review notification queued for the next business day.
-// Once the review has actually been done the queued notification is stale.
-func clearPendingReReview(task *models.ReviewTask) {
+// resetPendingReReviewFields drops a re-review notification queued for the next business
+// day: once the review has actually been done the queued notification is stale. It only
+// mutates the struct, so the caller must persist it. The CAS update path below clears the
+// same fields via a map and must be kept in sync with this one.
+func resetPendingReReviewFields(task *models.ReviewTask) {
 	task.PendingReReviewNotify = false
 	task.PendingReReviewSender = ""
 	task.PendingReReviewReviewer = ""
@@ -730,7 +732,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					if task.Status != "completed" {
 						task.Status = "completed"
 						task.ApprovedBy = latestTask.ApprovedBy
-						clearPendingReReview(&task)
+						resetPendingReReviewFields(&task)
 						task.UpdatedAt = time.Now()
 						if err := db.Save(&task).Error; err != nil {
 							log.Printf("failed to update task status to completed: %v", err)
@@ -757,7 +759,8 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					Updates(map[string]interface{}{
 						"approved_by": latestTask.ApprovedBy,
 						// A review just happened, so any re-review notification queued for the
-						// next morning is stale and must not fire.
+						// next morning is stale and must not fire. Keep in sync with
+						// resetPendingReReviewFields, which clears the same fields on a struct.
 						"pending_re_review_notify":   false,
 						"pending_re_review_sender":   "",
 						"pending_re_review_reviewer": "",
@@ -798,7 +801,7 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 			for _, task := range channelTasks {
 				task.Status = "completed"
-				clearPendingReReview(&task)
+				resetPendingReReviewFields(&task)
 				task.UpdatedAt = time.Now()
 				if err := db.Save(&task).Error; err != nil {
 					log.Printf("failed to update task status to completed: %v", err)
