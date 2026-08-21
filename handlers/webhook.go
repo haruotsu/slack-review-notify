@@ -594,14 +594,39 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	}
 }
 
-// resetPendingReReviewFields drops a re-review notification queued for the next business
-// day: once the review has actually been done the queued notification is stale. It only
-// mutates the struct, so the caller must persist it. The CAS update path below clears the
-// same fields via a map and must be kept in sync with this one.
+// resetPendingReReviewFields drops every re-review notification queued for the next
+// business day. Only valid where the task becomes completed and is therefore out of scope
+// for further notifications. It only mutates the struct, so the caller must persist it.
 func resetPendingReReviewFields(task *models.ReviewTask) {
 	task.PendingReReviewNotify = false
 	task.PendingReReviewSender = ""
 	task.PendingReReviewReviewer = ""
+}
+
+// removePendingReReviewFor drops the queued sender/reviewer pairs addressed to
+// reviewerMention and returns the remaining ones. Pairs are positional, so both sides
+// are dropped at the same index.
+func removePendingReReviewFor(task models.ReviewTask, reviewerMention string) (notify bool, sender string, reviewer string) {
+	if !task.PendingReReviewNotify {
+		return false, "", ""
+	}
+
+	senders := strings.Split(task.PendingReReviewSender, ",")
+	reviewers := strings.Split(task.PendingReReviewReviewer, ",")
+
+	var keptSenders, keptReviewers []string
+	for idx := 0; idx < len(senders) && idx < len(reviewers); idx++ {
+		if reviewers[idx] == reviewerMention {
+			continue
+		}
+		keptSenders = append(keptSenders, senders[idx])
+		keptReviewers = append(keptReviewers, reviewers[idx])
+	}
+
+	if len(keptReviewers) == 0 {
+		return false, "", ""
+	}
+	return true, strings.Join(keptSenders, ","), strings.Join(keptReviewers, ",")
 }
 
 // handleReviewSubmittedEvent handles the event when a review is submitted
@@ -673,6 +698,12 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 		approvalID := reviewerSlackID
 		if approvalID == "" {
 			approvalID = review.GetUser().GetLogin()
+		}
+
+		// Must match the form handleReviewRequestedEvent stores in the pending fields.
+		approverMention := review.GetUser().GetLogin()
+		if reviewerSlackID != "" {
+			approverMention = fmt.Sprintf("<@%s>", reviewerSlackID)
 		}
 
 		switch reviewState {
@@ -753,17 +784,18 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 					}
 				}
 			} else {
+				// The task stays in_review, so only the queued re-review requests this
+				// approval actually answers become stale; requests for other reviewers stand.
+				pendingNotify, pendingSender, pendingReviewer := removePendingReReviewFor(latestTask, approverMention)
+
 				// Partial approval: update approved_by with CAS-like WHERE clause (concurrent approval protection)
 				result := db.Model(&models.ReviewTask{}).
 					Where("id = ? AND (approved_by = ? OR approved_by IS NULL OR approved_by = '')", latestTask.ID, oldApprovedBy).
 					Updates(map[string]interface{}{
-						"approved_by": latestTask.ApprovedBy,
-						// A review just happened, so any re-review notification queued for the
-						// next morning is stale and must not fire. Keep in sync with
-						// resetPendingReReviewFields, which clears the same fields on a struct.
-						"pending_re_review_notify":   false,
-						"pending_re_review_sender":   "",
-						"pending_re_review_reviewer": "",
+						"approved_by":                latestTask.ApprovedBy,
+						"pending_re_review_notify":   pendingNotify,
+						"pending_re_review_sender":   pendingSender,
+						"pending_re_review_reviewer": pendingReviewer,
 						"updated_at":                 time.Now(),
 					})
 				if result.Error != nil {
