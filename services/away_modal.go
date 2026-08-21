@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"slack-review-notify/i18n"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -118,6 +119,17 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 		true,
 	)
 
+	fromTimeBlock := inputBlock(
+		"away_from_time",
+		t("modal.away.from_time"),
+		t("modal.away.from_time.hint"),
+		map[string]any{
+			"type":      "timepicker",
+			"action_id": "away_from_time",
+		},
+		true,
+	)
+
 	untilBlock := inputBlock(
 		"away_until",
 		t("modal.away.until"),
@@ -125,6 +137,17 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 		map[string]any{
 			"type":      "datepicker",
 			"action_id": "away_until",
+		},
+		true,
+	)
+
+	untilTimeBlock := inputBlock(
+		"away_until_time",
+		t("modal.away.until_time"),
+		t("modal.away.until_time.hint"),
+		map[string]any{
+			"type":      "timepicker",
+			"action_id": "away_until_time",
 		},
 		true,
 	)
@@ -168,7 +191,9 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 		},
 		userBlock,
 		fromBlock,
+		fromTimeBlock,
 		untilBlock,
+		untilTimeBlock,
 		reasonBlock,
 		deleteAllBlock,
 	}
@@ -185,6 +210,25 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 		"close":  plainText(t("modal.away.close")),
 		"blocks": blocks,
 	}
+}
+
+// parseClockTime parses a Slack timepicker "HH:MM" value. ok is false for
+// anything the timepicker would never send, so the caller can surface an error
+// instead of quietly using a day boundary.
+func parseClockTime(s string) (hour, minute int, ok bool) {
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	h, err := strconv.Atoi(parts[0])
+	if err != nil || h < 0 || h > 23 {
+		return 0, 0, false
+	}
+	m, err := strconv.Atoi(parts[1])
+	if err != nil || m < 0 || m > 59 {
+		return 0, 0, false
+	}
+	return h, m, true
 }
 
 // ParseAwayModalSubmission converts the view.state.values map into an
@@ -250,6 +294,20 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 		return false
 	}
 
+	selectedTime := func(blockID string) string {
+		actions, ok := values[blockID]
+		if !ok {
+			return ""
+		}
+		if v, ok := actions[blockID]; ok {
+			return v.SelectedTime
+		}
+		for _, v := range actions {
+			return v.SelectedTime
+		}
+		return ""
+	}
+
 	form := &AwayForm{}
 
 	form.SlackUserID = selectedUser("away_user")
@@ -268,20 +326,27 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 	// so the leave covers the entire selected day, matching the slash-command
 	// behavior. Without this, an `until` of 2030-04-05 would expire at midnight
 	// the same day instead of at the end of it.
-	parseDate := func(blockID string, endOfDay bool) *time.Time {
-		actions, ok := values[blockID]
-		if !ok {
-			return nil
-		}
+	parseDate := func(blockID, timeBlockID string, endOfDay bool) *time.Time {
 		var raw string
-		if v, ok := actions[blockID]; ok {
-			if v.SelectedDate != "" {
-				raw = v.SelectedDate
-			} else {
-				raw = strings.TrimSpace(v.Value)
+		if actions, ok := values[blockID]; ok {
+			if v, ok := actions[blockID]; ok {
+				if v.SelectedDate != "" {
+					raw = v.SelectedDate
+				} else {
+					raw = strings.TrimSpace(v.Value)
+				}
 			}
 		}
+		timeVal := selectedTime(timeBlockID)
+
 		if raw == "" {
+			// Both pickers are optional, so picking a time and leaving the date
+			// blank is an ordinary slip. Returning nil here would drop the time
+			// without a word, and a nil away_until means "away indefinitely" —
+			// the reviewer would stay excluded until somebody noticed.
+			if timeVal != "" {
+				errs[timeBlockID] = t("modal.away.error.date_required_for_time")
+			}
 			return nil
 		}
 		parsed, err := time.ParseInLocation("2006-01-02", raw, loc)
@@ -289,23 +354,45 @@ func ParseAwayModalSubmission(values map[string]map[string]ViewStateValue, loc *
 			errs[blockID] = t("modal.away.error.invalid_date")
 			return nil
 		}
+
 		hh, mm, ss := 0, 0, 0
 		if endOfDay {
 			hh, mm, ss = 23, 59, 59
+		}
+		if timeVal != "" {
+			h, m, ok := parseClockTime(timeVal)
+			if !ok {
+				// Slack's timepicker always sends HH:MM, so this is a malformed
+				// payload rather than a user slip. Report it anyway: falling
+				// through would turn the requested slot into a whole day.
+				errs[timeBlockID] = t("modal.away.error.invalid_time")
+				return nil
+			}
+			hh, mm, ss = h, m, 0
 		}
 		ts := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), hh, mm, ss, 0, loc)
 		return &ts
 	}
 
-	form.AwayFrom = parseDate("away_from", false)
-	form.AwayUntil = parseDate("away_until", true)
+	// Only the set path reads the pickers. Parsing them under delete-all would
+	// let a leftover time selection raise date_required_for_time and block a
+	// deletion that does not use dates at all — the doc comment above promises
+	// the opposite.
+	if !form.DeleteAll {
+		form.AwayFrom = parseDate("away_from", "away_from_time", false)
+		form.AwayUntil = parseDate("away_until", "away_until_time", true)
+	}
 	form.Reason = field("away_reason")
 
-	// Same-day leave is legitimate (from=00:00 +loc, until=23:59:59 +loc), so
-	// only reject when start is strictly after end. The slash command's
-	// `on YYYY-MM-DD` form expresses the same intent.
-	if form.AwayFrom != nil && form.AwayUntil != nil && form.AwayFrom.After(*form.AwayUntil) {
-		errs["away_until"] = t("modal.away.error.until_before_from")
+	// Reject zero-length (from == until) and reversed ranges to prevent
+	// no-op records. Same-day leave with different times is legitimate.
+	if form.AwayFrom != nil && form.AwayUntil != nil && !form.AwayFrom.Before(*form.AwayUntil) {
+		isSameDay := form.AwayFrom.Year() == form.AwayUntil.Year() && form.AwayFrom.YearDay() == form.AwayUntil.YearDay()
+		if isSameDay {
+			errs["away_until_time"] = t("modal.away.error.until_time_before_from")
+		} else {
+			errs["away_until"] = t("modal.away.error.until_before_from")
+		}
 	}
 
 	if len(errs) > 0 {

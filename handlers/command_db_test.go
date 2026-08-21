@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -8,6 +9,7 @@ import (
 	"slack-review-notify/services"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -27,6 +29,22 @@ func setupCommandIntegrationTestDB(t *testing.T) *gorm.DB {
 	}
 
 	return db
+}
+
+// awayBoundsInChannelTZ returns a record's leave bounds rendered in the
+// timezone resolveTimezone falls back to (Asia/Tokyo), which is what these
+// tests register periods in.
+//
+// Bounds are stored in UTC (see models.UTCTime), so a JST 06:00-14:00 period
+// comes back as 21:00 the previous day / 05:00. Asserting on the raw values
+// would assert on the storage encoding instead of on the registered period.
+func awayBoundsInChannelTZ(t *testing.T, rec models.ReviewerAvailability) (*time.Time, *time.Time) {
+	t.Helper()
+	loc, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("fail to load Asia/Tokyo: %v", err)
+	}
+	return models.InLocation(rec.AwayFrom, loc), models.InLocation(rec.AwayUntil, loc)
 }
 
 func setupHTTPRequest(t *testing.T, text, channelID string) *http.Request {
@@ -443,7 +461,8 @@ func TestUnsetAway_SpecificPeriod(t *testing.T) {
 	db.Where("slack_user_id = ?", "UPART").Find(&records)
 	assert.Len(t, records, 1, "only the matching period should be removed")
 	if len(records) == 1 && assert.NotNil(t, records[0].AwayFrom) {
-		assert.Equal(t, "2099-06-10", records[0].AwayFrom.Format("2006-01-02"), "the other period must remain")
+		from, _ := awayBoundsInChannelTZ(t, records[0])
+		assert.Equal(t, "2099-06-10", from.Format("2006-01-02"), "the other period must remain")
 	}
 
 	// unset-away without a date removes all remaining leaves.
@@ -533,9 +552,11 @@ func TestUnsetAway_FromUntilPeriod(t *testing.T) {
 	assert.Len(t, remaining, 2, "only the matching range should be removed")
 	if assert.Len(t, remaining, 2) {
 		assert.NotNil(t, remaining[0].AwayFrom)
-		assert.Equal(t, "2099-07-01", remaining[0].AwayFrom.Format("2006-01-02"), "the 07 range must remain")
+		first, _ := awayBoundsInChannelTZ(t, remaining[0])
+		assert.Equal(t, "2099-07-01", first.Format("2006-01-02"), "the 07 range must remain")
 		assert.NotNil(t, remaining[1].AwayFrom)
-		assert.Equal(t, "2099-08-01", remaining[1].AwayFrom.Format("2006-01-02"), "the from-only period must remain")
+		second, _ := awayBoundsInChannelTZ(t, remaining[1])
+		assert.Equal(t, "2099-08-01", second.Format("2006-01-02"), "the from-only period must remain")
 	}
 
 	// Remove only the open-ended "from"-only period.
@@ -545,7 +566,8 @@ func TestUnsetAway_FromUntilPeriod(t *testing.T) {
 	db.Where("slack_user_id = ?", "URANGE").Find(&survivors)
 	assert.Len(t, survivors, 1, "the from-only period should be removable individually")
 	if assert.Len(t, survivors, 1) && assert.NotNil(t, survivors[0].AwayFrom) {
-		assert.Equal(t, "2099-07-01", survivors[0].AwayFrom.Format("2006-01-02"), "the 07 range must be the survivor")
+		from, _ := awayBoundsInChannelTZ(t, survivors[0])
+		assert.Equal(t, "2099-07-01", from.Format("2006-01-02"), "the 07 range must be the survivor")
 	}
 }
 
@@ -737,9 +759,45 @@ func TestUnsetAway_LegacyPipeFormat_SpecificPeriod(t *testing.T) {
 	db.Where("slack_user_id LIKE ?", "UPIPEP%").Find(&records)
 	assert.Len(t, records, 1, "only the matching legacy period should be removed")
 	if len(records) == 1 && assert.NotNil(t, records[0].AwayFrom) {
-		assert.Equal(t, "2099-06-10", records[0].AwayFrom.Format("2006-01-02"),
+		from, _ := awayBoundsInChannelTZ(t, records[0])
+		assert.Equal(t, "2099-06-10", from.Format("2006-01-02"),
 			"the non-matching legacy period must remain")
 	}
+}
+
+// TestShowAvailability_RendersChannelLocalTime guards the read side of UTC
+// normalization: bounds are stored in UTC, so show-availability must convert
+// them back to the channel's timezone. Without that conversion a JST
+// 06:00-14:00 leave would be listed as 2099-08-04 21:00-05:00, and a full-day
+// leave would lose its "no time shown" form because 00:00:00/23:59:59 only look
+// like day boundaries in the timezone the period was registered in.
+func TestShowAvailability_RendersChannelLocalTime(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) string {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w.Body.String()
+	}
+
+	send("set-away <@ULOCAL1> on 2099-08-05 06:00-14:00 reason 午前休")
+	send("set-away <@ULOCAL2> on 2099-08-10")
+
+	out := send("show-availability")
+	assert.Contains(t, out, "2099-08-05 06:00-14:00", "the time range must be shown in the channel timezone")
+	assert.NotContains(t, out, "2099-08-04", "the UTC start date must not leak into the listing")
+	assert.Contains(t, out, "2099-08-10", "a full-day leave must still be listed by date")
+	assert.NotContains(t, out, "2099-08-10 00:00", "a full-day leave must not gain a time range")
 }
 
 func TestShowAvailability_Integration(t *testing.T) {
@@ -865,4 +923,438 @@ func TestMapUserCommand_AcceptsEscapedMentionWithName(t *testing.T) {
 		t.Fatalf("expected user mapping to be created, got: %v", err)
 	}
 	assert.Equal(t, "U01ABCDE234", mapping.SlackUserID)
+}
+
+func TestSetAway_WithTimeRange(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	w := send("set-away <@UTIME1> on 2099-08-05 06:00-14:00 reason 午前休")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇に設定しました")
+	assert.Contains(t, w.Body.String(), "06:00-14:00")
+
+	var rec models.ReviewerAvailability
+	err := db.Where("slack_user_id = ?", "UTIME1").First(&rec).Error
+	assert.NoError(t, err)
+	assert.NotNil(t, rec.AwayFrom)
+	assert.NotNil(t, rec.AwayUntil)
+	from, until := awayBoundsInChannelTZ(t, rec)
+	assert.Equal(t, 6, from.Hour())
+	assert.Equal(t, 0, from.Minute())
+	assert.Equal(t, 14, until.Hour())
+	assert.Equal(t, 0, until.Minute())
+
+	// The stored representation must be UTC regardless of the channel timezone,
+	// so that lexicographic TEXT comparison in SQLite stays chronological.
+	_, offset := rec.AwayFrom.Zone()
+	assert.Equal(t, 0, offset, "away_from must be stored in UTC")
+	_, offset = rec.AwayUntil.Zone()
+	assert.Equal(t, 0, offset, "away_until must be stored in UTC")
+}
+
+func TestSetAway_FullDayStillWorks(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	w := send("set-away <@UFULL1> on 2099-08-10")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "2099-08-10")
+	assert.NotContains(t, w.Body.String(), "00:00")
+
+	var rec models.ReviewerAvailability
+	err := db.Where("slack_user_id = ?", "UFULL1").First(&rec).Error
+	assert.NoError(t, err)
+	from, until := awayBoundsInChannelTZ(t, rec)
+	assert.Equal(t, 0, from.Hour())
+	assert.Equal(t, 23, until.Hour())
+	assert.Equal(t, 59, until.Minute())
+}
+
+func TestSetAway_InvalidTimeRange(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	w := send("set-away <@UBAD1> on 2099-08-05 14:00-06:00")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "開始時刻は終了時刻より前")
+
+	wMalformed := send("set-away <@UBAD1> on 2099-08-05 06:00〜14:00")
+	assert.Equal(t, 200, wMalformed.Code)
+	assert.Contains(t, wMalformed.Body.String(), "HH:MM-HH:MM")
+
+	wAbc := send("set-away <@UBAD1> on 2099-08-05 abc:def")
+	assert.Equal(t, 200, wAbc.Code)
+	assert.Contains(t, wAbc.Body.String(), "HH:MM-HH:MM")
+
+	// Tokens without a colon used to slip past the guard entirely and register
+	// a full-day leave without a word, so a mistyped half day became a day off.
+	for _, token := range []string{"6-14", "abc", "0600-1400", "午前休"} {
+		w := send("set-away <@UBAD1> on 2099-08-05 " + token)
+		assert.Equal(t, 200, w.Code)
+		assert.Contains(t, w.Body.String(), "HH:MM-HH:MM", "token %q must be rejected", token)
+	}
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UBAD1").Count(&count)
+	assert.Equal(t, int64(0), count, "no leave may be registered from a rejected command")
+
+	// "reason" must still be accepted right after the date.
+	wReason := send("set-away <@UBAD1> on 2099-08-05 reason 午前休")
+	assert.Equal(t, 200, wReason.Code)
+	assert.Contains(t, wReason.Body.String(), "休暇に設定しました")
+}
+
+// TestSetAway_TimeRangeRejectedWithFromUntil pins that a time range typed after
+// "from"/"until" is refused rather than dropped. Times are only supported after
+// "on", and silently ignoring the token would register a full day — a trap this
+// PR created by making callers expect times to work at all.
+func TestSetAway_TimeRangeRejectedWithFromUntil(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	for _, cmd := range []string{
+		"set-away <@UFU1> from 2099-08-05 06:00-14:00 until 2099-08-06",
+		"set-away <@UFU1> from 2099-08-05 until 2099-08-06 06:00-14:00",
+	} {
+		w := send(cmd)
+		assert.Equal(t, 200, w.Code)
+		assert.Contains(t, w.Body.String(), "on YYYY-MM-DD HH:MM-HH:MM", "%q must be rejected", cmd)
+	}
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UFU1").Count(&count)
+	assert.Equal(t, int64(0), count, "no leave may be registered from a rejected command")
+
+	// The plain date form and a trailing reason must keep working.
+	wOK := send("set-away <@UFU1> from 2099-08-05 until 2099-08-06 reason 帰省")
+	assert.Equal(t, 200, wOK.Code)
+	assert.Contains(t, wOK.Body.String(), "休暇に設定しました")
+}
+
+// TestAwayPeriod_UnknownTokenRejected pins the parser's default branch. Tokens
+// sitting where a keyword belongs used to be dropped in silence, and the two
+// worst cases were destructive rather than merely wrong: "unset-away @user DATE"
+// (missing "on") parsed as "no period given", which makes unsetAway hard-delete
+// every leave the user has, and "on DATE HH:MM-HH:MM 午前休" (missing "reason")
+// registered the leave with an empty reason.
+func TestAwayPeriod_UnknownTokenRejected(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	countFor := func(user string) int64 {
+		var n int64
+		db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", user).Count(&n)
+		return n
+	}
+
+	send("set-away <@UUNK> on 2099-08-05")
+	send("set-away <@UUNK> on 2099-08-20")
+	assert.Equal(t, int64(2), countFor("UUNK"), "precondition: two leaves registered")
+
+	// A bare date without "on" must not wipe the user's whole schedule.
+	wBare := send("unset-away <@UUNK> 2099-08-05")
+	assert.Equal(t, 200, wBare.Code)
+	assert.Contains(t, wBare.Body.String(), "reason")
+	assert.Equal(t, int64(2), countFor("UUNK"), "a rejected command must delete nothing")
+
+	// Same token in set-away must not register an indefinite leave.
+	wSet := send("set-away <@UUNK2> 2099-08-05")
+	assert.Equal(t, 200, wSet.Code)
+	assert.Contains(t, wSet.Body.String(), "reason")
+	assert.Equal(t, int64(0), countFor("UUNK2"), "a rejected command must register nothing")
+
+	// A reason typed without the keyword must not be swallowed after a time range.
+	wReason := send("set-away <@UUNK3> on 2099-08-05 06:00-14:00 午前休")
+	assert.Equal(t, 200, wReason.Code)
+	assert.Contains(t, wReason.Body.String(), "reason")
+	assert.Equal(t, int64(0), countFor("UUNK3"), "a rejected command must register nothing")
+
+	// The correct form still works, and multi-word reasons survive.
+	wOK := send("set-away <@UUNK3> on 2099-08-05 06:00-14:00 reason 午前休 と 通院")
+	assert.Equal(t, 200, wOK.Code)
+	assert.Contains(t, wOK.Body.String(), "休暇に設定しました")
+	var rec models.ReviewerAvailability
+	assert.NoError(t, db.Where("slack_user_id = ?", "UUNK3").First(&rec).Error)
+	assert.Equal(t, "午前休 と 通院", rec.Reason)
+
+	// unset-away with no arguments beyond the user must still clear everything.
+	wClear := send("unset-away <@UUNK>")
+	assert.Equal(t, 200, wClear.Code)
+	assert.Equal(t, int64(0), countFor("UUNK"))
+}
+
+func TestUnsetAway_OnDateRemovesTimeSpecificRecords(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	send("set-away <@UDAY1> on 2099-09-01 06:00-14:00 reason 午前休")
+	send("set-away <@UDAY1> on 2099-09-02 reason 全休")
+
+	w := send("unset-away <@UDAY1> on 2099-09-01")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇を解除しました")
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UDAY1").Count(&count)
+	assert.Equal(t, int64(1), count, "only the 09-01 record should be removed")
+}
+
+func TestUnsetAway_OnDateWithTimeRange(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() {
+		services.IsTestMode = false
+	}()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	send("set-away <@UEXACT1> on 2099-09-01 06:00-14:00 reason 午前休")
+	send("set-away <@UEXACT1> on 2099-09-01 14:00-18:00 reason 午後休")
+
+	w := send("unset-away <@UEXACT1> on 2099-09-01 06:00-14:00")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇を解除しました")
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UEXACT1").Count(&count)
+	assert.Equal(t, int64(1), count, "only the matching time slot should be removed")
+}
+
+func TestFormatDateRange_WithTimeRange(t *testing.T) {
+	tr := func(key string, args ...interface{}) string {
+		templates := map[string]string{
+			"common.on_date":      "%s",
+			"common.on_date_time": "%s %s-%s",
+			"common.from_until":      "%s ~ %s",
+			"common.from_until_time": "%s ~ %s",
+			"common.until":        "%s まで",
+			"common.indefinite":   "無期限",
+		}
+		tmpl, ok := templates[key]
+		if !ok {
+			return key
+		}
+		return fmt.Sprintf(tmpl, args...)
+	}
+
+	jst, _ := time.LoadLocation("Asia/Tokyo")
+
+	from := time.Date(2099, 8, 5, 6, 0, 0, 0, jst)
+	until := time.Date(2099, 8, 5, 14, 0, 0, 0, jst)
+	result := formatDateRange(&from, &until, tr)
+	assert.Equal(t, "2099-08-05 06:00-14:00", result)
+
+	fromFull := time.Date(2099, 8, 5, 0, 0, 0, 0, jst)
+	untilFull := time.Date(2099, 8, 5, 23, 59, 59, 0, jst)
+	resultFull := formatDateRange(&fromFull, &untilFull, tr)
+	assert.Equal(t, "2099-08-05", resultFull)
+
+	fromMulti := time.Date(2099, 8, 5, 6, 0, 0, 0, jst)
+	untilMulti := time.Date(2099, 8, 6, 14, 0, 0, 0, jst)
+	resultMulti := formatDateRange(&fromMulti, &untilMulti, tr)
+	assert.Equal(t, "2099-08-05 06:00 ~ 2099-08-06 14:00", resultMulti)
+}
+
+func TestParseTimeRange(t *testing.T) {
+	tests := []struct {
+		input string
+		wantF [2]int
+		wantU [2]int
+		ok    bool
+	}{
+		{"06:00-14:00", [2]int{6, 0}, [2]int{14, 0}, true},
+		{"0:00-23:59", [2]int{0, 0}, [2]int{23, 59}, true},
+		{"9:30-17:00", [2]int{9, 30}, [2]int{17, 0}, true},
+		{"25:00-14:00", [2]int{}, [2]int{}, false},
+		{"06:00-25:00", [2]int{}, [2]int{}, false},
+		{"06:60-14:00", [2]int{}, [2]int{}, false},
+		{"abc-14:00", [2]int{}, [2]int{}, false},
+		{"06:00", [2]int{}, [2]int{}, false},
+		{"", [2]int{}, [2]int{}, false},
+	}
+	for _, tt := range tests {
+		f, u, ok := parseTimeRange(tt.input)
+		if ok != tt.ok {
+			t.Errorf("parseTimeRange(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			continue
+		}
+		if ok && (f != tt.wantF || u != tt.wantU) {
+			t.Errorf("parseTimeRange(%q) = %v, %v; want %v, %v", tt.input, f, u, tt.wantF, tt.wantU)
+		}
+	}
+}
+
+func TestParseAwayPeriod_PastTimeRange(t *testing.T) {
+	jst, _ := time.LoadLocation("Asia/Tokyo")
+	now := time.Date(2026, 8, 6, 15, 0, 0, 0, jst)
+
+	parts := []string{"_", "on", "2026-08-06", "06:00-14:00"}
+	_, errKey := parseAwayPeriod(parts, jst, now, rejectPastDates)
+	assert.Equal(t, "cmd.set_away.past_date", errKey)
+}
+
+func TestUnsetAway_FromUntilSameDayExactMatch(t *testing.T) {
+	db := setupCommandIntegrationTestDB(t)
+
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/slack/command", HandleSlackCommand(db))
+
+	send := func(text string) *httptest.ResponseRecorder {
+		req := setupHTTPRequest(t, text, "C12345")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	send("set-away <@USAMEDAY> from 2099-09-01 until 2099-09-01 reason 全休")
+	send("set-away <@USAMEDAY> on 2099-09-01 06:00-14:00 reason 午前休")
+
+	w := send("unset-away <@USAMEDAY> from 2099-09-01 until 2099-09-01")
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "休暇を解除しました")
+
+	var count int64
+	db.Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "USAMEDAY").Count(&count)
+	assert.Equal(t, int64(1), count, "from/until same-day should use exact match, not day-range deletion")
+}
+
+func TestFormatDateRange_SingleEndedWithTime(t *testing.T) {
+	tr := func(key string, args ...interface{}) string {
+		templates := map[string]string{
+			"common.on_date":      "%s",
+			"common.on_date_time": "%s %s-%s",
+			"common.from_until":      "%s ~ %s",
+			"common.from_until_time": "%s ~ %s",
+			"common.until":        "%s まで",
+			"common.indefinite":   "無期限",
+		}
+		tmpl, ok := templates[key]
+		if !ok {
+			return key
+		}
+		return fmt.Sprintf(tmpl, args...)
+	}
+
+	jst, _ := time.LoadLocation("Asia/Tokyo")
+
+	untilWithTime := time.Date(2099, 8, 5, 14, 0, 0, 0, jst)
+	result := formatDateRange(nil, &untilWithTime, tr)
+	assert.Equal(t, "2099-08-05 14:00 まで", result)
+
+	untilMidnight := time.Date(2099, 8, 5, 0, 0, 0, 0, jst)
+	resultMidnight := formatDateRange(nil, &untilMidnight, tr)
+	assert.Equal(t, "2099-08-05 00:00 まで", resultMidnight, "until=00:00 should show time, not collapse to date-only")
+
+	untilEndOfDay := time.Date(2099, 8, 5, 23, 59, 59, 0, jst)
+	resultEnd := formatDateRange(nil, &untilEndOfDay, tr)
+	assert.Equal(t, "2099-08-05 まで", resultEnd, "until=23:59:59 is a day boundary and should show date only")
+
+	fromWithTime := time.Date(2099, 8, 5, 9, 30, 0, 0, jst)
+	resultFrom := formatDateRange(&fromWithTime, nil, tr)
+	assert.Equal(t, "2099-08-05 09:30 ~ 無期限", resultFrom)
 }

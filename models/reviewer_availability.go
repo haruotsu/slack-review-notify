@@ -21,6 +21,47 @@ type ReviewerAvailability struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index"`
 }
 
+// UTCTime returns a copy of t normalized to UTC, or nil when t is nil. The
+// pointee is never mutated: callers keep their own local-time value for
+// rendering while only the stored/bound representation changes.
+//
+// Why every stored and compared timestamp must be UTC: go-sqlite3 binds a
+// time.Time as TEXT formatted with *that value's own* offset
+// ("2006-01-02 15:04:05.999999999-07:00"), and away_from/away_until are
+// declared datetime (NUMERIC affinity), so SQLite keeps the TEXT and compares
+// it lexicographically. A row written as "2026-08-05 06:00:00+09:00" therefore
+// fails to match a bind of "2026-08-05 01:00:00+00:00" even though both denote
+// the same instant — which is exactly what happened when a channel's
+// set-timezone differed from the process TZ. Once every offset is "+00:00",
+// lexicographic order equals chronological order again.
+func UTCTime(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	utc := t.UTC()
+	return &utc
+}
+
+// InLocation returns a copy of t rendered in loc, or nil when t is nil. This is
+// the read-side counterpart of UTCTime: values come back from SQLite in UTC and
+// must be converted to the channel's timezone before being formatted for Slack.
+func InLocation(t *time.Time, loc *time.Location) *time.Time {
+	if t == nil {
+		return nil
+	}
+	local := t.In(loc)
+	return &local
+}
+
+// BeforeSave normalizes the leave bounds to UTC on every GORM write path
+// (Create/Save/Updates on the struct), so no write site has to remember to do
+// it. See UTCTime for why UTC is mandatory.
+func (r *ReviewerAvailability) BeforeSave(*gorm.DB) error {
+	r.AwayFrom = UTCTime(r.AwayFrom)
+	r.AwayUntil = UTCTime(r.AwayUntil)
+	return nil
+}
+
 const reviewerAvailabilitySlackUserIndex = "idx_reviewer_availabilities_slack_user_id"
 
 // MigrateReviewerAvailabilityIndex relaxes the slack_user_id index from UNIQUE
@@ -130,16 +171,70 @@ func MigrateNormalizeSlackUserIDs(db *gorm.DB) error {
 // the given bounds, treating nil as a NULL column (so an indefinite period
 // matches only indefinite rows). Shared by the set-away/unset-away handlers and
 // the normalization migration so period matching stays consistent everywhere.
+// Bounds are bound as UTC because that is how they are stored (see UTCTime);
+// binding a local-offset value would never match.
 func MatchPeriod(q *gorm.DB, from, until *time.Time) *gorm.DB {
 	if from == nil {
 		q = q.Where("away_from IS NULL")
 	} else {
-		q = q.Where("away_from = ?", from)
+		q = q.Where("away_from = ?", UTCTime(from))
 	}
 	if until == nil {
 		q = q.Where("away_until IS NULL")
 	} else {
-		q = q.Where("away_until = ?", until)
+		q = q.Where("away_until = ?", UTCTime(until))
 	}
 	return q
+}
+
+// nonUTCAvailabilityBounds matches rows whose away_from/away_until TEXT was
+// written with an offset other than UTC. go-sqlite3 renders a UTC value's
+// offset as the literal "+00:00" (the "-07:00" layout element never emits "Z"),
+// so the suffix test is exact rather than heuristic.
+const nonUTCAvailabilityBounds = "(away_from IS NOT NULL AND away_from NOT LIKE '%+00:00') OR " +
+	"(away_until IS NOT NULL AND away_until NOT LIKE '%+00:00')"
+
+// MigrateAvailabilityTimestampsToUTC rewrites leave bounds that an older
+// version stored with a non-UTC offset (the channel's set-timezone, e.g.
+// "+09:00") into the UTC representation the code now writes and binds.
+//
+// Without this pass a database would hold both representations at once, and
+// SQLite's lexicographic TEXT comparison breaks across that boundary: a
+// "+09:00" row is invisible to a "+00:00" bind, so a legacy leave period would
+// stop excluding its reviewer and set-away would insert a duplicate row instead
+// of updating the existing one. The instant each row denotes is unchanged —
+// only its textual encoding is.
+//
+// The whole pass runs in one transaction so a mid-loop failure cannot leave the
+// table half-normalized, matching MigrateNormalizeSlackUserIDs' style. Only
+// non-UTC rows are loaded, so once normalization is complete a later startup
+// scans zero rows. Columns are written with UpdateColumns so this
+// representation-only change does not bump updated_at.
+func MigrateAvailabilityTimestampsToUTC(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&ReviewerAvailability{}) {
+		return nil
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		var records []ReviewerAvailability
+		if err := tx.Unscoped().Where(nonUTCAvailabilityBounds).Find(&records).Error; err != nil {
+			return err
+		}
+
+		for _, r := range records {
+			if err := tx.Unscoped().Model(&ReviewerAvailability{}).
+				Where("id = ?", r.ID).
+				UpdateColumns(map[string]any{
+					"away_from":  UTCTime(r.AwayFrom),
+					"away_until": UTCTime(r.AwayUntil),
+				}).Error; err != nil {
+				return err
+			}
+		}
+
+		if len(records) > 0 {
+			log.Printf("normalized %d leave period(s) to UTC", len(records))
+		}
+		return nil
+	})
 }

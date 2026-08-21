@@ -2,6 +2,10 @@ package i18n
 
 import (
 	"os"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -152,6 +156,41 @@ func TestAllEnKeysExistInJa(t *testing.T) {
 	for key := range messagesEn {
 		if _, ok := messagesJa[key]; !ok {
 			t.Errorf("key %q exists in en but not in ja", key)
+		}
+	}
+}
+
+// formatVerbRe matches a printf verb, skipping "%%" and allowing the explicit
+// argument index some messages use to reorder arguments (e.g. "%[2]s %[1]s").
+var formatVerbRe = regexp.MustCompile(`%(\[\d+\])?[-+# 0]*\d*(\.\d+)?([a-zA-Z])`)
+
+// formatVerbs returns the verb letters of s as a sorted multiset, so that a
+// translation reordering its arguments still compares equal.
+func formatVerbs(s string) []string {
+	var verbs []string
+	for _, m := range formatVerbRe.FindAllStringSubmatch(strings.ReplaceAll(s, "%%", ""), -1) {
+		verbs = append(verbs, m[3])
+	}
+	sort.Strings(verbs)
+	return verbs
+}
+
+// TestFormatVerbsMatchAcrossLanguages pins that both translations of a message
+// take the same arguments. Callers pass one argument list for every language, so
+// a verb dropped from one side renders "%!s(MISSING)" or "%!(EXTRA string=...)"
+// to the users of that language only — invisible to anyone exercising the other.
+// A verb whose type differs (%s vs %d) misrenders the same way. Key parity alone
+// catches neither.
+func TestFormatVerbsMatchAcrossLanguages(t *testing.T) {
+	for key, ja := range messagesJa {
+		en, ok := messagesEn[key]
+		if !ok {
+			continue // already reported by TestAllJaKeysExistInEn
+		}
+		jaVerbs, enVerbs := formatVerbs(ja), formatVerbs(en)
+		if !slices.Equal(jaVerbs, enVerbs) {
+			t.Errorf("key %q takes %v in ja but %v in en\n  ja: %q\n  en: %q",
+				key, jaVerbs, enVerbs, ja, en)
 		}
 	}
 }

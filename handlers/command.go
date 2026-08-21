@@ -97,7 +97,7 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			if isSubCommand {
 				// If the first argument is a subcommand, use the default label name
 				subCommand = parts[0]
-				labelName = "needs-review" // Default label name
+				labelName = defaultLabelName
 
 				if len(parts) > 1 {
 					params = strings.Join(parts[1:], " ")
@@ -274,13 +274,13 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				setLanguage(c, db, channelID, labelName, strings.TrimSpace(params))
 
 			case "set-away":
-				setAway(c, db, channelID, labelName, params, lang)
+				setAway(c, db, channelID, params, lang)
 
 			case "unset-away":
-				unsetAway(c, db, channelID, labelName, params, lang)
+				unsetAway(c, db, channelID, params, lang)
 
 			case "show-availability":
-				showAvailability(c, db, lang)
+				showAvailability(c, db, channelID, lang)
 
 			default:
 				c.String(200, t("cmd.unknown_with_help"))
@@ -1310,9 +1310,11 @@ func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername, lang string)
 
 // awayPeriod holds the parsed leave period and reason from a set-away/unset-away command.
 type awayPeriod struct {
-	from   *time.Time
-	until  *time.Time
-	reason string
+	from         *time.Time
+	until        *time.Time
+	reason       string
+	hasTimeRange bool
+	hasOn        bool
 }
 
 // Named values for parseAwayPeriod's rejectPast argument, so call sites read
@@ -1337,6 +1339,44 @@ func resolveTimezone(db *gorm.DB, channelID, labelName string) *time.Location {
 		return time.UTC
 	}
 	return loc
+}
+
+var timeRangeRe = regexp.MustCompile(`^\d{1,2}:\d{2}-\d{1,2}:\d{2}$`)
+
+func parseTimeRange(s string) (from [2]int, until [2]int, ok bool) {
+	parts := strings.SplitN(s, "-", 2)
+	if len(parts) != 2 {
+		return from, until, false
+	}
+	parse := func(t string) ([2]int, bool) {
+		hm := strings.SplitN(t, ":", 2)
+		if len(hm) != 2 {
+			return [2]int{}, false
+		}
+		h, err1 := strconv.Atoi(hm[0])
+		m, err2 := strconv.Atoi(hm[1])
+		if err1 != nil || err2 != nil || h < 0 || h > 23 || m < 0 || m > 59 {
+			return [2]int{}, false
+		}
+		return [2]int{h, m}, true
+	}
+	f, ok1 := parse(parts[0])
+	u, ok2 := parse(parts[1])
+	if !ok1 || !ok2 {
+		return from, until, false
+	}
+	return f, u, true
+}
+
+// isAwayKeyword reports whether s is one of the keywords parseAwayPeriod
+// recognizes. Any other token sitting where a keyword is expected is a typo,
+// and parseAwayPeriod's loop would otherwise drop it without a word.
+func isAwayKeyword(s string) bool {
+	switch s {
+	case "from", "until", "on", "reason":
+		return true
+	}
+	return false
 }
 
 // parseAwayPeriod parses the "from"/"until"/"on"/"reason" keywords from parts.
@@ -1366,6 +1406,9 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 			if rejectPast && startOfDay.Before(todayStart) {
 				return p, "cmd.set_away.past_date"
 			}
+			if i+1 < len(parts) && !isAwayKeyword(parts[i+1]) {
+				return p, "cmd.set_away.time_range_needs_on"
+			}
 			p.from = &startOfDay
 		case "until":
 			if hasOn {
@@ -1382,6 +1425,12 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 			endOfDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, loc)
 			if rejectPast && endOfDay.Before(now) {
 				return p, "cmd.set_away.past_date"
+			}
+			// Time ranges are only supported after "on". Rejecting the token
+			// here keeps "from DATE 06:00-14:00" from quietly registering a
+			// full day, now that the caller has a reason to expect times to work.
+			if i+1 < len(parts) && !isAwayKeyword(parts[i+1]) {
+				return p, "cmd.set_away.time_range_needs_on"
 			}
 			p.until = &endOfDay
 		case "on":
@@ -1401,21 +1450,59 @@ func parseAwayPeriod(parts []string, loc *time.Location, now time.Time, rejectPa
 			if rejectPast && endOfDay.Before(now) {
 				return p, "cmd.set_away.past_date"
 			}
+			if i+1 < len(parts) && timeRangeRe.MatchString(parts[i+1]) {
+				i++
+				fromTime, untilTime, ok := parseTimeRange(parts[i])
+				if !ok {
+					return p, "cmd.set_away.invalid_time_range"
+				}
+				startOfDay = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), fromTime[0], fromTime[1], 0, 0, loc)
+				endOfDay = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), untilTime[0], untilTime[1], 0, 0, loc)
+				if !startOfDay.Before(endOfDay) {
+					return p, "cmd.set_away.from_time_after_until_time"
+				}
+				if rejectPast && endOfDay.Before(now) {
+					return p, "cmd.set_away.past_date"
+				}
+				p.hasTimeRange = true
+			} else if i+1 < len(parts) && !isAwayKeyword(parts[i+1]) {
+				// The token after the date is neither a valid time range nor a
+				// keyword, so it is a typo: "6-14", "abc-14:00", or "06:00〜14:00"
+				// typed with a full-width tilde. Testing only for ":" let those
+				// through, and the loop's default case then dropped them without
+				// a word — registering a full-day leave when a half day was meant.
+				return p, "cmd.set_away.invalid_time_range"
+			}
 			p.from = &startOfDay
 			p.until = &endOfDay
 			hasOn = true
+			p.hasOn = true
 		case "reason":
+			// A trailing bare "reason" is accepted as an empty reason rather
+			// than rejected: unlike the cases the default branch catches, it
+			// loses no input and destroys nothing, and "reason with no text"
+			// means the same thing as no reason at all.
 			if i+1 < len(parts) {
 				p.reason = strings.Join(parts[i+1:], " ")
 				i = len(parts) // End loop
 			}
+		default:
+			// Every token that reaches here sits where a keyword belongs, so it
+			// is a typo. Dropping it silently is how "unset-away @user
+			// 2099-08-05" (missing "on") turned into "delete every leave this
+			// user has": with no date parsed, unsetAway skips the period filter
+			// and hard-deletes the lot. The same silence swallowed the reason in
+			// "set-away @user on DATE 06:00-14:00 午前休", where "reason" was
+			// forgotten. Rejecting the command costs a retry; the alternative
+			// destroys records with no way back.
+			return p, "cmd.set_away.unknown_token"
 		}
 	}
 	return p, ""
 }
 
 // setAway marks a user as away/on leave
-func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang string) {
+func setAway(c *gin.Context, db *gorm.DB, channelID, params, lang string) {
 	t := i18n.L(lang)
 	if params == "" {
 		c.String(200, t("cmd.set_away.usage"))
@@ -1434,7 +1521,7 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 		return
 	}
 
-	loc := resolveTimezone(db, channelID, labelName)
+	loc := resolveAwayTimezone(db, channelID)
 	nowLocal := time.Now().In(loc)
 
 	period, errKey := parseAwayPeriod(parts, loc, nowLocal, rejectPastDates)
@@ -1507,8 +1594,11 @@ func setAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang str
 
 // unsetAway removes a user's away/leave status.
 // Without a date, all leave periods for the user are removed.
-// With "on"/"from"/"until", only the period that exactly matches is removed.
-func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang string) {
+// "on DATE" removes every period that falls inside that day, including the
+// time-ranged ones, so a caller who does not remember the exact slot can still
+// clear the day. "on DATE HH:MM-HH:MM", "from" and "until" remove only the
+// period that matches exactly.
+func unsetAway(c *gin.Context, db *gorm.DB, channelID, params, lang string) {
 	t := i18n.L(lang)
 	if params == "" {
 		c.String(200, t("cmd.unset_away.usage"))
@@ -1544,7 +1634,7 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 
 	// If a date is specified, delete only the matching period; otherwise delete all.
 	if len(parts) > 1 {
-		loc := resolveTimezone(db, channelID, labelName)
+		loc := resolveAwayTimezone(db, channelID)
 		nowLocal := time.Now().In(loc)
 		period, errKey := parseAwayPeriod(parts, loc, nowLocal, allowPastDates)
 		if errKey != "" {
@@ -1555,7 +1645,30 @@ func unsetAway(c *gin.Context, db *gorm.DB, channelID, labelName, params, lang s
 		// Extra tokens without a date keyword (e.g. a stray "reason") must not
 		// silently restrict the match to indefinite records.
 		if period.from != nil || period.until != nil {
-			query = models.MatchPeriod(query, period.from, period.until)
+			isSingleDayWithoutTime := period.hasOn && !period.hasTimeRange &&
+				period.from != nil && period.until != nil
+			if isSingleDayWithoutTime {
+				// Both boundaries are built with time.Date in the channel's
+				// timezone and converted to UTC only at bind time, because that
+				// is how the bounds are stored (see models.UTCTime).
+				//
+				// The end boundary is built from the next calendar day rather
+				// than derived from dayStart. Neither AddDate(0,0,1) nor +24h is
+				// correct across a DST transition: where local midnight does not
+				// exist (Asia/Beirut springs 00:00 -> 01:00 on 2027-03-28)
+				// time.Date normalizes dayStart to 01:00, and AddDate carries
+				// that wall clock forward, stretching the window an hour into the
+				// next day — far enough to hard-delete a 00:00-00:30 leave
+				// registered for it. time.Date normalizes an out-of-range day, so
+				// day+1 also covers month and year rollover.
+				y, m, d := period.from.Year(), period.from.Month(), period.from.Day()
+				dayStart := time.Date(y, m, d, 0, 0, 0, 0, loc)
+				nextDayStart := time.Date(y, m, d+1, 0, 0, 0, 0, loc)
+				query = query.Where("away_from >= ? AND away_from < ? AND away_until >= ? AND away_until < ?",
+					dayStart.UTC(), nextDayStart.UTC(), dayStart.UTC(), nextDayStart.UTC())
+			} else {
+				query = models.MatchPeriod(query, period.from, period.until)
+			}
 		}
 	}
 
@@ -1573,13 +1686,32 @@ func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface
 	isSameDay := awayFrom != nil && awayUntil != nil &&
 		awayFrom.Year() == awayUntil.Year() && awayFrom.YearDay() == awayUntil.YearDay()
 
+	isFullDay := func(from, until *time.Time) bool {
+		return from.Hour() == 0 && from.Minute() == 0 && from.Second() == 0 &&
+			until.Hour() == 23 && until.Minute() == 59 && until.Second() == 59
+	}
+	isFromBoundary := func(t *time.Time) bool {
+		return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0
+	}
+	isUntilBoundary := func(t *time.Time) bool {
+		return t.Hour() == 23 && t.Minute() == 59 && t.Second() == 59
+	}
+
 	switch {
+	case isSameDay && !isFullDay(awayFrom, awayUntil):
+		return t("common.on_date_time", awayFrom.Format("2006-01-02"), awayFrom.Format("15:04"), awayUntil.Format("15:04"))
 	case isSameDay:
 		return t("common.on_date", awayFrom.Format("2006-01-02"))
+	case awayFrom != nil && awayUntil != nil && !isFullDay(awayFrom, awayUntil):
+		return t("common.from_until_time", awayFrom.Format("2006-01-02 15:04"), awayUntil.Format("2006-01-02 15:04"))
 	case awayFrom != nil && awayUntil != nil:
 		return t("common.from_until", awayFrom.Format("2006-01-02"), awayUntil.Format("2006-01-02"))
+	case awayFrom != nil && !isFromBoundary(awayFrom):
+		return t("common.from_until", awayFrom.Format("2006-01-02 15:04"), t("common.indefinite"))
 	case awayFrom != nil:
 		return t("common.from_until", awayFrom.Format("2006-01-02"), t("common.indefinite"))
+	case awayUntil != nil && !isUntilBoundary(awayUntil):
+		return t("common.until", awayUntil.Format("2006-01-02 15:04"))
 	case awayUntil != nil:
 		return t("common.until", awayUntil.Format("2006-01-02"))
 	default:
@@ -1588,14 +1720,15 @@ func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface
 }
 
 // showAvailability displays a list of users currently on leave
-func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
+func showAvailability(c *gin.Context, db *gorm.DB, channelID, lang string) {
 	t := i18n.L(lang)
+	loc := resolveAwayTimezone(db, channelID)
 	var records []models.ReviewerAvailability
 	now := time.Now()
 
 	// Get non-expired records (currently away or scheduled for the future).
 	// Order by user then start date so a user's multiple periods stay grouped.
-	db.Where("away_until IS NULL OR away_until > ?", now).
+	db.Where("away_until IS NULL OR away_until > ?", now.UTC()).
 		Order("slack_user_id, away_from").
 		Find(&records)
 
@@ -1606,8 +1739,15 @@ func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
 
 	response := t("cmd.show_availability.header")
 	for _, r := range records {
+		// Bounds come back from SQLite in UTC; render them in the channel's
+		// timezone so the wall-clock times match what was registered. This must
+		// happen before formatDateRange, whose 00:00:00 / 23:59:59 full-day
+		// checks only hold in the timezone the period was written in.
+		awayFrom := models.InLocation(r.AwayFrom, loc)
+		awayUntil := models.InLocation(r.AwayUntil, loc)
+
 		// Determine status: scheduled (AwayFrom is in the future) or currently away
-		isScheduled := r.AwayFrom != nil && r.AwayFrom.After(now)
+		isScheduled := awayFrom != nil && awayFrom.After(now)
 		var statusLabel string
 		if isScheduled {
 			statusLabel = t("cmd.show_availability.status_scheduled")
@@ -1616,7 +1756,7 @@ func showAvailability(c *gin.Context, db *gorm.DB, lang string) {
 		}
 
 		line := fmt.Sprintf("• <@%s> [%s] ", r.SlackUserID, statusLabel)
-		line += formatDateRange(r.AwayFrom, r.AwayUntil, t)
+		line += formatDateRange(awayFrom, awayUntil, t)
 
 		if r.Reason != "" {
 			line += t("common.reason_paren", r.Reason)

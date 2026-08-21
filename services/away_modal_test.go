@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -32,7 +33,9 @@ func TestBuildAwayManagementModalView_HasAllFields(t *testing.T) {
 	required := []string{
 		"away_user",
 		"away_from",
+		"away_from_time",
 		"away_until",
+		"away_until_time",
 		"away_reason",
 		"away_delete_all",
 	}
@@ -76,7 +79,9 @@ func minimalAwayValues() map[string]map[string]ViewStateValue {
 	return map[string]map[string]ViewStateValue{
 		"away_user":       {"away_user": {SelectedUser: "U999"}},
 		"away_from":       {"away_from": {Value: ""}},
+		"away_from_time":  {"away_from_time": {SelectedTime: ""}},
 		"away_until":      {"away_until": {Value: ""}},
+		"away_until_time": {"away_until_time": {SelectedTime: ""}},
 		"away_reason":     {"away_reason": {Value: ""}},
 		"away_delete_all": {"away_delete_all": {SelectedOptions: nil}},
 	}
@@ -270,5 +275,137 @@ func TestParseAwayModalSubmission_DeleteAll(t *testing.T) {
 	}
 	if form.SlackUserID != "U999" {
 		t.Errorf("SlackUserID = %q, want U999", form.SlackUserID)
+	}
+}
+
+func TestParseAwayModalSubmission_WithTimePicker(t *testing.T) {
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("load JST: %v", err)
+	}
+	v := minimalAwayValues()
+	v["away_from"] = map[string]ViewStateValue{
+		"away_from": {Value: "2030-04-01"},
+	}
+	v["away_from_time"] = map[string]ViewStateValue{
+		"away_from_time": {SelectedTime: "06:00"},
+	}
+	v["away_until"] = map[string]ViewStateValue{
+		"away_until": {Value: "2030-04-01"},
+	}
+	v["away_until_time"] = map[string]ViewStateValue{
+		"away_until_time": {SelectedTime: "14:00"},
+	}
+	form, err := ParseAwayModalSubmission(v, jst, "ja")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if form.AwayFrom == nil || form.AwayFrom.Hour() != 6 || form.AwayFrom.Minute() != 0 {
+		t.Errorf("AwayFrom = %v, want 06:00", form.AwayFrom)
+	}
+	if form.AwayUntil == nil || form.AwayUntil.Hour() != 14 || form.AwayUntil.Minute() != 0 {
+		t.Errorf("AwayUntil = %v, want 14:00", form.AwayUntil)
+	}
+}
+
+// TestParseAwayModalSubmission_TimeWithoutDateRejected pins that a time picked
+// without its date is reported instead of dropped. Both pickers are optional, so
+// this is an ordinary slip; accepting it left away_until nil, which means "away
+// indefinitely" — the reviewer would stay excluded until somebody noticed.
+func TestParseAwayModalSubmission_TimeWithoutDateRejected(t *testing.T) {
+	for _, tc := range []struct{ name, timeBlock string }{
+		{"start", "away_from_time"},
+		{"end", "away_until_time"},
+	} {
+		v := minimalAwayValues()
+		v[tc.timeBlock] = map[string]ViewStateValue{
+			tc.timeBlock: {SelectedTime: "09:00"},
+		}
+		_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+		var ve *ModalValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("%s: want a validation error, got %v", tc.name, err)
+		}
+		if _, ok := ve.Errors[tc.timeBlock]; !ok {
+			t.Errorf("%s: want the error on %q, got %v", tc.name, tc.timeBlock, ve.Errors)
+		}
+	}
+}
+
+// TestParseAwayModalSubmission_MalformedTimeRejected pins the other half of the
+// same rule. Slack's timepicker always sends HH:MM, so these values only arrive
+// in a malformed payload — but falling through silently turned the requested
+// slot into a whole day.
+func TestParseAwayModalSubmission_MalformedTimeRejected(t *testing.T) {
+	for _, bad := range []string{"9", "25:00", "ab:cd", "12:60", ":30"} {
+		v := minimalAwayValues()
+		v["away_from"] = map[string]ViewStateValue{
+			"away_from": {Value: "2030-04-01"},
+		}
+		v["away_from_time"] = map[string]ViewStateValue{
+			"away_from_time": {SelectedTime: bad},
+		}
+		_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+		var ve *ModalValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("%q: want a validation error, got %v", bad, err)
+		}
+		if _, ok := ve.Errors["away_from_time"]; !ok {
+			t.Errorf("%q: want the error on away_from_time, got %v", bad, ve.Errors)
+		}
+	}
+}
+
+func TestParseAwayModalSubmission_SameTimeRejected(t *testing.T) {
+	v := minimalAwayValues()
+	v["away_from"] = map[string]ViewStateValue{
+		"away_from": {Value: "2030-04-01"},
+	}
+	v["away_from_time"] = map[string]ViewStateValue{
+		"away_from_time": {SelectedTime: "06:00"},
+	}
+	v["away_until"] = map[string]ViewStateValue{
+		"away_until": {Value: "2030-04-01"},
+	}
+	v["away_until_time"] = map[string]ViewStateValue{
+		"away_until_time": {SelectedTime: "06:00"},
+	}
+	_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+	if err == nil {
+		t.Fatalf("expected validation error for zero-length leave (same from and until time)")
+	}
+	ve, ok := err.(*ModalValidationError)
+	if !ok {
+		t.Fatalf("want *ModalValidationError, got %T", err)
+	}
+	if _, has := ve.Errors["away_until_time"]; !has {
+		t.Errorf("want error on away_until_time, got %+v", ve.Errors)
+	}
+}
+
+func TestParseAwayModalSubmission_SameDayFromTimeAfterUntilTime(t *testing.T) {
+	v := minimalAwayValues()
+	v["away_from"] = map[string]ViewStateValue{
+		"away_from": {Value: "2030-04-01"},
+	}
+	v["away_from_time"] = map[string]ViewStateValue{
+		"away_from_time": {SelectedTime: "14:00"},
+	}
+	v["away_until"] = map[string]ViewStateValue{
+		"away_until": {Value: "2030-04-01"},
+	}
+	v["away_until_time"] = map[string]ViewStateValue{
+		"away_until_time": {SelectedTime: "06:00"},
+	}
+	_, err := ParseAwayModalSubmission(v, time.UTC, "ja")
+	if err == nil {
+		t.Fatalf("expected validation error for from_time > until_time on same day")
+	}
+	ve, ok := err.(*ModalValidationError)
+	if !ok {
+		t.Fatalf("want *ModalValidationError, got %T", err)
+	}
+	if _, has := ve.Errors["away_until_time"]; !has {
+		t.Errorf("want error on away_until_time, got %+v", ve.Errors)
 	}
 }

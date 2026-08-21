@@ -147,11 +147,14 @@ GitHubユーザーとSlackユーザーを紐付けることで、PR作成者に�
 ```
 
 ### 休暇管理
-- `/slack-review-notify set-away @user [until YYYY-MM-DD] [reason 理由]`: ユーザーを休暇に設定
-- `/slack-review-notify unset-away @user`: ユーザーの休暇を解除
+- `/slack-review-notify set-away @user [from YYYY-MM-DD] [until YYYY-MM-DD] [reason 理由]`: ユーザーを休暇に設定
+- `/slack-review-notify set-away @user on YYYY-MM-DD [HH:MM-HH:MM] [reason 理由]`: 単日の休暇を設定（時刻を付けるとその時間帯のみ）
+- `/slack-review-notify unset-away @user [on YYYY-MM-DD [HH:MM-HH:MM]]`: 休暇を解除（全件 / 指定日の全件 / 指定時間帯のみ）
 - `/slack-review-notify show-availability`: 休暇中のユーザー一覧を表示
 
-`/slack-review-notify help` の **🌴 休暇管理を開く** ボタンからモーダルでも操作できます。ユーザーピッカー + 開始日 / 終了日（datepicker, 任意）+ 理由（任意）+「このユーザーの休暇を全削除」チェックボックスで、登録と全削除に対応します。
+`/slack-review-notify help` の **🌴 休暇管理を開く** ボタンからモーダルでも操作できます。ユーザーピッカー + 開始日 / 終了日（datepicker, 任意）+ 開始時刻 / 終了時刻（timepicker, 任意）+ 理由（任意）+「このユーザーの休暇を全削除」チェックボックスで、登録と全削除に対応します。
+
+休暇の日付・時刻は、そのチャンネルの `set-timezone`（未設定なら Asia/Tokyo）で解釈・表示されます。
 
 ### レビュー管理
 通知メッセージから各種アクションを実行できます:

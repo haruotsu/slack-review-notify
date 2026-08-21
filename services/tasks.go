@@ -356,8 +356,17 @@ func CleanupOldTasks(db *gorm.DB) {
 
 // CleanupExpiredAvailability permanently deletes expired leave records
 func CleanupExpiredAvailability(db *gorm.DB) {
-	now := time.Now()
-	result := db.Unscoped().Where("away_until IS NOT NULL AND away_until < ?", now).Delete(&models.ReviewerAvailability{})
+	cleanupExpiredAvailabilityAt(db, time.Now())
+}
+
+// cleanupExpiredAvailabilityAt takes now as a parameter so tests can pin the
+// cutoff, including passing it in a non-UTC Location to prove the bind does not
+// depend on the process timezone.
+func cleanupExpiredAvailabilityAt(db *gorm.DB, now time.Time) {
+	// Bound as UTC to match how away_until is stored (see models.UTCTime).
+	// This is a hard delete, so a wrong offset destroys live leave records.
+	nowUTC := now.UTC()
+	result := db.Unscoped().Where("away_until IS NOT NULL AND away_until < ?", nowUTC).Delete(&models.ReviewerAvailability{})
 	if result.Error != nil {
 		log.Printf("expired availability cleanup error: %v", result.Error)
 	} else if result.RowsAffected > 0 {

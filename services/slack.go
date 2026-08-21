@@ -173,18 +173,23 @@ func buildMentionText(s string) string {
 // GetAwayUserIDs returns the user IDs of users currently on leave
 // (excludes scheduled future leaves where AwayFrom > now)
 func GetAwayUserIDs(db *gorm.DB) []string {
-	now := time.Now()
+	return getAwayUserIDsAt(db, time.Now())
+}
 
+func getAwayUserIDsAt(db *gorm.DB, now time.Time) []string {
 	// Retrieve the IDs of users with a currently active period:
 	// 1. AwayFrom is nil (immediate) or in the past/present AND
 	// 2. AwayUntil is nil (indefinite) or in the future
 	// A user may have several active periods at once, so SELECT DISTINCT to
 	// return each ID once and avoid fetching unneeded columns.
 	var ids []string
+	// now is bound as UTC to match how the bounds are stored, so this returns
+	// the same set regardless of the process timezone (see models.UTCTime).
+	nowUTC := now.UTC()
 	result := db.Model(&models.ReviewerAvailability{}).
 		Where(
 			"(away_from IS NULL OR away_from <= ?) AND (away_until IS NULL OR away_until > ?)",
-			now, now,
+			nowUTC, nowUTC,
 		).
 		Distinct().
 		Pluck("slack_user_id", &ids)

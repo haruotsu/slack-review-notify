@@ -1175,3 +1175,77 @@ func TestSelectRandomReviewers_ExcludesAwayUsers(t *testing.T) {
 		}
 	}
 }
+
+func TestGetAwayUserIDsAt_TimeSpecificLeave(t *testing.T) {
+	db := setupTestDB(t)
+
+	jst, _ := time.LoadLocation("Asia/Tokyo")
+	from := time.Date(2099, 8, 5, 6, 0, 0, 0, jst)
+	until := time.Date(2099, 8, 5, 14, 0, 0, 0, jst)
+
+	db.Create(&models.ReviewerAvailability{
+		ID:          "time-1",
+		SlackUserID: "U_HALFDAY",
+		AwayFrom:    &from,
+		AwayUntil:   &until,
+		Reason:      "午前休",
+		CreatedAt:   from,
+		UpdatedAt:   from,
+	})
+
+	duringLeave := time.Date(2099, 8, 5, 10, 0, 0, 0, jst)
+	ids := getAwayUserIDsAt(db, duringLeave)
+	assert.Contains(t, ids, "U_HALFDAY")
+
+	afterLeave := time.Date(2099, 8, 5, 15, 0, 0, 0, jst)
+	ids2 := getAwayUserIDsAt(db, afterLeave)
+	assert.NotContains(t, ids2, "U_HALFDAY")
+
+	beforeLeave := time.Date(2099, 8, 5, 5, 0, 0, 0, jst)
+	ids3 := getAwayUserIDsAt(db, beforeLeave)
+	assert.NotContains(t, ids3, "U_HALFDAY")
+}
+
+// TestGetAwayUserIDsAt_NowInAnyTimezone pins the bug that the Dockerfile's
+// ENV TZ=Asia/Tokyo used to paper over: a leave period is written in the
+// channel's timezone, but `now` comes from time.Now() in the *process*
+// timezone. Because go-sqlite3 stores a time.Time as TEXT carrying its own
+// offset and SQLite compares that TEXT lexicographically, a "+09:00" row was
+// invisible to a "+00:00" bind, so a reviewer on leave was still assigned.
+//
+// Every `now` below denotes the same instant (2099-08-05 10:00 JST) expressed
+// in a different Location, so the answer must not depend on which one is used.
+func TestGetAwayUserIDsAt_NowInAnyTimezone(t *testing.T) {
+	db := setupTestDB(t)
+
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	assert.NoError(t, err)
+	from := time.Date(2099, 8, 5, 6, 0, 0, 0, jst)
+	until := time.Date(2099, 8, 5, 14, 0, 0, 0, jst)
+
+	assert.NoError(t, db.Create(&models.ReviewerAvailability{
+		ID:          "tz-1",
+		SlackUserID: "U_TZ",
+		AwayFrom:    &from,
+		AwayUntil:   &until,
+		CreatedAt:   from,
+		UpdatedAt:   from,
+	}).Error)
+
+	newYork, err := time.LoadLocation("America/New_York")
+	assert.NoError(t, err)
+	kolkata, err := time.LoadLocation("Asia/Kolkata") // +05:30, a non-hour offset
+	assert.NoError(t, err)
+
+	duringLeave := time.Date(2099, 8, 5, 10, 0, 0, 0, jst)
+	for _, loc := range []*time.Location{time.UTC, newYork, kolkata, jst} {
+		ids := getAwayUserIDsAt(db, duringLeave.In(loc))
+		assert.Contains(t, ids, "U_TZ", "must be detected as away with now in %s", loc)
+	}
+
+	afterLeave := time.Date(2099, 8, 5, 15, 0, 0, 0, jst)
+	for _, loc := range []*time.Location{time.UTC, newYork, kolkata, jst} {
+		ids := getAwayUserIDsAt(db, afterLeave.In(loc))
+		assert.NotContains(t, ids, "U_TZ", "must be back from leave with now in %s", loc)
+	}
+}

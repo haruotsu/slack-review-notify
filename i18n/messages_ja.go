@@ -76,6 +76,7 @@ var messagesJa = map[string]string{
 *休暇管理:*
 • /slack-review-notify set-away @user from [YYYY-MM-DD] until [YYYY-MM-DD] reason [理由] - ユーザーを休暇に設定
 • /slack-review-notify set-away @user on [YYYY-MM-DD] reason [理由] - 単一日の休暇を設定
+• /slack-review-notify set-away @user on [YYYY-MM-DD] [HH:MM-HH:MM] reason [理由] - 時間指定の休暇を設定
 • /slack-review-notify unset-away @user - ユーザーの休暇を解除
 • /slack-review-notify show-availability - 休暇中・予約中のユーザー一覧を表示
 
@@ -229,19 +230,23 @@ var messagesJa = map[string]string{
 	"cmd.remove_user_mapping.success":   "GitHubユーザー `%s` のマッピングを削除しました。",
 
 	// ==================== Command: set-away ====================
-	"cmd.set_away.usage":        "休暇に設定するユーザーを指定してください。\n例:\n  set-away @user\n  set-away @user until 2025-06-01\n  set-away @user from 2025-05-28 until 2025-06-01\n  set-away @user on 2025-06-01\n  set-away @user on 2025-06-01 reason 有給休暇",
+	"cmd.set_away.usage":        "休暇に設定するユーザーを指定してください。\n例:\n  set-away @user\n  set-away @user until 2025-06-01\n  set-away @user from 2025-05-28 until 2025-06-01\n  set-away @user on 2025-06-01\n  set-away @user on 2025-06-01 06:00-14:00\n  set-away @user on 2025-06-01 reason 有給休暇",
 	"cmd.set_away.from_after_until":  "開始日（from）は終了日（until）より前に指定してください。",
 	"cmd.set_away.missing_date":     "キーワードの後に日付を指定してください。例: from 2025-06-01",
 	"cmd.set_away.conflicting_keywords": "`on` と `from`/`until` は同時に使えません。`on YYYY-MM-DD` または `from YYYY-MM-DD until YYYY-MM-DD` のどちらかを使用してください。",
 	"cmd.set_away.no_user":      "休暇に設定するユーザーを指定してください。",
-	"cmd.set_away.invalid_date": "日付形式が無効です。YYYY-MM-DD形式で指定してください（例: 2025-06-01）",
+	"cmd.set_away.invalid_date":       "日付形式が無効です。YYYY-MM-DD形式で指定してください（例: 2025-06-01）",
+	"cmd.set_away.invalid_time_range":          "時刻範囲の形式が無効です。HH:MM-HH:MM形式で指定してください（例: 06:00-14:00）。理由を書く場合は `reason 理由` の形式で指定してください。",
+	"cmd.set_away.from_time_after_until_time": "開始時刻は終了時刻より前に指定してください。",
+	"cmd.set_away.time_range_needs_on":        "時刻の指定は `on YYYY-MM-DD HH:MM-HH:MM` の形式のみ対応しています。`from`/`until` には日付だけを指定してください。理由を書く場合は `reason 理由` の形式で指定してください。",
+	"cmd.set_away.unknown_token":              "解釈できない指定があります。日付は `on YYYY-MM-DD` または `from YYYY-MM-DD until YYYY-MM-DD`、理由は `reason 理由` の形式で指定してください。",
 	"cmd.set_away.past_date":    "過去の日付は指定できません。今日以降の日付を指定してください。",
 	"cmd.set_away.update_error": "休暇設定の更新に失敗しました。",
 	"cmd.set_away.create_error": "休暇設定の作成に失敗しました。",
 	"cmd.set_away.success":      "<@%s> を休暇に設定しました",
 
 	// ==================== Command: unset-away ====================
-	"cmd.unset_away.usage":   "休暇を解除するユーザーを指定してください。\n例:\n  unset-away @user （すべての休暇を解除）\n  unset-away @user on 2025-06-01 （指定日の休暇のみ解除）\n  unset-away @user from 2025-05-28 until 2025-06-01 （指定期間の休暇のみ解除）",
+	"cmd.unset_away.usage":   "休暇を解除するユーザーを指定してください。\n例:\n  unset-away @user （すべての休暇を解除）\n  unset-away @user on 2025-06-01 （指定日の休暇をすべて解除）\n  unset-away @user on 2025-06-01 06:00-14:00 （指定時間帯の休暇のみ解除）\n  unset-away @user from 2025-05-28 until 2025-06-01 （指定期間の休暇のみ解除）",
 	"cmd.unset_away.not_set": "<@%s> は休暇に設定されていません。",
 	"cmd.unset_away.success": "<@%s> の休暇を解除しました",
 
@@ -259,7 +264,9 @@ var messagesJa = map[string]string{
 	"common.select_placeholder": "選択してください",
 	"common.until":              "%s まで",
 	"common.from_until":         "%s ~ %s",
+	"common.from_until_time":    "%s ~ %s",
 	"common.on_date":            "%s",
+	"common.on_date_time":       "%s %s-%s",
 	"common.indefinite":         "無期限",
 	"common.reason":             "、理由: %s",
 	"common.reason_paren":       "（%s）",
@@ -317,8 +324,12 @@ var messagesJa = map[string]string{
 	"modal.away.user.hint":        "Slack のユーザーピッカーから選択。",
 	"modal.away.from":             "開始日",
 	"modal.away.from.hint":        "未指定なら「今すぐ」開始扱い。",
+	"modal.away.from_time":        "開始時刻",
+	"modal.away.from_time.hint":   "未指定なら0:00扱い。時間単位の休暇に使用します。",
 	"modal.away.until":            "終了日",
 	"modal.away.until.hint":       "未指定なら「無期限」扱い。",
+	"modal.away.until_time":       "終了時刻",
+	"modal.away.until_time.hint":  "未指定なら23:59扱い。時間単位の休暇に使用します。",
 	"modal.away.reason":           "理由（任意）",
 	"modal.away.reason.hint":      "例: 有給休暇、出張、療養 など。",
 	"modal.away.delete_all":       "このユーザーの休暇を全削除",
@@ -329,7 +340,10 @@ var messagesJa = map[string]string{
 	"modal.away.nothing_deleted":  "<@%s> には削除対象の休暇がありませんでした。",
 	"modal.away.error.user_required":    "対象ユーザーを選択してください。",
 	"modal.away.error.invalid_date":     "日付は YYYY-MM-DD 形式で指定してください。",
-	"modal.away.error.until_before_from": "終了日は開始日と同じか、それより後にしてください。",
+	"modal.away.error.date_required_for_time": "時刻を指定する場合は日付も選択してください。",
+	"modal.away.error.invalid_time":           "時刻は HH:MM 形式で指定してください。",
+	"modal.away.error.until_before_from":      "終了日は開始日と同じか、それより後にしてください。",
+	"modal.away.error.until_time_before_from": "終了時刻は開始時刻より後にしてください。",
 	"modal.away.error.save_failed":      "保存に失敗しました。時間をおいて再度お試しください。",
 	"modal.away.error.delete_failed":    "削除に失敗しました。時間をおいて再度お試しください。",
 	"modal.away.error.context_lost":     "モーダルの状態が失われました。お手数ですが再度開き直してください。",
