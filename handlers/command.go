@@ -524,20 +524,25 @@ func showHelp(c *gin.Context, db *gorm.DB, channelID, lang string) {
 		},
 	})
 
-	blocks := []map[string]interface{}{
-		{
+	// The help body is longer than a single section block can hold, so it is spread
+	// over consecutive sections; one oversized section would make Slack discard the
+	// whole response and show the caller "invalid_command_response".
+	helpText := t("cmd.help")
+	var blocks []map[string]interface{}
+	for _, chunk := range services.SplitTextForSections(helpText, services.SlackSectionTextLimit) {
+		blocks = append(blocks, map[string]interface{}{
 			"type": "section",
 			"text": map[string]interface{}{
 				"type": "mrkdwn",
-				"text": t("cmd.help"),
+				"text": chunk,
 			},
-		},
+		})
 	}
 	blocks = append(blocks, actionBlocks...)
 
 	c.JSON(200, gin.H{
 		"response_type": "ephemeral",
-		"text":          t("cmd.help"),
+		"text":          helpText,
 		"blocks":        blocks,
 	})
 }
