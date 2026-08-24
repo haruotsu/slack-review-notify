@@ -7,80 +7,53 @@ var messagesEn = map[string]string{
 
 	// ==================== Command: Help ====================
 	"cmd.help": `*Review Notification Bot Configuration*
-Command format: /slack-review-notify [label-name] subcommand [args]
+Format: /slack-review-notify [label-name] subcommand [args]
+The list below omits the leading /slack-review-notify. Omitting [label-name] uses needs-review.
 
-*Label names with spaces*
-If your label name contains spaces, wrap it in quotes (" or '):
-- Example: /slack-review-notify "needs review" set-mention @team
-- Example: /slack-review-notify 'security review' add-reviewer @security
+*Getting started*
+:point_right: A target repository is required before anything is notified → [label-name] add-repo owner/repo
+:point_right: A mention target is optional (notifications still go out, just without an @-mention)
 
-*Initial Setup*
-The following repository setting is required to receive notifications:
-:point_right: *Add target repository (required)*
-   /slack-review-notify [label-name] add-repo owner/repo
+*Specifying labels*
+• Each label keeps its own independent settings (e.g. bug set-mention @bug-team)
+• Comma-separated labels are an AND condition. e.g. "frontend,urgent" add-repo owner/app → only PRs carrying both
+• Wrap label names containing spaces in quotes (e.g. "needs review" set-mention @team)
 
-:information_source: Notifications will not be sent until at least one repository is added.
+*Basics*
+• show - Show all label settings for this channel
+• [label-name] show - Show detailed settings for one label
+• show-my-reviews - Show your unfinished review requests across all channels
+• help - Show this help
 
-*Recommended (Optional)*
-:point_right: *Set mention target*
-   /slack-review-notify [label-name] set-mention @user
-   Without this, notifications are still sent — just without an @-mention. Add it when you want to ping a person or team.
+*Repositories and mentions*
+• [label-name] add-repo owner/repo1,owner/repo2 - Add target repositories (required)
+• [label-name] remove-repo owner/repo - Remove a repository
+• [label-name] set-mention @user - Set the mention target
 
-*Multiple Label Configuration*
-You can have independent settings for different labels in this channel:
-- Example 1: /slack-review-notify bug set-mention @bug-team - settings for "bug" label
-- Example 2: /slack-review-notify feature set-mention @dev-team - settings for "feature" label
-- Example 3: /slack-review-notify security-review set-mention @security-team - settings for "security-review" label
+*Reviewers*
+• [label-name] add-reviewer @user1,@user2 - Add reviewers
+• [label-name] show-reviewers - Show the reviewer list
+• [label-name] clear-reviewers - Clear reviewers
 
-*Multiple Label AND Conditions*
-Specify multiple labels separated by commas to notify only when all labels are present:
-- Example: /slack-review-notify "hoge-project,needs-review" set-mention @team
-  - Notifies only when the PR has both "hoge-project" and "needs-review" labels
-- Example: /slack-review-notify "frontend,urgent,needs-review" add-repo owner/app
-  - All 3 labels are required
+*Notification behavior*
+• [label-name] set-reviewer-reminder-interval 30 - Reminder interval (minutes)
+• [label-name] set-business-hours-start 09:00 / set-business-hours-end 18:00 - Business hours
+• [label-name] set-timezone Asia/Tokyo - Timezone
+• [label-name] set-required-approvals N - Required approvals (1-10)
+• [label-name] set-language ja|en - Message language
+• [label-name] set-label new-label-name - Rename the label
+• [label-name] activate / deactivate - Enable or disable notifications
 
-*All Commands*
-*Basic Operations:*
-• /slack-review-notify show - Show all label settings for this channel
-• /slack-review-notify [label-name] show - Show detailed settings for specified label
-• /slack-review-notify show-my-reviews - Show your unfinished review requests across all channels
+*User mapping (for PR author notifications)*
+• map-user <github-username> @slack-user - Link a GitHub user to a Slack user
+• show-user-mappings - Show registered mappings
+• remove-user-mapping <github-username> - Remove a mapping
 
-*Required Settings:*
-• /slack-review-notify [label-name] add-repo owner/repo1,owner/repo2 - Add target repositories (required)
-
-*Optional Settings:*
-• /slack-review-notify [label-name] set-mention @user - Set mention target (notifications still go out without it, just without an @-mention)
-
-*Reviewer Management:*
-• /slack-review-notify [label-name] add-reviewer @user1,@user2 - Add reviewers
-• /slack-review-notify [label-name] show-reviewers - Show reviewer list
-• /slack-review-notify [label-name] clear-reviewers - Clear reviewers
-
-*Advanced Settings:*
-• /slack-review-notify [label-name] remove-repo owner/repo - Remove repository
-• /slack-review-notify [label-name] set-label new-label-name - Rename label
-• /slack-review-notify [label-name] set-reviewer-reminder-interval 30 - Set reminder interval (minutes)
-• /slack-review-notify [label-name] set-business-hours-start 09:00 - Set business hours start
-• /slack-review-notify [label-name] set-business-hours-end 18:00 - Set business hours end
-• /slack-review-notify [label-name] set-timezone Asia/Tokyo - Set timezone
-• /slack-review-notify [label-name] set-required-approvals N - Set required approvals (1-10)
-• /slack-review-notify [label-name] set-language ja|en - Set message language
-• /slack-review-notify [label-name] activate - Enable notifications
-• /slack-review-notify [label-name] deactivate - Disable notifications
-
-*User Mapping (for PR author notifications):*
-• /slack-review-notify map-user <github-username> @slack-user - Link GitHub user to Slack user
-• /slack-review-notify show-user-mappings - Show registered user mappings
-• /slack-review-notify remove-user-mapping <github-username> - Remove user mapping
-
-*Leave Management:*
-• /slack-review-notify set-away @user from [YYYY-MM-DD] until [YYYY-MM-DD] reason [description] - Set user as away
-• /slack-review-notify set-away @user on [YYYY-MM-DD] reason [description] - Set away for a single day
-• /slack-review-notify set-away @user on [YYYY-MM-DD] [HH:MM-HH:MM] reason [description] - Set away for a time range
-• /slack-review-notify unset-away @user - Remove user's away status
-• /slack-review-notify show-availability - Show users on leave or scheduled
-
-Omitting [label-name] uses the default label "needs-review"`,
+*Leave management*
+• set-away @user from [YYYY-MM-DD] until [YYYY-MM-DD] reason [description] - Set a date range
+• set-away @user on [YYYY-MM-DD] [HH:MM-HH:MM] reason [description] - Set a single day (time optional)
+• unset-away @user - Clear a user's leave
+• show-availability - Show users on leave or scheduled`,
 
 	// ==================== Command: show-my-reviews ====================
 	"cmd.reviews.header":                        ":clipboard: *Your unfinished review requests (%d)*\n_Oldest requests are shown first_",

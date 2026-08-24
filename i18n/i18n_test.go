@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestT_ReturnsJapanese_WhenLangIsJa(t *testing.T) {
@@ -191,6 +192,21 @@ func TestFormatVerbsMatchAcrossLanguages(t *testing.T) {
 		if !slices.Equal(jaVerbs, enVerbs) {
 			t.Errorf("key %q takes %v in ja but %v in en\n  ja: %q\n  en: %q",
 				key, jaVerbs, enVerbs, ja, en)
+		}
+	}
+}
+
+// slackSectionTextLimit mirrors Slack's per-section text limit. The renderer splits an
+// over-long help body across sections rather than letting Slack reject the response, but
+// a help text that no longer fits one section has also grown past what anyone reads, so
+// it is kept within a single section on purpose.
+const slackSectionTextLimit = 3000
+
+func TestHelpTextFitsInOneSlackSection(t *testing.T) {
+	for lang := range messages {
+		help := TWithLang(lang, "cmd.help")
+		if n := utf8.RuneCountInString(help); n > slackSectionTextLimit {
+			t.Errorf("cmd.help[%s] has %d characters, want <= %d", lang, n, slackSectionTextLimit)
 		}
 	}
 }

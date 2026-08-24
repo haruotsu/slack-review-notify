@@ -22,6 +22,19 @@ import (
 	"gorm.io/gorm"
 )
 
+// subCommands lists every accepted subcommand. The first token of the command text is
+// matched against it to tell a subcommand apart from a label name, and the help text is
+// expected to document all of them.
+var subCommands = []string{
+	"show", "help", "show-my-reviews", "set-mention", "add-reviewer",
+	"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
+	"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
+	"set-business-hours-start", "set-business-hours-end", "set-timezone",
+	"map-user", "show-user-mappings", "remove-user-mapping",
+	"set-required-approvals", "set-language",
+	"set-away", "unset-away", "show-availability",
+}
+
 // HandleSlackCommand is a handler that processes Slack slash commands
 func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -78,16 +91,8 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			// Determine whether the first argument is a subcommand or a label name
-			potentialSubCommands := []string{"show", "help", "show-my-reviews", "set-mention", "add-reviewer",
-				"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
-				"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
-				"set-business-hours-start", "set-business-hours-end", "set-timezone",
-				"map-user", "show-user-mappings", "remove-user-mapping",
-				"set-required-approvals", "set-language",
-				"set-away", "unset-away", "show-availability"}
-
 			isSubCommand := false
-			for _, cmd := range potentialSubCommands {
+			for _, cmd := range subCommands {
 				if parts[0] == cmd {
 					isSubCommand = true
 					break
@@ -524,20 +529,25 @@ func showHelp(c *gin.Context, db *gorm.DB, channelID, lang string) {
 		},
 	})
 
-	blocks := []map[string]interface{}{
-		{
+	// The help body is longer than a single section block can hold, so it is spread
+	// over consecutive sections; one oversized section would make Slack discard the
+	// whole response and show the caller "invalid_command_response".
+	helpText := t("cmd.help")
+	var blocks []map[string]interface{}
+	for _, chunk := range services.SplitTextForSections(helpText, services.SlackSectionTextLimit) {
+		blocks = append(blocks, map[string]interface{}{
 			"type": "section",
 			"text": map[string]interface{}{
 				"type": "mrkdwn",
-				"text": t("cmd.help"),
+				"text": chunk,
 			},
-		},
+		})
 	}
 	blocks = append(blocks, actionBlocks...)
 
 	c.JSON(200, gin.H{
 		"response_type": "ephemeral",
-		"text":          t("cmd.help"),
+		"text":          helpText,
 		"blocks":        blocks,
 	})
 }
