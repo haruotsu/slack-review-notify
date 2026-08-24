@@ -232,8 +232,8 @@ func TestHelp_ReturnsEnglishWhenLanguageIsEn(t *testing.T) {
 	assert.Equal(t, 200, w.Code)
 	// Should return English help
 	assert.Contains(t, w.Body.String(), "Review Notification Bot Configuration")
-	assert.Contains(t, w.Body.String(), "Initial Setup")
-	assert.Contains(t, w.Body.String(), "Recommended (Optional)")
+	assert.Contains(t, w.Body.String(), "Getting started")
+	assert.Contains(t, w.Body.String(), "A mention target is optional")
 	// Should NOT contain Japanese
 	assert.NotContains(t, w.Body.String(), "Review通知Bot設定コマンド")
 }

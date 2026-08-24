@@ -7,80 +7,53 @@ var messagesJa = map[string]string{
 
 	// ==================== Command: Help ====================
 	"cmd.help": `*Review通知Bot設定コマンド*
-コマンド形式: /slack-review-notify [ラベル名] サブコマンド [引数]
+形式: /slack-review-notify [ラベル名] サブコマンド [引数]
+以下の一覧では先頭の /slack-review-notify を省略しています。[ラベル名] を省略すると needs-review が使われます。
 
-*スペースを含むラベル名について*
-スペースを含むラベル名を使用する場合は、クォート（"または'）で囲んでください:
-- 例: /slack-review-notify "needs review" set-mention @team
-- 例: /slack-review-notify 'security review' add-reviewer @security
+*はじめに*
+:point_right: 通知には対象リポジトリの登録が必須です → [ラベル名] add-repo owner/repo
+:point_right: メンション先の設定は任意です（未設定でもメンション無しで通知されます）
 
-*初期設定*
-通知を受けるには以下のリポジトリ設定が必須です:
-:point_right: *対象リポジトリの追加（必須）*
-   /slack-review-notify [ラベル名] add-repo owner/repo
+*ラベルの指定*
+• ラベルごとに独立した設定を持てます（例: bug set-mention @バグチーム）
+• カンマ区切りは AND 条件。例: "frontend,urgent" add-repo owner/app → 両方のラベルが付いたPRのみ通知
+• スペースを含むラベル名はクォートで囲みます（例: "needs review" set-mention @team）
 
-:information_source: リポジトリが未設定の場合、通知は送信されません。
+*基本操作*
+• show - このチャンネルの全ラベル設定を表示
+• [ラベル名] show - 指定ラベルの詳細設定を表示
+• show-my-reviews - 自分宛ての未完了レビュー依頼を全チャンネルから表示
+• help - このヘルプを表示
 
-*推奨設定（任意）*
-:point_right: *メンション先の設定*
-   /slack-review-notify [ラベル名] set-mention @user
-   未設定でも通知は送信されます（メンション無し）。チームに気付かせたい場合に設定してください。
+*リポジトリ・メンション*
+• [ラベル名] add-repo owner/repo1,owner/repo2 - 対象リポジトリを追加（必須）
+• [ラベル名] remove-repo owner/repo - リポジトリを削除
+• [ラベル名] set-mention @user - メンション先を設定
 
-*複数ラベル設定の使い方*
-このチャンネル内で複数の異なるラベルごとに独立した設定を持つことができます:
-- 例1: /slack-review-notify bug set-mention @バグチーム → bugラベル用の設定
-- 例2: /slack-review-notify feature set-mention @開発チーム → featureラベル用の設定
-- 例3: /slack-review-notify security-review set-mention @セキュリティチーム → security-reviewラベル用の設定
+*レビュワー*
+• [ラベル名] add-reviewer @user1,@user2 - レビュワーを追加
+• [ラベル名] show-reviewers - レビュワー一覧を表示
+• [ラベル名] clear-reviewers - レビュワーをクリア
 
-*複数ラベルAND条件の設定*
-カンマ区切りで複数のラベルを指定することで、全てのラベルが付いている場合のみ通知します:
-- 例: /slack-review-notify "hoge-project,needs-review" set-mention @team
-  → PRに「hoge-project」と「needs-review」の両方のラベルがある場合のみ通知
-- 例: /slack-review-notify "frontend,urgent,needs-review" add-repo owner/app
-  → 3つのラベル全てが必要
+*通知の挙動*
+• [ラベル名] set-reviewer-reminder-interval 30 - リマインド頻度（分）
+• [ラベル名] set-business-hours-start 09:00 / set-business-hours-end 18:00 - 営業時間
+• [ラベル名] set-timezone Asia/Tokyo - タイムゾーン
+• [ラベル名] set-required-approvals N - 必要なapprove数（1〜10）
+• [ラベル名] set-language ja|en - メッセージの言語
+• [ラベル名] set-label 新ラベル名 - ラベル名を変更
+• [ラベル名] activate / deactivate - 通知の有効化・無効化
 
-*全コマンド一覧*
-*基本操作:*
-• /slack-review-notify show - このチャンネルの全ラベル設定を表示
-• /slack-review-notify [ラベル名] show - 指定ラベルの詳細設定を表示
-• /slack-review-notify show-my-reviews - 全チャンネルから自分宛ての未完了レビュー依頼を表示
+*ユーザーマッピング（PR作成者への通知用）*
+• map-user <github-username> @slack-user - GitHubユーザーとSlackユーザーを紐付け
+• show-user-mappings - 登録済みの一覧を表示
+• remove-user-mapping <github-username> - マッピングを削除
 
-*必須設定:*
-• /slack-review-notify [ラベル名] add-repo owner/repo1,owner/repo2 - 対象リポジトリを追加（必須）
-
-*任意設定:*
-• /slack-review-notify [ラベル名] set-mention @user - メンション先を設定（未設定可。設定するとレビュー依頼通知に @ メンションが付きます）
-
-*レビュワー管理:*
-• /slack-review-notify [ラベル名] add-reviewer @user1,@user2 - レビュワーを追加
-• /slack-review-notify [ラベル名] show-reviewers - レビュワー一覧を表示
-• /slack-review-notify [ラベル名] clear-reviewers - レビュワーをクリア
-
-*高度な設定:*
-• /slack-review-notify [ラベル名] remove-repo owner/repo - リポジトリを削除
-• /slack-review-notify [ラベル名] set-label 新ラベル名 - ラベル名を変更
-• /slack-review-notify [ラベル名] set-reviewer-reminder-interval 30 - リマインド頻度設定（分）
-• /slack-review-notify [ラベル名] set-business-hours-start 09:00 - 営業開始時間を設定
-• /slack-review-notify [ラベル名] set-business-hours-end 18:00 - 営業終了時間を設定
-• /slack-review-notify [ラベル名] set-timezone Asia/Tokyo - タイムゾーンを設定
-• /slack-review-notify [ラベル名] set-required-approvals N - 必要なapprove数を設定（1〜10）
-• /slack-review-notify [ラベル名] set-language ja|en - メッセージの言語を設定
-• /slack-review-notify [ラベル名] activate - 通知を有効化
-• /slack-review-notify [ラベル名] deactivate - 通知を無効化
-
-*ユーザーマッピング（PR作成者の通知用）:*
-• /slack-review-notify map-user <github-username> @slack-user - GitHubユーザーとSlackユーザーを紐付け
-• /slack-review-notify show-user-mappings - 登録済みのユーザーマッピング一覧を表示
-• /slack-review-notify remove-user-mapping <github-username> - ユーザーマッピングを削除
-
-*休暇管理:*
-• /slack-review-notify set-away @user from [YYYY-MM-DD] until [YYYY-MM-DD] reason [理由] - ユーザーを休暇に設定
-• /slack-review-notify set-away @user on [YYYY-MM-DD] reason [理由] - 単一日の休暇を設定
-• /slack-review-notify set-away @user on [YYYY-MM-DD] [HH:MM-HH:MM] reason [理由] - 時間指定の休暇を設定
-• /slack-review-notify unset-away @user - ユーザーの休暇を解除
-• /slack-review-notify show-availability - 休暇中・予約中のユーザー一覧を表示
-
-[ラベル名]を省略すると「needs-review」というデフォルトのラベルを使用します`,
+*休暇管理*
+• set-away @user from [YYYY-MM-DD] until [YYYY-MM-DD] reason [理由] - 期間で設定
+• set-away @user on [YYYY-MM-DD] [HH:MM-HH:MM] reason [理由] - 単日で設定（時間は任意）
+• unset-away @user - 休暇を解除
+• show-availability - 休暇中・予約中のユーザー一覧を表示`,
 
 	// ==================== Command: show-my-reviews ====================
 	"cmd.reviews.header":                        ":clipboard: *あなたへの未完了レビュー依頼 (%d件)*\n_古い依頼から表示しています_",

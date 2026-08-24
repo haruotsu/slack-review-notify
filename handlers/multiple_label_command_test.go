@@ -157,8 +157,8 @@ func TestMultipleLabelHelp(t *testing.T) {
 
 	// Verify that the help message contains the multiple labels explanation
 	body := w.Body.String()
-	assert.Contains(t, body, "*複数ラベルAND条件の設定*")
-	assert.Contains(t, body, "カンマ区切りで複数のラベルを指定")
-	assert.Contains(t, body, "hoge-project,needs-review")
-	assert.Contains(t, body, "全てのラベルが付いている場合のみ通知")
+	assert.Contains(t, body, "*ラベルの指定*")
+	assert.Contains(t, body, "ラベルごとに独立した設定を持てます")
+	assert.Contains(t, body, "カンマ区切りは AND 条件")
+	assert.Contains(t, body, "両方のラベルが付いたPRのみ通知")
 }

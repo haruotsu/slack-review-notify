@@ -147,3 +147,16 @@ func TestHelpCommand_ButtonTextWithinSlackLimit(t *testing.T) {
 	}
 	assert.Positive(t, buttonCount, "help response must contain buttons")
 }
+
+// TestHelpText_DocumentsEverySubCommand keeps the help text honest about what the bot
+// accepts: a subcommand the help never mentions is a subcommand nobody discovers.
+func TestHelpText_DocumentsEverySubCommand(t *testing.T) {
+	for _, lang := range []string{"ja", "en"} {
+		t.Run(lang, func(t *testing.T) {
+			help := i18n.TWithLang(lang, "cmd.help")
+			for _, sub := range subCommands {
+				assert.Contains(t, help, sub, "help text must document the %q subcommand", sub)
+			}
+		})
+	}
+}

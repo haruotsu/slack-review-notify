@@ -59,16 +59,13 @@ func TestHandleSlackCommand_Help(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 	assert.Contains(t, w.Body.String(), "Review通知Bot設定コマンド")
-	assert.Contains(t, w.Body.String(), "複数ラベル設定の使い方")
-	// Help text now positions repository as the only required setup; set-mention
-	// is moved to the recommended/optional section so the wording shouldn't claim
-	// "両方必須" anymore.
-	assert.Contains(t, w.Body.String(), "対象リポジトリの追加（必須）")
-	assert.Contains(t, w.Body.String(), "推奨設定（任意）")
-	assert.Contains(t, w.Body.String(), "リポジトリが未設定の場合、通知は送信されません")
+	assert.Contains(t, w.Body.String(), "ラベルごとに独立した設定を持てます")
+	// The repository is the only required setup; set-mention has to read as optional
+	// so nobody thinks notifications are blocked without it.
+	assert.Contains(t, w.Body.String(), "対象リポジトリの登録が必須です")
+	assert.Contains(t, w.Body.String(), "メンション先の設定は任意です")
 	assert.Contains(t, w.Body.String(), "このチャンネルの全ラベル設定を表示")
 	assert.Contains(t, w.Body.String(), "指定ラベルの詳細設定を表示")
-	assert.Contains(t, w.Body.String(), "/slack-review-notify show-my-reviews")
 }
 
 func TestHandleSlackCommand_Show(t *testing.T) {
