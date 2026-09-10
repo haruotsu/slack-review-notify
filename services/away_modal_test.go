@@ -582,7 +582,7 @@ func TestAwayModalPrefillFromState(t *testing.T) {
 		"away_all_day":    {"away_all_day": {SelectedOptions: []ViewSelectedOption{{Value: "yes"}}}},
 		"away_delete_all": {"away_delete_all": {SelectedOptions: []ViewSelectedOption{{Value: "yes"}}}},
 	}
-	got := AwayModalPrefillFromState(values)
+	got := AwayModalPrefillFromState(values, AwayModalMetadata{})
 	want := AwayModalPrefill{
 		AllDay:    true,
 		UserID:    "U999",
@@ -605,10 +605,10 @@ func TestAwayModalPrefillFromState_Unticked(t *testing.T) {
 	values := map[string]map[string]ViewStateValue{
 		"away_all_day": {"away_all_day": {SelectedOptions: []ViewSelectedOption{}}},
 	}
-	if got := AwayModalPrefillFromState(values); got.AllDay {
+	if got := AwayModalPrefillFromState(values, AwayModalMetadata{}); got.AllDay {
 		t.Errorf("empty selected_options must read as unticked, got %+v", got)
 	}
-	if got := AwayModalPrefillFromState(nil); got != (AwayModalPrefill{}) {
+	if got := AwayModalPrefillFromState(nil, AwayModalMetadata{}); got != (AwayModalPrefill{}) {
 		t.Errorf("nil state must yield the zero prefill, got %+v", got)
 	}
 }
@@ -663,5 +663,76 @@ func TestParseAwayModalSubmission_AllDayTimeWithoutDateAccepted(t *testing.T) {
 	}
 	if form.AwayFrom != nil || form.AwayUntil != nil {
 		t.Errorf("dates = %v / %v, want nil / nil (indefinite)", form.AwayFrom, form.AwayUntil)
+	}
+}
+
+// TestBuildAwayManagementModalView_AllDayStashesTimes: while all-day is ticked
+// the time pickers are not rendered, so view.state.values cannot carry what
+// they held. Stashing them in private_metadata is what lets unticking the box
+// bring the times back instead of handing the user two empty pickers.
+func TestBuildAwayManagementModalView_AllDayStashesTimes(t *testing.T) {
+	view := BuildAwayManagementModalView(AwayManagementModalInputs{
+		ChannelID: "C12345",
+		UserID:    "U777",
+		Lang:      "ja",
+		Prefill:   AwayModalPrefill{AllDay: true, FromTime: "09:00", UntilTime: "17:30"},
+	})
+	meta, err := DecodeAwayModalMetadata(view["private_metadata"].(string))
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if meta.FromTime != "09:00" || meta.UntilTime != "17:30" {
+		t.Errorf("metadata times = %q / %q, want 09:00 / 17:30", meta.FromTime, meta.UntilTime)
+	}
+	if meta.ChannelID != "C12345" || meta.UserID != "U777" {
+		t.Errorf("metadata = %+v, want channel/user preserved", meta)
+	}
+}
+
+// TestBuildAwayManagementModalView_TimesVisibleAreNotStashed: with the pickers
+// on screen, Slack sends their values in view.state.values. Stashing them too
+// would give the re-render a second, staler source for the same field.
+func TestBuildAwayManagementModalView_TimesVisibleAreNotStashed(t *testing.T) {
+	view := BuildAwayManagementModalView(AwayManagementModalInputs{
+		ChannelID: "C12345",
+		UserID:    "U777",
+		Lang:      "ja",
+		Prefill:   AwayModalPrefill{AllDay: false, FromTime: "09:00", UntilTime: "17:30"},
+	})
+	meta, err := DecodeAwayModalMetadata(view["private_metadata"].(string))
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if meta.FromTime != "" || meta.UntilTime != "" {
+		t.Errorf("metadata times = %q / %q, want both empty", meta.FromTime, meta.UntilTime)
+	}
+}
+
+// TestAwayModalPrefillFromState_RestoresHiddenTimes: a payload from an all-day
+// view has no time blocks at all, so the stashed values are the only source.
+func TestAwayModalPrefillFromState_RestoresHiddenTimes(t *testing.T) {
+	values := map[string]map[string]ViewStateValue{
+		"away_user":    {"away_user": {SelectedUser: "U999"}},
+		"away_all_day": {"away_all_day": {SelectedOptions: []ViewSelectedOption{}}},
+	}
+	meta := AwayModalMetadata{ChannelID: "C1", UserID: "U1", FromTime: "09:00", UntilTime: "17:30"}
+	got := AwayModalPrefillFromState(values, meta)
+	if got.FromTime != "09:00" || got.UntilTime != "17:30" {
+		t.Errorf("times = %q / %q, want the stashed 09:00 / 17:30", got.FromTime, got.UntilTime)
+	}
+}
+
+// TestAwayModalPrefillFromState_RenderedEmptyTimesBeatStash: once the pickers
+// are on screen the user can see they are empty, so a leftover stash must not
+// resurrect a time behind their back.
+func TestAwayModalPrefillFromState_RenderedEmptyTimesBeatStash(t *testing.T) {
+	values := map[string]map[string]ViewStateValue{
+		"away_from_time":  {"away_from_time": {}},
+		"away_until_time": {"away_until_time": {}},
+	}
+	meta := AwayModalMetadata{FromTime: "09:00", UntilTime: "17:30"}
+	got := AwayModalPrefillFromState(values, meta)
+	if got.FromTime != "" || got.UntilTime != "" {
+		t.Errorf("times = %q / %q, want both empty (the pickers are visible and blank)", got.FromTime, got.UntilTime)
 	}
 }

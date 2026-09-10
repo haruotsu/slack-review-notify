@@ -67,12 +67,16 @@ func awayModalViewForToggle(db *gorm.DB, payload SlackActionPayload) (viewID str
 		return "", nil, false
 	}
 	meta, err := services.DecodeAwayModalMetadata(payload.View.PrivateMetadata)
-	if err != nil {
-		log.Printf("away all-day toggle has invalid private_metadata: %q (err=%v)", payload.View.PrivateMetadata, err)
+	if err != nil || meta.ChannelID == "" {
+		// Re-rendering without the channel would replace a working view with
+		// one whose private_metadata has lost it for good, and the eventual
+		// submit would have nowhere to post its confirmation. Leaving the
+		// modal as it is keeps the context the user still has.
+		log.Printf("away all-day toggle has unusable private_metadata: %q (err=%v)", payload.View.PrivateMetadata, err)
 		return "", nil, false
 	}
 
-	prefill := services.AwayModalPrefillFromState(payload.View.State.Values)
+	prefill := services.AwayModalPrefillFromState(payload.View.State.Values, meta)
 	return payload.View.ID, newAwayModalView(db, meta.ChannelID, meta.UserID, prefill), true
 }
 

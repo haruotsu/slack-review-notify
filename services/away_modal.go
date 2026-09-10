@@ -26,9 +26,16 @@ const AwayAllDayActionID = "away_all_day"
 
 // AwayModalMetadata is what we stash in `view.private_metadata` so the
 // submission handler knows where to post its confirmation back.
+//
+// FromTime/UntilTime are only set while the all-day box hides the time
+// pickers. A block that is not rendered is absent from view.state.values, so
+// without this the times a user already picked would be gone the moment they
+// ticked all-day — the box is supposed to hide the times, not discard them.
 type AwayModalMetadata struct {
 	ChannelID string `json:"c"`
 	UserID    string `json:"u"`
+	FromTime  string `json:"ft,omitempty"`
+	UntilTime string `json:"ut,omitempty"`
 }
 
 // EncodeAwayModalMetadata serializes the struct for view.private_metadata.
@@ -214,17 +221,23 @@ func BuildAwayManagementModalView(in AwayManagementModalInputs) map[string]any {
 	}
 	blocks = append(blocks, reasonBlock, deleteAllBlock)
 
+	// Only the hidden pickers need stashing; while they are on screen Slack
+	// reports them in view.state.values and a second copy here would just be
+	// a staler source for the same field.
+	meta := AwayModalMetadata{ChannelID: in.ChannelID, UserID: in.UserID}
+	if p.AllDay {
+		meta.FromTime = p.FromTime
+		meta.UntilTime = p.UntilTime
+	}
+
 	return map[string]any{
-		"type":        "modal",
-		"callback_id": AwayManagementModalCallbackID,
-		"private_metadata": EncodeAwayModalMetadata(AwayModalMetadata{
-			ChannelID: in.ChannelID,
-			UserID:    in.UserID,
-		}),
-		"title":  plainText(t("modal.away.title")),
-		"submit": plainText(t("modal.away.submit")),
-		"close":  plainText(t("modal.away.close")),
-		"blocks": blocks,
+		"type":             "modal",
+		"callback_id":      AwayManagementModalCallbackID,
+		"private_metadata": EncodeAwayModalMetadata(meta),
+		"title":            plainText(t("modal.away.title")),
+		"submit":           plainText(t("modal.away.submit")),
+		"close":            plainText(t("modal.away.close")),
+		"blocks":           blocks,
 	}
 }
 
@@ -265,17 +278,30 @@ func awayStateChecked(values map[string]map[string]ViewStateValue, blockID strin
 	return false
 }
 
+// awayStateTime reads a timepicker, falling back to the value meta kept while
+// the picker was hidden. The fallback is keyed on the block being absent from
+// the state rather than on an empty value: a rendered picker the user can see
+// is blank must stay blank, and Slack's timepicker offers no way to clear a
+// value once set, so a visible blank is always deliberate.
+func awayStateTime(values map[string]map[string]ViewStateValue, blockID, stashed string) string {
+	if _, rendered := values[blockID]; !rendered {
+		return stashed
+	}
+	return awayStateValue(values, blockID).SelectedTime
+}
+
 // AwayModalPrefillFromState turns the view.state.values of a block_actions
 // payload into the prefill for the next render, so toggling all-day keeps
-// everything else the user has already entered.
-func AwayModalPrefillFromState(values map[string]map[string]ViewStateValue) AwayModalPrefill {
+// everything else the user has already entered. meta supplies the times while
+// the all-day box has the pickers hidden and the state cannot carry them.
+func AwayModalPrefillFromState(values map[string]map[string]ViewStateValue, meta AwayModalMetadata) AwayModalPrefill {
 	return AwayModalPrefill{
 		AllDay:    awayStateChecked(values, AwayAllDayActionID),
 		UserID:    awayStateValue(values, "away_user").SelectedUser,
 		From:      awayStateDate(values, "away_from"),
-		FromTime:  awayStateValue(values, "away_from_time").SelectedTime,
+		FromTime:  awayStateTime(values, "away_from_time", meta.FromTime),
 		Until:     awayStateDate(values, "away_until"),
-		UntilTime: awayStateValue(values, "away_until_time").SelectedTime,
+		UntilTime: awayStateTime(values, "away_until_time", meta.UntilTime),
 		Reason:    strings.TrimSpace(awayStateValue(values, "away_reason").Value),
 		DeleteAll: awayStateChecked(values, "away_delete_all"),
 	}
