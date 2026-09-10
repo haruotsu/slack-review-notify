@@ -152,7 +152,7 @@ GitHubユーザーとSlackユーザーを紐付けることで、PR作成者に�
 - `/slack-review-notify unset-away @user [on YYYY-MM-DD [HH:MM-HH:MM]]`: 休暇を解除（全件 / 指定日の全件 / 指定時間帯のみ）
 - `/slack-review-notify show-availability`: 休暇中のユーザー一覧を表示
 
-`/slack-review-notify help` の **🌴 休暇管理を開く** ボタンからモーダルでも操作できます。ユーザーピッカー + 開始日 / 終了日（datepicker, 任意）+ 開始時刻 / 終了時刻（timepicker, 任意）+ 理由（任意）+「このユーザーの休暇を全削除」チェックボックスで、登録と全削除に対応します。
+`/slack-review-notify help` の **🌴 休暇管理を開く** ボタンからモーダルでも操作できます。ユーザーピッカー + 開始日 / 終了日（datepicker, 任意）+「終日」チェックボックス + 理由（任意）+「このユーザーの休暇を全削除」チェックボックスで、登録と全削除に対応します。「終日」は初期状態でオンです。オフにすると開始時刻 / 終了時刻（timepicker, 任意）が表示され、時間単位の休暇を登録できます。
 
 休暇の日付・時刻は、そのチャンネルの `set-timezone`（未設定なら Asia/Tokyo）で解釈・表示されます。
 

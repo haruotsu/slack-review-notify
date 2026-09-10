@@ -19,17 +19,7 @@ import (
 // a few seconds so the API call is fired in a goroutine; the HTTP response
 // to Slack must return immediately.
 func handleOpenAwayManagement(c *gin.Context, db *gorm.DB, payload SlackActionPayload) {
-	channelID := payload.Container.ChannelID
-	userID := payload.User.ID
-
-	configs := loadChannelConfigs(db, channelID)
-	lang := pickModalLanguage(configs, "")
-
-	view := services.BuildAwayManagementModalView(services.AwayManagementModalInputs{
-		ChannelID: channelID,
-		UserID:    userID,
-		Lang:      lang,
-	})
+	view := awayModalViewForOpen(db, payload)
 	triggerID := payload.TriggerID
 
 	go func() {
@@ -39,6 +29,63 @@ func handleOpenAwayManagement(c *gin.Context, db *gorm.DB, payload SlackActionPa
 	}()
 
 	c.Status(http.StatusOK)
+}
+
+// awayModalViewForOpen builds the modal a help-button click opens: empty, in
+// the channel's language, with the all-day box ticked so no time pickers are
+// shown until the user asks for them.
+func awayModalViewForOpen(db *gorm.DB, payload SlackActionPayload) map[string]any {
+	return newAwayModalView(db, payload.Container.ChannelID, payload.User.ID, services.DefaultAwayModalPrefill())
+}
+
+// handleAwayAllDayToggled is the dispatch_action callback for the all-day
+// checkbox. The modal is rebuilt with the time pickers added or removed and
+// pushed with views.update. Slack expects a plain 200 for block_actions; the
+// API call itself runs in the background like the views.open path.
+func handleAwayAllDayToggled(c *gin.Context, db *gorm.DB, payload SlackActionPayload) {
+	viewID, view, ok := awayModalViewForToggle(db, payload)
+	if !ok {
+		c.Status(http.StatusOK)
+		return
+	}
+
+	go func() {
+		if err := services.UpdateView(viewID, view); err != nil {
+			log.Printf("away views.update failed: %v", err)
+		}
+	}()
+
+	c.Status(http.StatusOK)
+}
+
+// awayModalViewForToggle rebuilds the modal from the state Slack attached to
+// the checkbox action. Everything already entered is carried over as initial
+// values, so the toggle never doubles as a reset. ok is false when the payload
+// has no view to update.
+func awayModalViewForToggle(db *gorm.DB, payload SlackActionPayload) (viewID string, view map[string]any, ok bool) {
+	if payload.View == nil || payload.View.ID == "" {
+		return "", nil, false
+	}
+	meta, err := services.DecodeAwayModalMetadata(payload.View.PrivateMetadata)
+	if err != nil {
+		log.Printf("away all-day toggle has invalid private_metadata: %q (err=%v)", payload.View.PrivateMetadata, err)
+		return "", nil, false
+	}
+
+	prefill := services.AwayModalPrefillFromState(payload.View.State.Values)
+	return payload.View.ID, newAwayModalView(db, meta.ChannelID, meta.UserID, prefill), true
+}
+
+func newAwayModalView(db *gorm.DB, channelID, userID string, prefill services.AwayModalPrefill) map[string]any {
+	configs := loadChannelConfigs(db, channelID)
+	lang := pickModalLanguage(configs, "")
+
+	return services.BuildAwayManagementModalView(services.AwayManagementModalInputs{
+		ChannelID: channelID,
+		UserID:    userID,
+		Lang:      lang,
+		Prefill:   prefill,
+	})
 }
 
 // handleAwayModalSubmission applies the parsed form to ReviewerAvailability:

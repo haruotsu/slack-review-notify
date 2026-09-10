@@ -146,6 +146,13 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		// All-day box toggled inside the away modal → re-render via views.update
+		// with the time pickers removed (ticked) or added (unticked).
+		if actionID == services.AwayAllDayActionID && payload.View != nil {
+			handleAwayAllDayToggled(c, db, payload)
+			return
+		}
+
 		// Handle "Pause Reminder" selection menu
 		if actionID == "pause_reminder" || actionID == "pause_reminder_initial" {
 			// Get value from selection menu
