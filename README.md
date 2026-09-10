@@ -132,7 +132,7 @@ When a mapping is set, notifications appear like:
 - `/slack-review-notify unset-away @user [on YYYY-MM-DD [HH:MM-HH:MM]]`: Remove away status — all of it, everything on one day, or just that time slot
 - `/slack-review-notify show-availability`: Show users currently on leave
 
-You can also manage leave from the **🌴 Manage availability** button under `/slack-review-notify help`, which opens a modal with a user picker, optional start/end datepickers with matching timepickers, an optional reason, and a "remove all leave for this user" checkbox.
+You can also manage leave from the **🌴 Manage availability** button under `/slack-review-notify help`, which opens a modal with a user picker, optional start/end datepickers, an "All day" checkbox, an optional reason, and a "remove all leave for this user" checkbox. "All day" starts ticked; untick it to reveal optional start/end timepickers for hourly leave.
 
 Leave dates and times are interpreted and displayed in the channel's `set-timezone` (Asia/Tokyo when unset).
 

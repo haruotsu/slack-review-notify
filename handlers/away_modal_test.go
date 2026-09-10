@@ -278,6 +278,7 @@ type awaySubmission struct {
 	fromTime  string
 	untilTime string
 	reason    string
+	allDay    bool
 	deleteAll bool
 }
 
@@ -286,6 +287,10 @@ func buildAwayViewSubmission(t *testing.T, s awaySubmission) string {
 	deleteOpts := "[]"
 	if s.deleteAll {
 		deleteOpts = `[{"value":"yes"}]`
+	}
+	allDayOpts := "[]"
+	if s.allDay {
+		allDayOpts = `[{"value":"yes"}]`
 	}
 	meta := services.EncodeAwayModalMetadata(services.AwayModalMetadata{
 		ChannelID: s.channelID,
@@ -311,6 +316,7 @@ func buildAwayViewSubmission(t *testing.T, s awaySubmission) string {
 					"away_from_time":  {"away_from_time":  {"type": "timepicker",       "selected_time": "` + s.fromTime + `"}},
 					"away_until_time": {"away_until_time": {"type": "timepicker",       "selected_time": "` + s.untilTime + `"}},
 					"away_reason":     {"away_reason":     {"type": "plain_text_input", "value": "` + s.reason + `"}},
+					"away_all_day":    {"away_all_day":    {"type": "checkboxes",       "selected_options": ` + allDayOpts + `}},
 					"away_delete_all": {"away_delete_all": {"type": "checkboxes",       "selected_options": ` + deleteOpts + `}}
 				}
 			}
@@ -318,4 +324,247 @@ func buildAwayViewSubmission(t *testing.T, s awaySubmission) string {
 		"actions": []
 	}`
 	return payload
+}
+
+// TestAwayModal_OpenRendersAllDayByDefault: a freshly opened modal is the
+// all-day shape. Whole-day leave is the common case, so the form must not
+// ask for times until the user unticks the box.
+func TestAwayModal_OpenRendersAllDayByDefault(t *testing.T) {
+	db := setupTestDB(t)
+
+	var payload SlackActionPayload
+	if err := json.Unmarshal([]byte(`{
+		"type": "block_actions",
+		"trigger_id": "trigger-xyz",
+		"user": {"id": "U12345"},
+		"actions": [{"action_id": "`+services.OpenAwayManagementActionID+`"}],
+		"container": {"channel_id": "C12345"}
+	}`), &payload); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+
+	view := awayModalViewForOpen(db, payload)
+	ids := awayBlockIDs(view)
+	assert.Contains(t, ids, services.AwayAllDayActionID)
+	assert.NotContains(t, ids, "away_from_time", "the default form must not show time pickers")
+	assert.NotContains(t, ids, "away_until_time", "the default form must not show time pickers")
+}
+
+// TestHandleSlackAction_AwayAllDayToggle: unticking the box inside the modal
+// arrives as block_actions with the view attached; the handler must accept it
+// (views.update is skipped under IsTestMode) rather than fall through to the
+// reminder-button branches, which would 400 on the missing message.
+func TestHandleSlackAction_AwayAllDayToggle(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+
+	w := postPayload(t, router, awayAllDayTogglePayload(false))
+	assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	assert.Empty(t, w.Body.String(), "a modal re-render must ack with an empty body")
+}
+
+// TestAwayModal_ToggleRerenderKeepsInputs pins the view the toggle handler
+// pushes: unticked shows the time pickers, and what the user already picked
+// (here the target user) rides along as initial values so the toggle does not
+// double as a reset. The view id must be the one Slack sent, or views.update
+// would target nothing.
+func TestAwayModal_ToggleRerenderKeepsInputs(t *testing.T) {
+	db := setupTestDB(t)
+
+	var payload SlackActionPayload
+	if err := json.Unmarshal([]byte(awayAllDayTogglePayload(false)), &payload); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+
+	viewID, view, ok := awayModalViewForToggle(db, payload)
+	if !ok {
+		t.Fatalf("toggle must produce a view")
+	}
+	assert.Equal(t, "V_AWAY", viewID)
+
+	ids := awayBlockIDs(view)
+	assert.Contains(t, ids, "away_from_time", "unticking all-day must reveal the time pickers")
+	assert.Contains(t, ids, "away_until_time", "unticking all-day must reveal the time pickers")
+
+	for _, b := range view["blocks"].([]map[string]any) {
+		if b["block_id"] == "away_user" {
+			element := b["element"].(map[string]any)
+			assert.Equal(t, "U_TARGET", element["initial_user"], "the picked user must survive the re-render")
+		}
+	}
+
+	// Ticking it again hides the pickers; the state Slack sends then carries
+	// the option as selected.
+	if err := json.Unmarshal([]byte(awayAllDayTogglePayload(true)), &payload); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	_, view, ok = awayModalViewForToggle(db, payload)
+	if !ok {
+		t.Fatalf("toggle must produce a view")
+	}
+	ids = awayBlockIDs(view)
+	assert.NotContains(t, ids, "away_from_time", "ticking all-day must hide the time pickers")
+	assert.NotContains(t, ids, "away_until_time", "ticking all-day must hide the time pickers")
+}
+
+// TestAwayModal_ViewSubmission_AllDayWinsOverTimes: with the box ticked the
+// stored leave spans the whole selected day in the channel's zone even if a
+// time value is still in the payload (two quick toggles can race the
+// re-render). Anything else would silently shrink a day off into a slot.
+func TestAwayModal_ViewSubmission_AllDayWinsOverTimes(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+
+	db.Create(&models.ChannelConfig{
+		ID:             uuid.NewString(),
+		SlackChannelID: "C12345",
+		LabelName:      "needs-review",
+		Timezone:       "Asia/Tokyo",
+		IsActive:       true,
+	})
+
+	payload := buildAwayViewSubmission(t, awaySubmission{
+		channelID: "C12345",
+		userID:    "U_ADMIN",
+		awayUser:  "U_TARGET",
+		from:      "2030-04-01",
+		until:     "2030-04-01",
+		fromTime:  "09:00",
+		untilTime: "17:00",
+		allDay:    true,
+	})
+	w := postPayload(t, router, payload)
+	assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	assert.NotContains(t, w.Body.String(), "response_action", "all-day must not be rejected")
+
+	jst, _ := time.LoadLocation("Asia/Tokyo")
+	var rows []models.ReviewerAvailability
+	db.Where("slack_user_id = ?", "U_TARGET").Find(&rows)
+	if assert.Len(t, rows, 1) {
+		got := rows[0]
+		if assert.NotNil(t, got.AwayFrom) {
+			assert.True(t, got.AwayFrom.Equal(time.Date(2030, 4, 1, 0, 0, 0, 0, jst)),
+				"AwayFrom = %v, want start of day", got.AwayFrom)
+		}
+		if assert.NotNil(t, got.AwayUntil) {
+			assert.True(t, got.AwayUntil.Equal(time.Date(2030, 4, 1, 23, 59, 59, 0, jst)),
+				"AwayUntil = %v, want end of day", got.AwayUntil)
+		}
+	}
+}
+
+// awayAllDayTogglePayload is the block_actions payload Slack sends when the
+// all-day box changes inside the modal. ticked mirrors the resulting state.
+func awayAllDayTogglePayload(ticked bool) string {
+	opts := "[]"
+	if ticked {
+		opts = `[{"value":"yes"}]`
+	}
+	return `{
+		"type": "block_actions",
+		"user": {"id": "U12345"},
+		"actions": [{"action_id": "` + services.AwayAllDayActionID + `", "type": "checkboxes", "selected_options": ` + opts + `}],
+		"container": {"type": "view", "view_id": "V_AWAY"},
+		"view": {
+			"id": "V_AWAY",
+			"callback_id": "` + services.AwayManagementModalCallbackID + `",
+			"private_metadata": "{\"c\":\"C12345\",\"u\":\"U12345\"}",
+			"state": {
+				"values": {
+					"away_user":    {"away_user":    {"type": "users_select", "selected_user": "U_TARGET"}},
+					"away_all_day": {"away_all_day": {"type": "checkboxes",   "selected_options": ` + opts + `}}
+				}
+			}
+		}
+	}`
+}
+
+func awayBlockIDs(view map[string]any) []string {
+	ids := []string{}
+	for _, b := range view["blocks"].([]map[string]any) {
+		if id, ok := b["block_id"].(string); ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// TestAwayModalViewForToggle_NoChannelContext: private_metadata is how the
+// modal remembers which channel it belongs to. If it comes back without one,
+// re-rendering would replace a working view with one that has lost its
+// channel for good, and the eventual submit would post nowhere. Skip the
+// update instead — the same guard the settings modal's label dropdown uses.
+func TestAwayModalViewForToggle_NoChannelContext(t *testing.T) {
+	db := setupTestDB(t)
+
+	var payload SlackActionPayload
+	if err := json.Unmarshal([]byte(`{
+		"type": "block_actions",
+		"user": {"id": "U12345"},
+		"actions": [{"action_id": "`+services.AwayAllDayActionID+`"}],
+		"container": {"type": "view", "view_id": "V_AWAY"},
+		"view": {"id": "V_AWAY", "private_metadata": "{}", "state": {"values": {}}}
+	}`), &payload); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+
+	if _, _, ok := awayModalViewForToggle(db, payload); ok {
+		t.Errorf("a payload with no channel context must not trigger views.update")
+	}
+}
+
+// TestAwayModal_ToggleRoundTripKeepsTimes: untick, pick times, tick, untick.
+// The box is meant to work like a calendar app's "all day", where the times
+// are still there when you turn it back off — they are only hidden, and a
+// hidden picker is absent from view.state.values entirely.
+func TestAwayModal_ToggleRoundTripKeepsTimes(t *testing.T) {
+	db := setupTestDB(t)
+
+	// The all-day view Slack is showing after the user ticked the box back on
+	// with 09:00 / 17:30 already picked: no time blocks, times only in metadata.
+	meta := services.EncodeAwayModalMetadata(services.AwayModalMetadata{
+		ChannelID: "C12345",
+		UserID:    "U12345",
+		FromTime:  "09:00",
+		UntilTime: "17:30",
+	})
+	raw, err := json.Marshal(map[string]any{
+		"type":      "block_actions",
+		"user":      map[string]any{"id": "U12345"},
+		"actions":   []any{map[string]any{"action_id": services.AwayAllDayActionID}},
+		"container": map[string]any{"type": "view", "view_id": "V_AWAY"},
+		"view": map[string]any{
+			"id":               "V_AWAY",
+			"callback_id":      services.AwayManagementModalCallbackID,
+			"private_metadata": meta,
+			"state": map[string]any{"values": map[string]any{
+				"away_user":    map[string]any{"away_user": map[string]any{"selected_user": "U_TARGET"}},
+				"away_all_day": map[string]any{"away_all_day": map[string]any{"selected_options": []any{}}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var payload SlackActionPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+
+	_, view, ok := awayModalViewForToggle(db, payload)
+	if !ok {
+		t.Fatalf("toggle must produce a view")
+	}
+	initials := map[string]any{}
+	for _, b := range view["blocks"].([]map[string]any) {
+		if id, ok := b["block_id"].(string); ok {
+			initials[id] = b["element"].(map[string]any)["initial_time"]
+		}
+	}
+	ids := awayBlockIDs(view)
+	assert.Contains(t, ids, "away_from_time")
+	assert.Contains(t, ids, "away_until_time")
+	assert.Equal(t, "09:00", initials["away_from_time"])
+	assert.Equal(t, "17:30", initials["away_until_time"])
 }
