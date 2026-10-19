@@ -55,7 +55,18 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 // Reviewers are assigned to the task before the notification is sent so the morning
 // greeting can mention them. The task is persisted as in_review only after the
 // notification succeeds, so a failed notification leaves it to be retried next tick.
+// The caller passes a struct read earlier in the batch, so the status is re-read here
+// before notifying: a task reviewed in the meantime must not get a morning greeting.
 func activateBusinessHoursTask(db *gorm.DB, task models.ReviewTask, config models.ChannelConfig, labelName string) error {
+	var current models.ReviewTask
+	if err := db.Where("id = ?", task.ID).First(&current).Error; err != nil {
+		return fmt.Errorf("task reload error: %w", err)
+	}
+	if current.Status != "waiting_business_hours" {
+		log.Printf("skip waiting_business_hours activation, task no longer waiting: task=%s, status=%s", task.ID, current.Status)
+		return nil
+	}
+
 	// Randomly select reviewers (excluding PR author)
 	excludeIDs := []string{}
 	if task.PRAuthorSlackID != "" {
@@ -82,11 +93,22 @@ func activateBusinessHoursTask(db *gorm.DB, task models.ReviewTask, config model
 		return fmt.Errorf("business hours notification error: %w", err)
 	}
 
-	// Mark the task as in_review only after the notification succeeded
-	task.Status = "in_review"
-	task.UpdatedAt = time.Now()
-	if err := db.Save(&task).Error; err != nil {
-		return fmt.Errorf("task status update error: %w", err)
+	// Mark the task as in_review only after the notification succeeded. CAS on status so
+	// a review landing during the notification is not rolled back to in_review.
+	result := db.Model(&models.ReviewTask{}).
+		Where("id = ? AND status = ?", task.ID, "waiting_business_hours").
+		Updates(map[string]interface{}{
+			"status":     "in_review",
+			"reviewer":   task.Reviewer,
+			"reviewers":  task.Reviewers,
+			"updated_at": time.Now(),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("task status update error: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		log.Printf("waiting_business_hours activation CAS miss (concurrent update): task=%s", task.ID)
+		return nil
 	}
 
 	log.Printf("waiting_business_hours task activated: %s", task.ID)
