@@ -13,7 +13,7 @@ COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -o slack-review-notify
 
 # 実行用イメージ
-FROM alpine:latest
+FROM alpine:3.24
 
 # 必要なライブラリをインストール（SQLite実行に必要）
 RUN apk --no-cache add ca-certificates sqlite tzdata
