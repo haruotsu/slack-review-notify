@@ -139,10 +139,11 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"cmd.set_timezone.updated": "Updated timezone for label \"%s\" to %s.",
 
 	// ==================== Command: notify-on-holidays ====================
-	"cmd.set_notify_on_holidays.usage": "Please specify on or off. Example: /slack-review-notify %s set-notify-on-holidays on",
-	"cmd.set_notify_on_holidays.on":    "Label \"%s\" will now notify on weekends and holidays during business hours.",
-	"cmd.set_notify_on_holidays.off":   "Label \"%s\" will not notify on weekends and holidays.",
-	"cmd.set_notify_on_holidays.error": "Failed to save the setting.",
+	"cmd.set_notify_on_holidays.usage":   "Please specify on or off. Example: /slack-review-notify %s set-notify-on-holidays on",
+	"cmd.set_notify_on_holidays.invalid": "Specify on or off. With on, notifications are also sent on weekends and holidays during business hours.",
+	"cmd.set_notify_on_holidays.set":     "Set weekend and holiday notifications for label \"%s\" to %s.",
+	"cmd.set_notify_on_holidays.updated": "Updated weekend and holiday notifications for label \"%s\" to %s.",
+	"cmd.set_notify_on_holidays.error":   "Failed to save the setting.",
 
 	// ==================== Command: required-approvals ====================
 	"cmd.set_required_approvals.usage":   "Please specify the required number of approvals. Example: /slack-review-notify %s set-required-approvals 2",

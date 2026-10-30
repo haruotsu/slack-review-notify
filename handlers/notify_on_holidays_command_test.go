@@ -44,7 +44,7 @@ func TestSetNotifyOnHolidays_OnEnablesHolidayNotification(t *testing.T) {
 	w := postSlackCommand(t, router, "set-notify-on-holidays on")
 
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "土日・祝日も営業時間内は通知する")
+	assert.Contains(t, w.Body.String(), "ラベル「needs-review」の土日・祝日の通知を on に更新しました。")
 	var config models.ChannelConfig
 	db.Where("slack_channel_id = ? AND label_name = ?", "C12345", "needs-review").First(&config)
 	assert.True(t, config.NotifyOnHolidays)
@@ -67,7 +67,7 @@ func TestSetNotifyOnHolidays_OffDisablesHolidayNotification(t *testing.T) {
 	w := postSlackCommand(t, router, "set-notify-on-holidays off")
 
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "will not notify on weekends and holidays")
+	assert.Contains(t, w.Body.String(), `Updated weekend and holiday notifications for label "needs-review" to off.`)
 	var config models.ChannelConfig
 	db.Where("slack_channel_id = ? AND label_name = ?", "C12345", "needs-review").First(&config)
 	assert.False(t, config.NotifyOnHolidays)
@@ -80,6 +80,7 @@ func TestSetNotifyOnHolidays_CreatesConfigForUnknownLabel(t *testing.T) {
 	w := postSlackCommand(t, router, "weekend-team set-notify-on-holidays on")
 
 	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "ラベル「weekend-team」の土日・祝日の通知を on に設定しました。")
 	var config models.ChannelConfig
 	err := db.Where("slack_channel_id = ? AND label_name = ?", "C12345", "weekend-team").First(&config).Error
 	assert.NoError(t, err)
@@ -90,16 +91,27 @@ func TestSetNotifyOnHolidays_CreatesConfigForUnknownLabel(t *testing.T) {
 	assert.Equal(t, "Asia/Tokyo", config.Timezone)
 }
 
+func TestSetNotifyOnHolidays_ShowsUsageWithoutValue(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupTestRouter(db)
+
+	w := postSlackCommand(t, router, "set-notify-on-holidays")
+
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "例: /slack-review-notify needs-review set-notify-on-holidays on")
+	var count int64
+	db.Model(&models.ChannelConfig{}).Count(&count)
+	assert.Equal(t, int64(0), count)
+}
+
 func TestSetNotifyOnHolidays_RejectsValueOtherThanOnOff(t *testing.T) {
 	db := setupTestDB(t)
 	router := setupTestRouter(db)
 
-	for _, text := range []string{"set-notify-on-holidays", "set-notify-on-holidays yes"} {
-		w := postSlackCommand(t, router, text)
+	w := postSlackCommand(t, router, "set-notify-on-holidays yes")
 
-		assert.Equal(t, 200, w.Code)
-		assert.Contains(t, w.Body.String(), "set-notify-on-holidays on")
-	}
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "on または off で指定してください。")
 	var count int64
 	db.Model(&models.ChannelConfig{}).Count(&count)
 	assert.Equal(t, int64(0), count)

@@ -257,12 +257,11 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 				setTimezone(c, db, channelID, labelName, strings.TrimSpace(params), lang)
 
 			case "set-notify-on-holidays":
-				value := strings.TrimSpace(params)
-				if value != "on" && value != "off" {
+				if params == "" {
 					c.String(200, t("cmd.set_notify_on_holidays.usage", labelName))
 					return
 				}
-				setNotifyOnHolidays(c, db, channelID, labelName, value == "on", lang)
+				setNotifyOnHolidays(c, db, channelID, labelName, strings.TrimSpace(params), lang)
 
 			case "map-user":
 				mapUser(c, db, params, lang)
@@ -1204,8 +1203,13 @@ func setTimezone(c *gin.Context, db *gorm.DB, channelID, labelName, timezone, la
 }
 
 // setNotifyOnHolidays sets whether weekends and holidays are treated as business days
-func setNotifyOnHolidays(c *gin.Context, db *gorm.DB, channelID, labelName string, enabled bool, lang string) {
+func setNotifyOnHolidays(c *gin.Context, db *gorm.DB, channelID, labelName, value, lang string) {
 	t := i18n.L(lang)
+	if value != "on" && value != "off" {
+		c.String(200, t("cmd.set_notify_on_holidays.invalid"))
+		return
+	}
+	enabled := value == "on"
 
 	var config models.ChannelConfig
 	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
@@ -1228,21 +1232,19 @@ func setNotifyOnHolidays(c *gin.Context, db *gorm.DB, channelID, labelName strin
 			c.String(200, t("cmd.set_notify_on_holidays.error"))
 			return
 		}
-	} else {
-		config.NotifyOnHolidays = enabled
-		config.UpdatedAt = time.Now()
-		if err := db.Save(&config).Error; err != nil {
-			log.Printf("failed to update config for set-notify-on-holidays: %v", err)
-			c.String(200, t("cmd.set_notify_on_holidays.error"))
-			return
-		}
+		c.String(200, t("cmd.set_notify_on_holidays.set", labelName, value))
+		return
 	}
 
-	if enabled {
-		c.String(200, t("cmd.set_notify_on_holidays.on", labelName))
-	} else {
-		c.String(200, t("cmd.set_notify_on_holidays.off", labelName))
+	config.NotifyOnHolidays = enabled
+	config.UpdatedAt = time.Now()
+	if err := db.Save(&config).Error; err != nil {
+		log.Printf("failed to update config for set-notify-on-holidays: %v", err)
+		c.String(200, t("cmd.set_notify_on_holidays.error"))
+		return
 	}
+
+	c.String(200, t("cmd.set_notify_on_holidays.updated", labelName, value))
 }
 
 // isValidTimezone validates the timezone

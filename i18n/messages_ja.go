@@ -139,10 +139,11 @@ var messagesJa = map[string]string{
 	"cmd.set_timezone.updated": "ラベル「%s」のタイムゾーンを %s に更新しました。",
 
 	// ==================== Command: notify-on-holidays ====================
-	"cmd.set_notify_on_holidays.usage": "on か off を指定してください。例: /slack-review-notify %s set-notify-on-holidays on",
-	"cmd.set_notify_on_holidays.on":    "ラベル「%s」で、土日・祝日も営業時間内は通知するよう設定しました。",
-	"cmd.set_notify_on_holidays.off":   "ラベル「%s」で、土日・祝日は通知しないよう設定しました。",
-	"cmd.set_notify_on_holidays.error": "設定の保存に失敗しました。",
+	"cmd.set_notify_on_holidays.usage":   "on か off を指定してください。例: /slack-review-notify %s set-notify-on-holidays on",
+	"cmd.set_notify_on_holidays.invalid": "on または off で指定してください。on にすると土日・祝日も営業時間内は通知します。",
+	"cmd.set_notify_on_holidays.set":     "ラベル「%s」の土日・祝日の通知を %s に設定しました。",
+	"cmd.set_notify_on_holidays.updated": "ラベル「%s」の土日・祝日の通知を %s に更新しました。",
+	"cmd.set_notify_on_holidays.error":   "設定の保存に失敗しました。",
 
 	// ==================== Command: required-approvals ====================
 	"cmd.set_required_approvals.usage":   "必要なapprove数を指定してください。例: /slack-review-notify %s set-required-approvals 2",
