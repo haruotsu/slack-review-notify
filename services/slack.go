@@ -1077,6 +1077,13 @@ func GetNextBusinessDayMorningWithConfig(now time.Time, config *models.ChannelCo
 	// Create today's business hours start time
 	todayMorning := time.Date(nowInTZ.Year(), nowInTZ.Month(), nowInTZ.Day(), startHour, startMin, 0, 0, tz)
 
+	if config != nil && config.NotifyOnHolidays {
+		if nowInTZ.Before(todayMorning) {
+			return todayMorning
+		}
+		return todayMorning.AddDate(0, 0, 1)
+	}
+
 	// Check current day of week and time
 	weekday := nowInTZ.Weekday()
 
