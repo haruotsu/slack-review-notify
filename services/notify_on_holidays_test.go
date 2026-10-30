@@ -53,6 +53,46 @@ func TestIsWithinBusinessHours_NotifyOnHolidays(t *testing.T) {
 	}
 }
 
+func TestIsWithinBusinessHours_NotifyOnHolidaysOvernight(t *testing.T) {
+	jst, err := time.LoadLocation("Asia/Tokyo")
+	assert.NoError(t, err)
+
+	config := &models.ChannelConfig{
+		BusinessHoursStart: "22:00",
+		BusinessHoursEnd:   "06:00",
+		Timezone:           "Asia/Tokyo",
+		NotifyOnHolidays:   true,
+	}
+
+	tests := []struct {
+		name        string
+		currentTime time.Time
+		expected    bool
+	}{
+		{
+			name:        "日をまたぐ営業時間なら土曜の深夜も通知対象になる",
+			currentTime: time.Date(2024, 1, 13, 2, 0, 0, 0, jst), // Saturday
+			expected:    true,
+		},
+		{
+			name:        "日をまたぐ営業時間なら祝日の夜も通知対象になる",
+			currentTime: time.Date(2024, 1, 8, 23, 0, 0, 0, jst), // Coming of Age Day
+			expected:    true,
+		},
+		{
+			name:        "日をまたぐ営業時間でも休日の昼は通知対象にならない",
+			currentTime: time.Date(2024, 1, 14, 12, 0, 0, 0, jst), // Sunday
+			expected:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, IsWithinBusinessHours(config, tt.currentTime))
+		})
+	}
+}
+
 func TestGetNextBusinessDayMorningWithConfig_NotifyOnHolidays(t *testing.T) {
 	jst, err := time.LoadLocation("Asia/Tokyo")
 	assert.NoError(t, err)
