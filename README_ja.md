@@ -114,6 +114,7 @@ Slack App の *OAuth & Permissions* で以下のスコープを付与してく�
 - `/slack-review-notify [ラベル名] set-business-hours-start 09:00`: 営業時間の開始時刻を設定（HH:MM形式）
 - `/slack-review-notify [ラベル名] set-business-hours-end 18:00`: 営業時間の終了時刻を設定（HH:MM形式）
 - `/slack-review-notify [ラベル名] set-timezone Asia/Tokyo`: タイムゾーンを設定（例: `Asia/Tokyo`, `UTC`, `America/New_York`）
+- `/slack-review-notify [ラベル名] set-notify-on-holidays on|off`: 土日・祝日も営業時間内は通知するかを設定（デフォルト: off。祝日判定はタイムゾーンが `Asia/Tokyo` のときのみ。切り替え前に翌営業日まで止まったリマインドは、その時刻まで止まったまま）
 - `/slack-review-notify [ラベル名] set-required-approvals N`: 必要なapprove数を設定（1〜10）
 - `/slack-review-notify [ラベル名] set-language ja|en`: メッセージの言語を設定
 - `/slack-review-notify [ラベル名] activate`: このラベルの通知を有効化
@@ -215,6 +216,9 @@ PR作成者にもスレッド通知が届くようにするため、最初にユ
 /slack-review-notify us-team set-business-hours-start 09:00
 /slack-review-notify us-team set-business-hours-end 17:00
 /slack-review-notify us-team set-timezone America/New_York
+
+# 土日・祝日も営業時間内は通知するチームの場合
+/slack-review-notify on-call set-notify-on-holidays on
 
 # 設定確認
 /slack-review-notify show

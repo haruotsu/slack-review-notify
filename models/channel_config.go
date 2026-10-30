@@ -21,6 +21,7 @@ type ChannelConfig struct {
 	BusinessHoursEnd         string `gorm:"default:'18:00'"`      // Business hours end (HH:MM format)
 	Timezone                 string `gorm:"default:'Asia/Tokyo'"` // Timezone (default: JST)
 	Language                 string `gorm:"default:'ja'"`         // Language for messages (ja, en)
+	NotifyOnHolidays         bool   `gorm:"default:false"`        // Treat weekends and holidays as business days
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
 	DeletedAt                gorm.DeletedAt `gorm:"index"`

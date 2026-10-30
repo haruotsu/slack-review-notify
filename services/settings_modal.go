@@ -105,6 +105,7 @@ type SettingsForm struct {
 	Timezone                 string
 	RequiredApprovals        int
 	Language                 string
+	NotifyOnHolidays         *bool // nil when the submitted modal predates the field; keep the stored value
 	IsActive                 bool
 }
 
@@ -154,6 +155,7 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		cfgLang = "ja"
 	}
 	isActive := true
+	notifyOnHolidays := false
 
 	if cfg != nil {
 		// DefaultMentionID is a single column with mixed shapes in real configs
@@ -203,6 +205,7 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 			cfgLang = cfg.Language
 		}
 		isActive = cfg.IsActive
+		notifyOnHolidays = cfg.NotifyOnHolidays
 	}
 
 	plainText := func(s string) map[string]any {
@@ -306,6 +309,11 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 	if !isActive {
 		activeInitial = "false"
 	}
+	notifyOnHolidaysOptions := []map[string]any{
+		option(t("modal.notify_on_holidays.true"), "true"),
+		option(t("modal.notify_on_holidays.false"), "false"),
+	}
+	notifyOnHolidaysInitial := strconv.FormatBool(notifyOnHolidays)
 
 	blocks := []map[string]any{
 		{
@@ -396,6 +404,7 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		plainInput("business_hours_start", t("modal.business_hours_start"), "HH:MM", bhStart, false),
 		plainInput("business_hours_end", t("modal.business_hours_end"), "HH:MM", bhEnd, false),
 		plainInput("timezone", t("modal.timezone"), t("modal.timezone.hint"), tz, false),
+		staticSelect("notify_on_holidays", t("modal.notify_on_holidays"), notifyOnHolidaysOptions, notifyOnHolidaysInitial, false),
 		plainInput("required_approvals", t("modal.required_approvals"), t("modal.required_approvals.hint"), strconv.Itoa(requiredApprovals), false),
 		staticSelect("language", t("modal.language"), langOptions, cfgLang, false),
 		staticSelect("is_active", t("modal.is_active"), activeOptions, activeInitial, false),
@@ -605,6 +614,17 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 	form.Language = selectField("language")
 	if form.Language != "ja" && form.Language != "en" {
 		errs["language"] = "must be ja or en"
+	}
+
+	// A modal opened before this field existed submits without it. Rejecting the
+	// whole form or defaulting to "off" would silently undo a value set by command.
+	switch notifyOnHolidays := selectField("notify_on_holidays"); notifyOnHolidays {
+	case "true", "false":
+		enabled := notifyOnHolidays == "true"
+		form.NotifyOnHolidays = &enabled
+	case "":
+	default:
+		errs["notify_on_holidays"] = "must be true or false"
 	}
 
 	activeStr := selectField("is_active")

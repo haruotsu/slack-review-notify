@@ -30,6 +30,7 @@ var subCommands = []string{
 	"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
 	"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
 	"set-business-hours-start", "set-business-hours-end", "set-timezone",
+	"set-notify-on-holidays",
 	"map-user", "show-user-mappings", "remove-user-mapping",
 	"set-required-approvals", "set-language",
 	"set-away", "unset-away", "show-availability",
@@ -254,6 +255,13 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 					return
 				}
 				setTimezone(c, db, channelID, labelName, strings.TrimSpace(params), lang)
+
+			case "set-notify-on-holidays":
+				if params == "" {
+					c.String(200, t("cmd.set_notify_on_holidays.usage", labelName))
+					return
+				}
+				setNotifyOnHolidays(c, db, channelID, labelName, strings.TrimSpace(params), lang)
 
 			case "map-user":
 				mapUser(c, db, params, lang)
@@ -620,8 +628,13 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID, labelName, lang string) 
 		language = "ja"
 	}
 
+	notifyOnHolidays := t("cmd.show_config.notify_on_holidays.off")
+	if config.NotifyOnHolidays {
+		notifyOnHolidays = t("cmd.show_config.notify_on_holidays.on")
+	}
+
 	response := t("cmd.show_config.response", labelName, status, config.DefaultMentionID, formatReviewerList(config.ReviewerList, lang),
-		config.RepositoryList, reviewerReminderInterval, config.BusinessHoursStart, config.BusinessHoursEnd, timezone, requiredApprovals, language)
+		config.RepositoryList, reviewerReminderInterval, config.BusinessHoursStart, config.BusinessHoursEnd, timezone, notifyOnHolidays, requiredApprovals, language)
 
 	c.String(200, response)
 }
@@ -1187,6 +1200,51 @@ func setTimezone(c *gin.Context, db *gorm.DB, channelID, labelName, timezone, la
 	db.Save(&config)
 
 	c.String(200, t("cmd.set_timezone.updated", labelName, timezone))
+}
+
+// setNotifyOnHolidays sets whether weekends and holidays are treated as business days
+func setNotifyOnHolidays(c *gin.Context, db *gorm.DB, channelID, labelName, value, lang string) {
+	t := i18n.L(lang)
+	if value != "on" && value != "off" {
+		c.String(200, t("cmd.set_notify_on_holidays.invalid"))
+		return
+	}
+	enabled := value == "on"
+
+	var config models.ChannelConfig
+	result := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config)
+
+	if result.Error != nil {
+		config = models.ChannelConfig{
+			ID:                 uuid.NewString(),
+			SlackChannelID:     channelID,
+			LabelName:          labelName,
+			BusinessHoursStart: "09:00",
+			BusinessHoursEnd:   "18:00",
+			Timezone:           "Asia/Tokyo",
+			NotifyOnHolidays:   enabled,
+			IsActive:           true,
+			CreatedAt:          time.Now(),
+			UpdatedAt:          time.Now(),
+		}
+		if err := db.Create(&config).Error; err != nil {
+			log.Printf("failed to create config for set-notify-on-holidays: %v", err)
+			c.String(200, t("cmd.set_notify_on_holidays.error"))
+			return
+		}
+		c.String(200, t("cmd.set_notify_on_holidays.set", labelName, value))
+		return
+	}
+
+	config.NotifyOnHolidays = enabled
+	config.UpdatedAt = time.Now()
+	if err := db.Save(&config).Error; err != nil {
+		log.Printf("failed to update config for set-notify-on-holidays: %v", err)
+		c.String(200, t("cmd.set_notify_on_holidays.error"))
+		return
+	}
+
+	c.String(200, t("cmd.set_notify_on_holidays.updated", labelName, value))
 }
 
 // isValidTimezone validates the timezone

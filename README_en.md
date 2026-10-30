@@ -116,6 +116,7 @@ Command format: `/slack-review-notify [label-name] subcommand [args]`
 - `/slack-review-notify [label-name] set-business-hours-start 09:00`: Set business hours start (HH:MM)
 - `/slack-review-notify [label-name] set-business-hours-end 18:00`: Set business hours end (HH:MM)
 - `/slack-review-notify [label-name] set-timezone Asia/Tokyo`: Set timezone (e.g., `Asia/Tokyo`, `UTC`, `America/New_York`)
+- `/slack-review-notify [label-name] set-notify-on-holidays on|off`: Notify on weekends and holidays during business hours (default: off; holidays are only detected when the timezone is `Asia/Tokyo`; reminders already paused until the next business day stay paused until then)
 - `/slack-review-notify [label-name] set-required-approvals N`: Set required number of approvals (1-10)
 - `/slack-review-notify [label-name] set-language ja|en`: Set message language
 - `/slack-review-notify [label-name] activate`: Enable notifications
@@ -217,6 +218,9 @@ Set up user mappings first so PR authors receive thread notifications.
 /slack-review-notify us-team set-business-hours-start 09:00
 /slack-review-notify us-team set-business-hours-end 17:00
 /slack-review-notify us-team set-timezone America/New_York
+
+# Team that also wants notifications on weekends and holidays during business hours
+/slack-review-notify on-call set-notify-on-holidays on
 
 # Check settings
 /slack-review-notify show

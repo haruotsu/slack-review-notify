@@ -30,14 +30,7 @@ func IsWithinBusinessHours(config *models.ChannelConfig, currentTime time.Time) 
 
 	localTime := currentTime.In(loc)
 
-	// Check for weekends
-	weekday := localTime.Weekday()
-	if weekday == time.Saturday || weekday == time.Sunday {
-		return false
-	}
-
-	// Check for Japanese holidays if the timezone is Asia/Tokyo
-	if timezone == "Asia/Tokyo" && isJapaneseHoliday(localTime) {
+	if !config.NotifyOnHolidays && isNonWorkingDay(localTime, timezone) {
 		return false
 	}
 
@@ -63,6 +56,15 @@ func IsWithinBusinessHours(config *models.ChannelConfig, currentTime time.Time) 
 		return currentMinutes >= startMinutes && currentMinutes < endMinutes
 	}
 	return currentMinutes >= startMinutes || currentMinutes < endMinutes
+}
+
+// isNonWorkingDay reports whether the date is a weekend, or a Japanese public holiday when the timezone is Asia/Tokyo
+func isNonWorkingDay(localTime time.Time, timezone string) bool {
+	weekday := localTime.Weekday()
+	if weekday == time.Saturday || weekday == time.Sunday {
+		return true
+	}
+	return timezone == "Asia/Tokyo" && isJapaneseHoliday(localTime)
 }
 
 // parseBusinessHoursTime parses a time string (HH:MM) into hours and minutes
