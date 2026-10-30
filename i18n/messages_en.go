@@ -39,6 +39,7 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 • [label-name] set-reviewer-reminder-interval 30 - Reminder interval (minutes)
 • [label-name] set-business-hours-start 09:00 / set-business-hours-end 18:00 - Business hours
 • [label-name] set-timezone Asia/Tokyo - Timezone
+• [label-name] set-notify-on-holidays on|off - Whether to notify on weekends and holidays during business hours
 • [label-name] set-required-approvals N - Required approvals (1-10)
 • [label-name] set-language ja|en - Message language
 • [label-name] set-label new-label-name - Rename the label
@@ -137,6 +138,12 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"cmd.set_timezone.set":     "Set timezone for label \"%s\" to %s.",
 	"cmd.set_timezone.updated": "Updated timezone for label \"%s\" to %s.",
 
+	// ==================== Command: notify-on-holidays ====================
+	"cmd.set_notify_on_holidays.usage": "Please specify on or off. Example: /slack-review-notify %s set-notify-on-holidays on",
+	"cmd.set_notify_on_holidays.on":    "Label \"%s\" will now notify on weekends and holidays during business hours.",
+	"cmd.set_notify_on_holidays.off":   "Label \"%s\" will not notify on weekends and holidays.",
+	"cmd.set_notify_on_holidays.error": "Failed to save the setting.",
+
 	// ==================== Command: required-approvals ====================
 	"cmd.set_required_approvals.usage":   "Please specify the required number of approvals. Example: /slack-review-notify %s set-required-approvals 2",
 	"cmd.set_required_approvals.invalid": "Required approvals must be an integer between 1 and 10.",
@@ -158,8 +165,12 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 - Notification target repositories: %s
 - Post-assignment reminder interval: %d min
 - Business hours: %s - %s (%s)
+- Notify on weekends and holidays: %s
 - Required approvals: %d
 - Language: %s`,
+
+	"cmd.show_config.notify_on_holidays.on":  "Yes",
+	"cmd.show_config.notify_on_holidays.off": "No",
 
 	// ==================== Command: map-user ====================
 	// ==================== Modal: user_mapping ====================
@@ -273,6 +284,9 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"modal.business_hours_end":           "Business hours end",
 	"modal.timezone":                     "Timezone",
 	"modal.timezone.hint":                "e.g. Asia/Tokyo, UTC, America/New_York",
+	"modal.notify_on_holidays":           "Weekends and holidays",
+	"modal.notify_on_holidays.true":      "Notify during business hours",
+	"modal.notify_on_holidays.false":     "Do not notify",
 	"modal.required_approvals":           "Required approvals",
 	"modal.required_approvals.hint":      "Integer between 1 and 10",
 	"modal.language":                     "Language",

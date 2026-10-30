@@ -39,6 +39,7 @@ var messagesJa = map[string]string{
 • [ラベル名] set-reviewer-reminder-interval 30 - リマインド頻度（分）
 • [ラベル名] set-business-hours-start 09:00 / set-business-hours-end 18:00 - 営業時間
 • [ラベル名] set-timezone Asia/Tokyo - タイムゾーン
+• [ラベル名] set-notify-on-holidays on|off - 土日・祝日も営業時間内は通知するか
 • [ラベル名] set-required-approvals N - 必要なapprove数（1〜10）
 • [ラベル名] set-language ja|en - メッセージの言語
 • [ラベル名] set-label 新ラベル名 - ラベル名を変更
@@ -137,6 +138,12 @@ var messagesJa = map[string]string{
 	"cmd.set_timezone.set":     "ラベル「%s」のタイムゾーンを %s に設定しました。",
 	"cmd.set_timezone.updated": "ラベル「%s」のタイムゾーンを %s に更新しました。",
 
+	// ==================== Command: notify-on-holidays ====================
+	"cmd.set_notify_on_holidays.usage": "on か off を指定してください。例: /slack-review-notify %s set-notify-on-holidays on",
+	"cmd.set_notify_on_holidays.on":    "ラベル「%s」で、土日・祝日も営業時間内は通知するよう設定しました。",
+	"cmd.set_notify_on_holidays.off":   "ラベル「%s」で、土日・祝日は通知しないよう設定しました。",
+	"cmd.set_notify_on_holidays.error": "設定の保存に失敗しました。",
+
 	// ==================== Command: required-approvals ====================
 	"cmd.set_required_approvals.usage":   "必要なapprove数を指定してください。例: /slack-review-notify %s set-required-approvals 2",
 	"cmd.set_required_approvals.invalid": "必要なapprove数は1〜10の整数で指定してください。",
@@ -158,8 +165,12 @@ var messagesJa = map[string]string{
 - 通知対象リポジトリ: %s
 - レビュワー割り当て後のリマインド頻度: %d分
 - 営業時間: %s - %s (%s)
+- 土日・祝日の通知: %s
 - 必要なapprove数: %d
 - 言語: %s`,
+
+	"cmd.show_config.notify_on_holidays.on":  "する",
+	"cmd.show_config.notify_on_holidays.off": "しない",
 
 	// ==================== Command: map-user ====================
 	// ==================== Modal: user_mapping ====================
@@ -273,6 +284,9 @@ var messagesJa = map[string]string{
 	"modal.business_hours_end":           "営業終了時間",
 	"modal.timezone":                     "タイムゾーン",
 	"modal.timezone.hint":                "例: Asia/Tokyo, UTC, America/New_York",
+	"modal.notify_on_holidays":           "土日・祝日の通知",
+	"modal.notify_on_holidays.true":      "営業時間内なら通知する",
+	"modal.notify_on_holidays.false":     "通知しない",
 	"modal.required_approvals":           "必要なapprove数",
 	"modal.required_approvals.hint":      "1〜10の整数",
 	"modal.language":                     "言語",
