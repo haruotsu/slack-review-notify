@@ -278,6 +278,7 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 	cfg.Timezone = form.Timezone
 	cfg.RequiredApprovals = form.RequiredApprovals
 	cfg.Language = form.Language
+	cfg.NotifyOnHolidays = form.NotifyOnHolidays
 	cfg.IsActive = form.IsActive
 	cfg.UpdatedAt = now
 
