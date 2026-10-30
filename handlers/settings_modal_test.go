@@ -169,6 +169,7 @@ func TestHandleSlackAction_ViewSubmission_CreatesConfig(t *testing.T) {
 	assert.Equal(t, "UTC", cfg.Timezone)
 	assert.Equal(t, 2, cfg.RequiredApprovals)
 	assert.Equal(t, "en", cfg.Language)
+	assert.False(t, cfg.NotifyOnHolidays)
 	assert.True(t, cfg.IsActive)
 }
 

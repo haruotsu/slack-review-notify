@@ -80,18 +80,18 @@ func TestParseSettingsModalSubmission_NotifyOnHolidays(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if !got.NotifyOnHolidays {
-		t.Errorf("NotifyOnHolidays = false, want true")
+	if got.NotifyOnHolidays == nil || !*got.NotifyOnHolidays {
+		t.Errorf("NotifyOnHolidays = %v, want true", got.NotifyOnHolidays)
 	}
 }
 
-func TestParseSettingsModalSubmission_NotifyOnHolidaysMissingMeansOff(t *testing.T) {
+func TestParseSettingsModalSubmission_NotifyOnHolidaysMissingIsLeftUnset(t *testing.T) {
 	got, err := ParseSettingsModalSubmission(minimalValidParseValues())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if got.NotifyOnHolidays {
-		t.Errorf("NotifyOnHolidays = true, want false")
+	if got.NotifyOnHolidays != nil {
+		t.Errorf("NotifyOnHolidays = %v, want nil", *got.NotifyOnHolidays)
 	}
 }
 

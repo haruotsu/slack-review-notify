@@ -105,7 +105,7 @@ type SettingsForm struct {
 	Timezone                 string
 	RequiredApprovals        int
 	Language                 string
-	NotifyOnHolidays         bool
+	NotifyOnHolidays         *bool // nil when the submitted modal predates the field; keep the stored value
 	IsActive                 bool
 }
 
@@ -616,13 +616,13 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 		errs["language"] = "must be ja or en"
 	}
 
-	// A modal opened before this field existed submits without it; treat that as
-	// "off" instead of rejecting the whole form.
-	switch selectField("notify_on_holidays") {
-	case "true":
-		form.NotifyOnHolidays = true
-	case "false", "":
-		form.NotifyOnHolidays = false
+	// A modal opened before this field existed submits without it. Rejecting the
+	// whole form or defaulting to "off" would silently undo a value set by command.
+	switch notifyOnHolidays := selectField("notify_on_holidays"); notifyOnHolidays {
+	case "true", "false":
+		enabled := notifyOnHolidays == "true"
+		form.NotifyOnHolidays = &enabled
+	case "":
 	default:
 		errs["notify_on_holidays"] = "must be true or false"
 	}
