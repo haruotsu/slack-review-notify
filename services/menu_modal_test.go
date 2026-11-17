@@ -33,7 +33,7 @@ func TestBuildMenuModalView_OffersEveryOperationAsAButton(t *testing.T) {
 	view := BuildMenuModalView(MenuModalMetadata{ChannelID: "C1", UserID: "U1"}, "ja")
 
 	var want []string
-	for _, op := range append(append([]string{}, MenuViewOps...), MenuEditOps...) {
+	for _, op := range append(append([]string{}, MenuShowOps...), MenuConfigOps...) {
 		want = append(want, MenuActionPrefix+op)
 	}
 	assert.Equal(t, want, menuButtonActionIDs(t, view))
@@ -63,7 +63,7 @@ func TestMenuTexts_FitSlackTitleAndButtonLimits(t *testing.T) {
 			title := view["title"].(map[string]any)["text"].(string)
 			assert.LessOrEqual(t, utf8.RuneCountInString(title), SlackModalTitleLimit, "menu title")
 
-			for _, op := range append(append([]string{}, MenuViewOps...), MenuEditOps...) {
+			for _, op := range append(append([]string{}, MenuShowOps...), MenuConfigOps...) {
 				label := MenuOpLabel(op, lang)
 				assert.NotEqual(t, "modal.menu.op."+op, label, "operation %q has no label", op)
 				assert.LessOrEqual(t, utf8.RuneCountInString(label), SlackModalTitleLimit, "label of %q", op)
@@ -104,7 +104,38 @@ func TestBuildMenuResultView_StaysWithinSlackBlockLimit(t *testing.T) {
 
 	view := BuildMenuResultView(MenuModalMetadata{}, "ja", "title", texts)
 
-	assert.LessOrEqual(t, len(menuViewBlocks(t, view)), SlackModalMaxBlocks)
+	blocks := menuViewBlocks(t, view)
+	assert.Len(t, blocks, SlackModalMaxBlocks)
+	assert.Equal(t, "表示しきれない分は省略しました。", blocks[len(blocks)-1]["text"].(map[string]any)["text"],
+		"cutting silently would pass off a partial list as the whole one")
+}
+
+func TestBuildMenuResultView_NeverEmitsAnEmptySection(t *testing.T) {
+	text := strings.Repeat("a", SlackSectionTextLimit) + "\n"
+
+	view := BuildMenuResultView(MenuModalMetadata{}, "ja", "title", []string{text})
+
+	for _, block := range menuViewBlocks(t, view) {
+		assert.NotEmpty(t, strings.TrimSpace(block["text"].(map[string]any)["text"].(string)))
+	}
+}
+
+func TestBuildMenuAvailabilityView_ShowsEveryPeriodWhenTheyExactlyFit(t *testing.T) {
+	rows := make([]MenuAvailabilityRow, SlackModalMaxBlocks-1)
+	for i := range rows {
+		rows[i] = MenuAvailabilityRow{ID: fmt.Sprintf("leave-%d", i), Text: "row"}
+	}
+
+	view := BuildMenuAvailabilityView(MenuModalMetadata{}, "ja", rows)
+
+	blocks := menuViewBlocks(t, view)
+	require.Len(t, blocks, SlackModalMaxBlocks)
+	assert.Contains(t, blocks[len(blocks)-1], "accessory", "the last block must be a period, not a truncation note")
+}
+
+func TestRenameLabelBlockID_DiffersPerLabel(t *testing.T) {
+	assert.NotEqual(t, RenameLabelBlockID("bug"), RenameLabelBlockID("needs-review"))
+	assert.Equal(t, RenameLabelBlockID("bug"), RenameLabelBlockID("bug"))
 }
 
 func TestBuildMenuAvailabilityView_RowButtonRemovesThatPeriodAfterConfirming(t *testing.T) {

@@ -36,7 +36,6 @@ func menuModalView(db *gorm.DB, channelID, userID string) map[string]any {
 	return services.BuildMenuModalView(services.MenuModalMetadata{ChannelID: channelID, UserID: userID}, lang)
 }
 
-// handleOpenMenu opens the menu from the help message's button.
 func handleOpenMenu(c *gin.Context, db *gorm.DB, payload SlackActionPayload) {
 	openMenuModal(db, payload.TriggerID, payload.Container.ChannelID, payload.User.ID)
 	c.Status(http.StatusOK)
@@ -130,9 +129,8 @@ func menuActionView(db *gorm.DB, payload SlackActionPayload) (map[string]any, bo
 	return nil, false
 }
 
-// menuDefaultLabel picks the label the settings modal starts on: the default
-// label when the channel has it, otherwise the first one configured. With no
-// configs at all the modal falls back to create-new by itself.
+// With no configs at all nothing here has to choose create-new: the settings
+// modal falls back to it by itself for a label it cannot find.
 func menuDefaultLabel(configs []*models.ChannelConfig) string {
 	for _, cfg := range configs {
 		if cfg.LabelName == defaultLabelName {
@@ -157,8 +155,7 @@ func menuAvailabilityView(db *gorm.DB, meta services.MenuModalMetadata, lang str
 	return services.BuildMenuAvailabilityView(meta, lang, rows)
 }
 
-// menuUnsetAwayNotice is the channel message announcing a removed leave period,
-// posted visibly so teammates see the leave was cleared.
+// Posted to the channel rather than ephemerally, so teammates see the leave was cleared.
 func menuUnsetAwayNotice(db *gorm.DB, channelID string, record models.ReviewerAvailability, lang string) string {
 	t := i18n.L(lang)
 	loc := resolveAwayTimezone(db, channelID)

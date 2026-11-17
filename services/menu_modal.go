@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"slack-review-notify/i18n"
+	"strings"
 )
 
 // MenuModalCallbackID identifies the menu modal, the hub every other modal and
@@ -36,22 +37,16 @@ const (
 	MenuOpUserMapping      = "user_mapping"
 )
 
-// MenuViewOps and MenuEditOps list the menu buttons in display order.
+// MenuShowOps (read-only results) and MenuConfigOps (editing modals) list the
+// menu buttons in display order.
 var (
-	MenuViewOps = []string{
+	MenuShowOps = []string{
 		MenuOpShowLabels, MenuOpShowLabelDetails, MenuOpShowMyReviews,
 		MenuOpShowReviewers, MenuOpShowAvailability, MenuOpShowUserMappings,
 	}
-	MenuEditOps = []string{
+	MenuConfigOps = []string{
 		MenuOpEditSettings, MenuOpNewLabel, MenuOpAway, MenuOpUserMapping,
 	}
-)
-
-const (
-	// SlackModalMaxBlocks is Slack's cap on blocks in one modal view.
-	SlackModalMaxBlocks = 100
-	// SlackModalTitleLimit is Slack's cap on a modal title's length.
-	SlackModalTitleLimit = 24
 )
 
 // MenuModalMetadata round-trips through view.private_metadata. Buttons inside a
@@ -112,9 +107,9 @@ func BuildMenuModalView(meta MenuModalMetadata, lang string) map[string]any {
 	blocks := []map[string]any{
 		menuSection(t("modal.menu.header")),
 		menuSection(t("modal.menu.section.view")),
-		{"type": "actions", "block_id": "menu_view", "elements": buttons(MenuViewOps)},
+		{"type": "actions", "block_id": "menu_view", "elements": buttons(MenuShowOps)},
 		menuSection(t("modal.menu.section.edit")),
-		{"type": "actions", "block_id": "menu_edit", "elements": buttons(MenuEditOps)},
+		{"type": "actions", "block_id": "menu_edit", "elements": buttons(MenuConfigOps)},
 	}
 
 	return map[string]any{
@@ -140,6 +135,12 @@ func BuildMenuResultView(meta MenuModalMetadata, lang, title string, texts []str
 			blocks = append(blocks, map[string]any{"type": "divider"})
 		}
 		for _, chunk := range chunks {
+			// Splitting on a line boundary can leave a chunk of nothing but the
+			// trailing newline, and Slack rejects the whole view over one empty
+			// text object.
+			if strings.TrimSpace(chunk) == "" {
+				continue
+			}
 			blocks = append(blocks, menuSection(chunk))
 		}
 	}
@@ -163,11 +164,11 @@ func BuildMenuAvailabilityView(meta MenuModalMetadata, lang string, rows []MenuA
 		return menuResultView(meta, lang, title, []map[string]any{menuSection(t("cmd.show_availability.empty"))})
 	}
 
-	// One block is the header and one is reserved for the truncation note.
-	const maxRows = SlackModalMaxBlocks - 2
+	// The header takes one block; the truncation note takes another, but only
+	// when something is actually left out.
 	shown := rows
-	if len(shown) > maxRows {
-		shown = shown[:maxRows]
+	if len(shown) > SlackModalMaxBlocks-1 {
+		shown = shown[:SlackModalMaxBlocks-2]
 	}
 
 	blocks := []map[string]any{menuSection(t("cmd.show_availability.header"))}

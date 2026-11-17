@@ -73,20 +73,6 @@ func TestHelpCommand_IncludesOpenMenuButton(t *testing.T) {
 	assert.Contains(t, actionIDs, services.OpenMenuActionID)
 }
 
-func TestHandleSlackAction_MenuButtonsAreAccepted(t *testing.T) {
-	db := setupTestDB(t)
-	router := setupActionRouter(db)
-
-	open := `{"type":"block_actions","trigger_id":"t","user":{"id":"U1"},
-		"actions":[{"action_id":"open_menu","value":"default"}],"container":{"channel_id":"C12345"}}`
-	assert.Equal(t, http.StatusOK, postPayload(t, router, open).Code)
-
-	inMenu := `{"type":"block_actions","trigger_id":"t","user":{"id":"U1"},
-		"actions":[{"action_id":"menu:show_labels","value":"show_labels"}],"container":{"type":"view"},
-		"view":{"id":"V1","callback_id":"menu_modal","private_metadata":"{\"c\":\"C12345\",\"u\":\"U1\"}"}}`
-	assert.Equal(t, http.StatusOK, postPayload(t, router, inMenu).Code)
-}
-
 func TestMenuActionView_EditingOperationsOpenTheirExistingModals(t *testing.T) {
 	db := setupTestDB(t)
 
@@ -111,7 +97,7 @@ func TestMenuActionView_EditingOperationsOpenTheirExistingModals(t *testing.T) {
 func TestMenuActionView_EveryMenuButtonOpensAView(t *testing.T) {
 	db := setupTestDB(t)
 
-	for _, op := range append(append([]string{}, services.MenuViewOps...), services.MenuEditOps...) {
+	for _, op := range append(append([]string{}, services.MenuShowOps...), services.MenuConfigOps...) {
 		t.Run(op, func(t *testing.T) {
 			view, ok := menuActionView(db, menuActionPayload(t, op, "C12345", "U1"))
 			require.True(t, ok)
@@ -375,7 +361,6 @@ func TestSettingsModal_RenameTypedForAnotherLabelIsIgnored(t *testing.T) {
 	var cfg models.ChannelConfig
 	require.NoError(t, db.Where("id = ?", "b").First(&cfg).Error)
 	assert.Equal(t, "bug", cfg.LabelName)
-	assert.NotEqual(t, services.RenameLabelBlockID("bug"), services.RenameLabelBlockID("needs-review"))
 }
 
 func TestSettingsModal_RenameOfALabelRemovedMeanwhileIsRejected(t *testing.T) {
@@ -418,12 +403,187 @@ func TestSettingsModal_DeleteWinsOverRename(t *testing.T) {
 	assert.Zero(t, count)
 }
 
-func TestMenuModal_IsNotOpenedWithoutAChannel(t *testing.T) {
+func TestHelpMenuButton_OpensTheMenuForTheChannelItWasClickedIn(t *testing.T) {
 	db := setupTestDB(t)
 	router := setupActionRouter(db)
+	calls := startFakeSlack(t)
 
-	open := `{"type":"block_actions","trigger_id":"t","user":{"id":"U1"},
-		"actions":[{"action_id":"open_menu","value":"default"}],"container":{}}`
+	w := postSignedPayload(t, router, `{"type":"block_actions","trigger_id":"trigger-open","user":{"id":"U1"},
+		"actions":[{"action_id":"open_menu","value":"default"}],"container":{"channel_id":"C12345"}}`)
 
-	assert.Equal(t, http.StatusOK, postPayload(t, router, open).Code)
+	require.Equal(t, http.StatusOK, w.Code)
+	call := nextSlackCall(t, calls)
+	assert.Equal(t, "/views.open", call.Path)
+	assert.Equal(t, "trigger-open", call.Body["trigger_id"])
+	view := slackCallView(t, call)
+	assert.Equal(t, services.MenuModalCallbackID, view["callback_id"])
+	assert.Equal(t, `{"c":"C12345","u":"U1"}`, view["private_metadata"])
+}
+
+// A menu opened without its channel would open fine and then ignore every click.
+func TestHelpMenuButton_DoesNotOpenAMenuThatHasNoChannel(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+	calls := startFakeSlack(t)
+
+	w := postSignedPayload(t, router, `{"type":"block_actions","trigger_id":"trigger-open","user":{"id":"U1"},
+		"actions":[{"action_id":"open_menu","value":"default"}],"container":{}}`)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	requireNoSlackCall(t, calls)
+}
+
+func TestMenuButton_StacksItsViewOnTopOfTheMenu(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+	calls := startFakeSlack(t)
+
+	w := postSignedPayload(t, router, `{"type":"block_actions","trigger_id":"trigger-push","user":{"id":"U1"},
+		"actions":[{"action_id":"menu:show_labels","value":"show_labels"}],"container":{"type":"view"},
+		"view":{"id":"V1","callback_id":"menu_modal","private_metadata":"{\"c\":\"C12345\",\"u\":\"U1\"}"}}`)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	call := nextSlackCall(t, calls)
+	assert.Equal(t, "/views.push", call.Path, "views.open would replace the menu instead of stacking on it")
+	assert.Equal(t, "trigger-push", call.Body["trigger_id"])
+	assert.Equal(t, services.MenuResultCallbackID, slackCallView(t, call)["callback_id"])
+}
+
+func TestMenuUnsetAway_AnnouncesTheRemovalAndRefreshesTheList(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+	require.NoError(t, db.Create(&models.ChannelConfig{ID: "c1", SlackChannelID: "C12345", LabelName: "needs-review", Timezone: "Asia/Tokyo"}).Error)
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	require.NoError(t, err)
+	from := time.Date(2099, 12, 1, 0, 0, 0, 0, tokyo)
+	until := time.Date(2099, 12, 3, 23, 59, 59, 0, tokyo)
+	require.NoError(t, db.Create(&models.ReviewerAvailability{ID: "leave-1", SlackUserID: "UAWAY", AwayFrom: &from, AwayUntil: &until}).Error)
+	calls := startFakeSlack(t)
+
+	w := postSignedPayload(t, router, `{"type":"block_actions","trigger_id":"t","user":{"id":"U9"},
+		"actions":[{"action_id":"menu_unset_away","value":"leave-1"}],"container":{"type":"view"},
+		"view":{"id":"V2","callback_id":"menu_result","private_metadata":"{\"c\":\"C12345\",\"u\":\"U9\"}"}}`)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	post := nextSlackCall(t, calls)
+	assert.Equal(t, "/chat.postMessage", post.Path)
+	assert.Equal(t, "C12345", post.Body["channel"])
+	assert.Equal(t, "<@UAWAY> の休暇（2099-12-01 ~ 2099-12-03）を解除しました", post.Body["text"])
+
+	update := nextSlackCall(t, calls)
+	assert.Equal(t, "/views.update", update.Path)
+	assert.Equal(t, "V2", update.Body["view_id"])
+	assert.NotContains(t, update.Raw, "UAWAY", "the refreshed list must no longer show the removed period")
+}
+
+func TestMenuUnsetAway_AnnouncesNothingWhenThePeriodWasAlreadyGone(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+	calls := startFakeSlack(t)
+
+	postSignedPayload(t, router, `{"type":"block_actions","trigger_id":"t","user":{"id":"U9"},
+		"actions":[{"action_id":"menu_unset_away","value":"gone"}],"container":{"type":"view"},
+		"view":{"id":"V2","callback_id":"menu_result","private_metadata":"{\"c\":\"C12345\",\"u\":\"U9\"}"}}`)
+
+	assert.Equal(t, "/views.update", nextSlackCall(t, calls).Path)
+}
+
+func TestSettingsModal_RenameIsAnnouncedWithBothNames(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+	require.NoError(t, db.Create(&models.ChannelConfig{ID: "existing", SlackChannelID: "C99999", LabelName: "needs-review"}).Error)
+	calls := startFakeSlack(t)
+
+	postSignedPayload(t, router, settingsSubmission("needs-review", "ready-for-review"))
+
+	post := nextSlackCall(t, calls)
+	assert.Equal(t, "/chat.postMessage", post.Path)
+	assert.Equal(t, "C99999", post.Body["channel"])
+	assert.Equal(t, "ラベル名を「needs-review」から「ready-for-review」に変更しました。\nラベル「ready-for-review」の設定を保存しました 🎉", post.Body["text"])
+}
+
+func TestSettingsModal_SaveWithoutRenameIsAnnouncedAsBefore(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+	require.NoError(t, db.Create(&models.ChannelConfig{ID: "existing", SlackChannelID: "C99999", LabelName: "needs-review"}).Error)
+	calls := startFakeSlack(t)
+
+	postSignedPayload(t, router, settingsSubmission("needs-review", ""))
+
+	assert.Equal(t, "ラベル「needs-review」の設定を保存しました 🎉", nextSlackCall(t, calls).Body["text"])
+}
+
+func viewTitle(t *testing.T, view map[string]any) string {
+	t.Helper()
+	return view["title"].(map[string]any)["text"].(string)
+}
+
+func TestMenuActionView_ResultViewIsTitledAfterItsButton(t *testing.T) {
+	db := setupTestDB(t)
+
+	for _, op := range services.MenuShowOps {
+		t.Run(op, func(t *testing.T) {
+			view, ok := menuActionView(db, menuActionPayload(t, op, "C12345", "U1"))
+			require.True(t, ok)
+			assert.Equal(t, services.MenuOpLabel(op, "ja"), viewTitle(t, view))
+		})
+	}
+}
+
+func TestMenuActionView_FollowsTheChannelLanguage(t *testing.T) {
+	db := setupTestDB(t)
+	require.NoError(t, db.Create(&models.ChannelConfig{ID: "c1", SlackChannelID: "C12345", LabelName: "needs-review", Language: "en", ReviewerList: "UREVIEWER1"}).Error)
+
+	view, ok := menuActionView(db, menuActionPayload(t, services.MenuOpShowReviewers, "C12345", "U1"))
+
+	require.True(t, ok)
+	assert.Equal(t, "Reviewers", viewTitle(t, view))
+	assert.Contains(t, viewText(t, view), "Reviewer list for label")
+	assert.Equal(t, "Review Bot Menu", viewTitle(t, menuModalView(db, "C12345", "U1")))
+}
+
+// The reviewer list is its own view, not the label details under another title.
+func TestMenuActionView_ReviewersViewLeavesOutTheOtherSettings(t *testing.T) {
+	db := setupTestDB(t)
+	require.NoError(t, db.Create(&models.ChannelConfig{ID: "c1", SlackChannelID: "C12345", LabelName: "needs-review", ReviewerList: "UREVIEWER1", RepositoryList: "owner/app"}).Error)
+
+	view, ok := menuActionView(db, menuActionPayload(t, services.MenuOpShowReviewers, "C12345", "U1"))
+
+	require.True(t, ok)
+	text := viewText(t, view)
+	assert.Contains(t, text, "UREVIEWER1")
+	assert.NotContains(t, text, "owner/app")
+}
+
+func TestMenuActionView_EditSettingsPrefersTheDefaultLabel(t *testing.T) {
+	db := setupTestDB(t)
+	require.NoError(t, db.Create(&models.ChannelConfig{ID: "c1", SlackChannelID: "C12345", LabelName: "bug", DefaultMentionID: "UBUGOWNER"}).Error)
+	require.NoError(t, db.Create(&models.ChannelConfig{ID: "c2", SlackChannelID: "C12345", LabelName: "needs-review", DefaultMentionID: "UDEFAULTOWNER"}).Error)
+
+	view, ok := menuActionView(db, menuActionPayload(t, services.MenuOpEditSettings, "C12345", "U1"))
+
+	require.True(t, ok)
+	text := viewText(t, view)
+	assert.Contains(t, text, "UDEFAULTOWNER")
+	assert.NotContains(t, text, "UBUGOWNER")
+}
+
+// "menu" is a subcommand, so a label of that name can no longer be addressed as
+// the first argument.
+func TestMenuCommand_TakesPrecedenceOverALabelNamedMenu(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupTestRouter(db)
+	require.NoError(t, db.Create(&models.ChannelConfig{ID: "c1", SlackChannelID: "C12345", LabelName: "menu", RepositoryList: "owner/app"}).Error)
+
+	form := url.Values{}
+	form.Add("command", "/slack-review-notify")
+	form.Add("text", "menu show")
+	form.Add("channel_id", "C12345")
+	form.Add("user_id", "U12345")
+	req := httptest.NewRequest("POST", "/slack/command", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Empty(t, w.Body.String())
 }
