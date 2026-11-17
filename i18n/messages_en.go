@@ -393,6 +393,7 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 
 	"notify.reviewer_auto_assigned":  "Reviewer auto-assigned: %s Please review!",
 	"notify.reviewer_changed":        "Reviewer changed: %s → %s, please take a look!",
+	"notify.reviewer_already_replaced": "This reviewer has already been replaced or finished reviewing.",
 	"notify.cannot_change_reviewer":  "Cannot change reviewer - only one reviewer is registered. Please add more reviewers.",
 
 	"notify.task_completed":   "✅ *%s*\n🔗 %s\n\n*Review Complete*: The review task has been closed because the PR label was removed.",

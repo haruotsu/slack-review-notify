@@ -393,6 +393,7 @@ var messagesJa = map[string]string{
 
 	"notify.reviewer_auto_assigned":  "自動でレビュワーが割り当てられました: %s レビューをお願いします！",
 	"notify.reviewer_changed":        "レビュワーを変更しました: %s → %s さん、よろしくお願いします！",
+	"notify.reviewer_already_replaced": "このレビュワーは既に交代済みか、レビューを終えています。",
 	"notify.cannot_change_reviewer":  "レビュワーが1人しか登録されていないため、変更できません。他のレビュワーを登録してください。",
 
 	"notify.task_completed":   "✅ *%s*\n🔗 %s\n\n*レビュー完了*: このPRのラベルが外れたため、レビュータスクを終了しました。",
