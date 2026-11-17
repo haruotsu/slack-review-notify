@@ -24,6 +24,7 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 • [label-name] show - Show detailed settings for one label
 • show-my-reviews - Show your unfinished review requests across all channels
 • help - Show this help
+• menu - Open the operation menu as a modal (run the operations below from buttons)
 
 *Repositories and mentions*
 • [label-name] add-repo owner/repo1,owner/repo2 - Add target repositories (required)
@@ -283,6 +284,9 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"modal.label_select.create_new":      "+ Create new label…",
 	"modal.new_label_name":               "New label name",
 	"modal.new_label_name.hint":          "Must match the label name applied to PRs in GitHub.",
+	"modal.rename_label":                 "Rename label",
+	"modal.rename_label.hint":            "Enter a new label name only to rename it. Leave empty to keep the current name.",
+	"modal.rename_label.reserved":        "This label name cannot be used.",
 	"modal.default_mention_user":         "Mention target (user)",
 	"modal.default_mention_user.hint":    "Pick a user from Slack's picker. For anything else (subteam, free text) use the field below.",
 	"modal.default_mention_text":         "Mention target (other)",
@@ -319,6 +323,33 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"modal.deleted":                      "Deleted settings for label \"%s\" 🗑️",
 	"modal.open_button.new":              "➕ Add a new label configuration",
 	"modal.open_button.edit":             "⚙️ Edit `%s` settings",
+
+	// ==================== Menu Modal ====================
+	"modal.menu.open_button":                "Open menu",
+	"modal.menu.title":                      "Review Bot Menu",
+	"modal.menu.close":                      "Close",
+	"modal.menu.back":                       "Back",
+	"modal.menu.header":                     "Pick an operation. Each button opens the matching screen.",
+	"modal.menu.section.view":               "*View*",
+	"modal.menu.section.edit":               "*Configure*",
+	"modal.menu.op.show_labels":             "All label settings",
+	"modal.menu.op.show_label_details":      "Label details",
+	"modal.menu.op.show_my_reviews":         "My review requests",
+	"modal.menu.op.show_reviewers":          "Reviewers",
+	"modal.menu.op.show_availability":       "Leave list",
+	"modal.menu.op.show_user_mappings":      "User mapping list",
+	"modal.menu.op.edit_settings":           "Edit label settings",
+	"modal.menu.op.new_label":               "New label",
+	"modal.menu.op.away":                    "Manage leave",
+	"modal.menu.op.user_mapping":            "User mapping",
+	"modal.menu.availability.unset":         "Remove",
+	"modal.menu.availability.confirm.title": "Remove leave",
+	"modal.menu.availability.confirm.text":  "This leave period will be removed. Continue?",
+	"modal.menu.availability.confirm.ok":    "Remove",
+	"modal.menu.availability.confirm.deny":  "Cancel",
+	"modal.menu.availability.unset_done":    "Removed leave for <@%s> (%s)",
+	"modal.menu.truncated":                  "%d more could not be shown.",
+	"modal.menu.truncated_text":             "The rest was too long to show.",
 
 	// ==================== Away Management Modal ====================
 	"modal.away.open_button":      "🌴 Manage availability",

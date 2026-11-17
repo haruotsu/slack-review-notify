@@ -25,6 +25,21 @@ func OpenView(triggerID string, view map[string]interface{}) error {
 	return postViewsAPI("/views.open", body)
 }
 
+// PushView posts to slack views.push, stacking a view on top of the modal the
+// trigger_id came from. Closing the pushed view returns to the one below it.
+func PushView(triggerID string, view map[string]interface{}) error {
+	if IsTestMode {
+		log.Printf("test mode: would push view with trigger_id=%s", triggerID)
+		return nil
+	}
+
+	body := map[string]interface{}{
+		"trigger_id": triggerID,
+		"view":       view,
+	}
+	return postViewsAPI("/views.push", body)
+}
+
 // UpdateView posts to slack views.update for re-rendering an existing modal.
 func UpdateView(viewID string, view map[string]interface{}) error {
 	if IsTestMode {

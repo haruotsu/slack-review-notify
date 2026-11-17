@@ -1,6 +1,8 @@
 package services
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slack-review-notify/i18n"
@@ -22,6 +24,19 @@ const LabelSelectActionID = "label_select"
 // wants to create a new label configuration. When this value is selected,
 // BuildSettingsModalView renders a new_label_name input below the dropdown.
 const CreateNewLabelSentinel = "__create_new__"
+
+// RenameLabelBlockID returns the block_id of the rename field for one label.
+//
+// The id is not a constant on purpose. Slack carries a typed value over a
+// views.update whenever the block_id is unchanged, so with a fixed id a name
+// typed while editing one label would still be in the field after the dropdown
+// switched to another, and saving would rename the wrong label. The label is
+// hashed rather than embedded because block_id is capped at 255 characters and
+// a label name is not.
+func RenameLabelBlockID(labelName string) string {
+	sum := sha1.Sum([]byte(labelName))
+	return "rename_label:" + hex.EncodeToString(sum[:8])
+}
 
 // SettingsModalMetadata is what we stash in `view.private_metadata`. Channel ID
 // and user ID are stable across re-renders of the modal; the currently-selected
@@ -93,8 +108,10 @@ func (e *ModalValidationError) Error() string {
 // SettingsForm is the parsed view_submission payload, ready to upsert into ChannelConfig.
 type SettingsForm struct {
 	LabelName                string
-	CreateNew                bool // true when the user picked the create-new sentinel
-	DeleteConfig             bool // true when the delete checkbox was checked
+	RenameTo                 string // new name for an existing label; empty keeps the current name
+	RenameBlockID            string // block the rename field was read from, for reporting errors on it
+	CreateNew                bool   // true when the user picked the create-new sentinel
+	DeleteConfig             bool   // true when the delete checkbox was checked
 	DefaultMentionID         string
 	ReviewerList             string
 	RepositoryList           string
@@ -335,6 +352,17 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 			t("modal.new_label_name.hint"),
 			"",
 			false,
+		))
+	} else {
+		// Kept apart from new_label_name: that field names a row being created,
+		// this one moves an existing row, and sharing a block would let a stale
+		// value from one mode act in the other after the dropdown re-renders.
+		blocks = append(blocks, plainInput(
+			RenameLabelBlockID(initialLabel),
+			t("modal.rename_label"),
+			t("modal.rename_label.hint"),
+			"",
+			true,
 		))
 	}
 
@@ -614,6 +642,17 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 	form.Language = selectField("language")
 	if form.Language != "ja" && form.Language != "en" {
 		errs["language"] = "must be ja or en"
+	}
+
+	if !form.CreateNew {
+		form.RenameBlockID = RenameLabelBlockID(form.LabelName)
+		form.RenameTo = field(form.RenameBlockID)
+		if form.RenameTo == form.LabelName {
+			form.RenameTo = ""
+		}
+		if form.RenameTo == CreateNewLabelSentinel {
+			errs[form.RenameBlockID] = i18n.TWithLang(form.Language, "modal.rename_label.reserved")
+		}
 	}
 
 	// A modal opened before this field existed submits without it. Rejecting the

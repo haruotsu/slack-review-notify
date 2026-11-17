@@ -132,6 +132,24 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		// Help's "Open menu" button → open the menu modal.
+		if actionID == services.OpenMenuActionID {
+			handleOpenMenu(c, db, payload)
+			return
+		}
+
+		// A button inside the menu → push the view for that operation.
+		if strings.HasPrefix(actionID, services.MenuActionPrefix) {
+			handleMenuAction(c, db, payload)
+			return
+		}
+
+		// "Remove" button on a row of the menu's leave list.
+		if actionID == services.MenuUnsetAwayActionID {
+			handleMenuUnsetAway(c, db, payload)
+			return
+		}
+
 		// "🌴 Manage availability" button → open the away-management modal.
 		if actionID == services.OpenAwayManagementActionID {
 			handleOpenAwayManagement(c, db, payload)

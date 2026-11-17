@@ -26,7 +26,7 @@ import (
 // matched against it to tell a subcommand apart from a label name, and the help text is
 // expected to document all of them.
 var subCommands = []string{
-	"show", "help", "show-my-reviews", "set-mention", "add-reviewer",
+	"show", "help", "menu", "show-my-reviews", "set-mention", "add-reviewer",
 	"show-reviewers", "clear-reviewers", "add-repo", "remove-repo",
 	"set-label", "activate", "deactivate", "set-reviewer-reminder-interval",
 	"set-business-hours-start", "set-business-hours-end", "set-timezone",
@@ -136,6 +136,12 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 					helpLang = getLang(&helpConfig)
 				}
 				showHelp(c, db, channelID, helpLang)
+				return
+			}
+
+			if subCommand == "menu" {
+				openMenuModal(db, c.PostForm("trigger_id"), channelID, userID)
+				c.Status(http.StatusOK)
 				return
 			}
 
@@ -366,6 +372,10 @@ func getLang(config *models.ChannelConfig) string {
 const maxAssignedReviews = 50
 
 func showAssignedReviews(c *gin.Context, db *gorm.DB, userID, lang string) {
+	respondEphemeral(c, assignedReviewsText(db, userID, lang))
+}
+
+func assignedReviewsText(db *gorm.DB, userID, lang string) string {
 	t := i18n.L(lang)
 	userID = strings.TrimSpace(userID)
 	var tasks []models.ReviewTask
@@ -375,8 +385,7 @@ func showAssignedReviews(c *gin.Context, db *gorm.DB, userID, lang string) {
 		Order("created_at ASC").Order("id ASC").Find(&tasks)
 	if result.Error != nil {
 		log.Printf("assigned review list query error: %v", result.Error)
-		respondEphemeral(c, t("cmd.reviews.error"))
-		return
+		return t("cmd.reviews.error")
 	}
 
 	assigned := make([]models.ReviewTask, 0, len(tasks))
@@ -387,8 +396,7 @@ func showAssignedReviews(c *gin.Context, db *gorm.DB, userID, lang string) {
 	}
 
 	if len(assigned) == 0 {
-		respondEphemeral(c, t("cmd.reviews.empty"))
-		return
+		return t("cmd.reviews.empty")
 	}
 
 	var response strings.Builder
@@ -408,7 +416,7 @@ func showAssignedReviews(c *gin.Context, db *gorm.DB, userID, lang string) {
 		response.WriteString(t("cmd.reviews.truncated", len(assigned)-displayCount))
 	}
 
-	respondEphemeral(c, response.String())
+	return response.String()
 }
 
 func isAssignedReview(task models.ReviewTask, userID string) bool {
@@ -516,12 +524,18 @@ func showHelp(c *gin.Context, db *gorm.DB, channelID, lang string) {
 	))
 	flush()
 
-	// "🌴 休暇管理を開く" and "👥 ユーザーマッピング" live in their own row
-	// so they're visually separated from the per-label settings buttons.
-	// Different domain (per-user, not per-label), different modals.
+	// The menu, leave and user-mapping buttons live in their own row so they
+	// are visually separated from the per-label settings buttons: none of the
+	// three is scoped to one label.
 	actionBlocks = append(actionBlocks, map[string]interface{}{
 		"type": "actions",
 		"elements": []map[string]interface{}{
+			services.CreateButton(
+				t("modal.menu.open_button"),
+				services.OpenMenuActionID,
+				"",
+				"",
+			),
 			services.CreateButton(
 				t("modal.away.open_button"),
 				services.OpenAwayManagementActionID,
@@ -562,18 +576,20 @@ func showHelp(c *gin.Context, db *gorm.DB, channelID, lang string) {
 
 // showAllLabels displays all label configurations
 func showAllLabels(c *gin.Context, db *gorm.DB, channelID, lang string) {
+	c.String(200, allLabelsText(db, channelID, lang))
+}
+
+func allLabelsText(db *gorm.DB, channelID, lang string) string {
 	t := i18n.L(lang)
 	var configs []models.ChannelConfig
 
 	err := db.Where("slack_channel_id = ?", channelID).Find(&configs).Error
 	if err != nil {
-		c.String(200, t("cmd.show.error"))
-		return
+		return t("cmd.show.error")
 	}
 
 	if len(configs) == 0 {
-		c.String(200, t("cmd.show.no_config"))
-		return
+		return t("cmd.show.no_config")
 	}
 
 	response := t("cmd.show.header")
@@ -589,18 +605,21 @@ func showAllLabels(c *gin.Context, db *gorm.DB, channelID, lang string) {
 
 	response += t("cmd.show.footer")
 
-	c.String(200, response)
+	return response
 }
 
 // showConfig displays the configuration
 func showConfig(c *gin.Context, db *gorm.DB, channelID, labelName, lang string) {
+	c.String(200, configText(db, channelID, labelName, lang))
+}
+
+func configText(db *gorm.DB, channelID, labelName, lang string) string {
 	t := i18n.L(lang)
 	var config models.ChannelConfig
 
 	err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config).Error
 	if err != nil {
-		c.String(200, t("cmd.show_config.no_config", labelName, labelName))
-		return
+		return t("cmd.show_config.no_config", labelName, labelName)
 	}
 
 	status := t("common.inactive")
@@ -633,10 +652,8 @@ func showConfig(c *gin.Context, db *gorm.DB, channelID, labelName, lang string) 
 		notifyOnHolidays = t("cmd.show_config.notify_on_holidays.on")
 	}
 
-	response := t("cmd.show_config.response", labelName, status, config.DefaultMentionID, formatReviewerList(config.ReviewerList, lang),
+	return t("cmd.show_config.response", labelName, status, config.DefaultMentionID, formatReviewerList(config.ReviewerList, lang),
 		config.RepositoryList, reviewerReminderInterval, config.BusinessHoursStart, config.BusinessHoursEnd, timezone, notifyOnHolidays, requiredApprovals, language)
-
-	c.String(200, response)
 }
 
 // formatReviewerList formats the reviewer list for display
@@ -767,22 +784,23 @@ func addReviewers(c *gin.Context, db *gorm.DB, channelID, labelName, reviewerIDs
 
 // showReviewers displays the reviewer list
 func showReviewers(c *gin.Context, db *gorm.DB, channelID, labelName, lang string) {
+	c.String(200, reviewersText(db, channelID, labelName, lang))
+}
+
+func reviewersText(db *gorm.DB, channelID, labelName, lang string) string {
 	t := i18n.L(lang)
 	var config models.ChannelConfig
 
 	err := db.Where("slack_channel_id = ? AND label_name = ?", channelID, labelName).First(&config).Error
 	if err != nil {
-		c.String(200, t("cmd.show_reviewers.no_config", labelName, labelName))
-		return
+		return t("cmd.show_reviewers.no_config", labelName, labelName)
 	}
 
 	if config.ReviewerList == "" {
-		c.String(200, t("cmd.show_reviewers.empty", labelName, labelName))
-		return
+		return t("cmd.show_reviewers.empty", labelName, labelName)
 	}
 
-	response := t("cmd.show_reviewers.header", labelName, formatReviewerList(config.ReviewerList, lang))
-	c.String(200, response)
+	return t("cmd.show_reviewers.header", labelName, formatReviewerList(config.ReviewerList, lang))
 }
 
 // clearReviewers clears the reviewer list
@@ -1328,18 +1346,20 @@ func mapUser(c *gin.Context, db *gorm.DB, params, lang string) {
 }
 
 func showUserMappings(c *gin.Context, db *gorm.DB, lang string) {
+	c.String(200, userMappingsText(db, lang))
+}
+
+func userMappingsText(db *gorm.DB, lang string) string {
 	t := i18n.L(lang)
 	var mappings []models.UserMapping
 
 	if err := db.Find(&mappings).Error; err != nil {
 		log.Printf("failed to get user mappings: %v", err)
-		c.String(200, t("cmd.show_user_mappings.error"))
-		return
+		return t("cmd.show_user_mappings.error")
 	}
 
 	if len(mappings) == 0 {
-		c.String(200, t("cmd.show_user_mappings.empty"))
-		return
+		return t("cmd.show_user_mappings.empty")
 	}
 
 	response := t("cmd.show_user_mappings.header")
@@ -1347,7 +1367,7 @@ func showUserMappings(c *gin.Context, db *gorm.DB, lang string) {
 		response += fmt.Sprintf("• GitHub: `%s` → Slack: <@%s>\n", mapping.GithubUsername, mapping.SlackUserID)
 	}
 
-	c.String(200, response)
+	return response
 }
 
 func removeUserMapping(c *gin.Context, db *gorm.DB, githubUsername, lang string) {
@@ -1791,14 +1811,8 @@ func formatDateRange(awayFrom, awayUntil *time.Time, t func(string, ...interface
 func showAvailability(c *gin.Context, db *gorm.DB, channelID, lang string) {
 	t := i18n.L(lang)
 	loc := resolveAwayTimezone(db, channelID)
-	var records []models.ReviewerAvailability
 	now := time.Now()
-
-	// Get non-expired records (currently away or scheduled for the future).
-	// Order by user then start date so a user's multiple periods stay grouped.
-	db.Where("away_until IS NULL OR away_until > ?", now.UTC()).
-		Order("slack_user_id, away_from").
-		Find(&records)
+	records := activeAvailabilityRecords(db, now)
 
 	if len(records) == 0 {
 		c.String(200, t("cmd.show_availability.empty"))
@@ -1807,32 +1821,47 @@ func showAvailability(c *gin.Context, db *gorm.DB, channelID, lang string) {
 
 	response := t("cmd.show_availability.header")
 	for _, r := range records {
-		// Bounds come back from SQLite in UTC; render them in the channel's
-		// timezone so the wall-clock times match what was registered. This must
-		// happen before formatDateRange, whose 00:00:00 / 23:59:59 full-day
-		// checks only hold in the timezone the period was written in.
-		awayFrom := models.InLocation(r.AwayFrom, loc)
-		awayUntil := models.InLocation(r.AwayUntil, loc)
-
-		// Determine status: scheduled (AwayFrom is in the future) or currently away
-		isScheduled := awayFrom != nil && awayFrom.After(now)
-		var statusLabel string
-		if isScheduled {
-			statusLabel = t("cmd.show_availability.status_scheduled")
-		} else {
-			statusLabel = t("cmd.show_availability.status_away")
-		}
-
-		line := fmt.Sprintf("• <@%s> [%s] ", r.SlackUserID, statusLabel)
-		line += formatDateRange(awayFrom, awayUntil, t)
-
-		if r.Reason != "" {
-			line += t("common.reason_paren", r.Reason)
-		}
-		response += line + "\n"
+		response += "• " + availabilityLine(r, loc, now, lang) + "\n"
 	}
 
 	c.String(200, response)
+}
+
+// activeAvailabilityRecords returns the non-expired leave periods (currently away
+// or scheduled for the future), ordered by user then start date so a user's
+// multiple periods stay grouped.
+func activeAvailabilityRecords(db *gorm.DB, now time.Time) []models.ReviewerAvailability {
+	var records []models.ReviewerAvailability
+	db.Where("away_until IS NULL OR away_until > ?", now.UTC()).
+		Order("slack_user_id, away_from").
+		Find(&records)
+	return records
+}
+
+// availabilityLine renders one leave period as "<@user> [status] period (reason)".
+func availabilityLine(r models.ReviewerAvailability, loc *time.Location, now time.Time, lang string) string {
+	t := i18n.L(lang)
+
+	// Bounds come back from SQLite in UTC; render them in the channel's
+	// timezone so the wall-clock times match what was registered. This must
+	// happen before formatDateRange, whose 00:00:00 / 23:59:59 full-day
+	// checks only hold in the timezone the period was written in.
+	awayFrom := models.InLocation(r.AwayFrom, loc)
+	awayUntil := models.InLocation(r.AwayUntil, loc)
+
+	// Determine status: scheduled (AwayFrom is in the future) or currently away
+	statusLabel := t("cmd.show_availability.status_away")
+	if awayFrom != nil && awayFrom.After(now) {
+		statusLabel = t("cmd.show_availability.status_scheduled")
+	}
+
+	line := fmt.Sprintf("<@%s> [%s] ", r.SlackUserID, statusLabel)
+	line += formatDateRange(awayFrom, awayUntil, t)
+
+	if r.Reason != "" {
+		line += t("common.reason_paren", r.Reason)
+	}
+	return line
 }
 
 // setRequiredApprovals sets the number of required approvals

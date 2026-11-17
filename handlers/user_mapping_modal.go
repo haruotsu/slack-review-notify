@@ -19,23 +19,7 @@ import (
 // can render them — important so the operator can spot legacy non-U-id rows
 // that still need re-registration.
 func handleOpenUserMapping(c *gin.Context, db *gorm.DB, payload SlackActionPayload) {
-	channelID := payload.Container.ChannelID
-	userID := payload.User.ID
-
-	configs := loadChannelConfigs(db, channelID)
-	lang := pickModalLanguage(configs, "")
-
-	var mappings []models.UserMapping
-	if err := db.Order("github_username").Find(&mappings).Error; err != nil {
-		log.Printf("user-mapping modal: failed to list mappings: %v", err)
-	}
-
-	view := services.BuildUserMappingModalView(services.UserMappingModalInputs{
-		ChannelID: channelID,
-		UserID:    userID,
-		Lang:      lang,
-		Mappings:  mappings,
-	})
+	view := userMappingModalView(db, payload.Container.ChannelID, payload.User.ID)
 	triggerID := payload.TriggerID
 
 	go func() {
@@ -45,6 +29,22 @@ func handleOpenUserMapping(c *gin.Context, db *gorm.DB, payload SlackActionPaylo
 	}()
 
 	c.Status(http.StatusOK)
+}
+
+func userMappingModalView(db *gorm.DB, channelID, userID string) map[string]any {
+	configs := loadChannelConfigs(db, channelID)
+
+	var mappings []models.UserMapping
+	if err := db.Order("github_username").Find(&mappings).Error; err != nil {
+		log.Printf("user-mapping modal: failed to list mappings: %v", err)
+	}
+
+	return services.BuildUserMappingModalView(services.UserMappingModalInputs{
+		ChannelID: channelID,
+		UserID:    userID,
+		Lang:      pickModalLanguage(configs, ""),
+		Mappings:  mappings,
+	})
 }
 
 // handleUserMappingModalSubmission upserts or deletes a single row.
