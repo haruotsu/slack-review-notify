@@ -882,9 +882,10 @@ test.describe("29. Multiple labels per channel", () => {
 // ── 30. Edge cases ───────────────────────────────────────────────
 
 test.describe("30. Edge cases", () => {
-  test("30-1. empty command shows help", async ({ request }) => {
+  test("30-1. empty command opens the menu instead of posting help", async ({ request }) => {
+    // The menu is a modal, so the command itself answers with an empty body.
     const res = await slackCmd(request, "");
-    expect(res).toContain("Bot設定コマンド");
+    expect(res).toBe("");
   });
 
   test("30-2. quoted label name with spaces", async ({ request }) => {
