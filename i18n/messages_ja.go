@@ -380,6 +380,8 @@ var messagesJa = map[string]string{
 	"notify.business_hours_morning":  "🌅 *おはようございます！* %s\n\n📋 こちらのPRのレビューをお願いします。%s",
 	"notify.reviewer_in_morning":     "\n\n🎯 *レビュワー*: %s さん、よろしくお願いします！",
 	"notify.reminder":                "%s レビューしてくれたら嬉しいです...👀",
+	"notify.reminder.away_note":      "\n※ 休暇中のレビュワー %d 人にはメンションしていません。交代する場合は「変わってほしい！」を押してください。",
+	"notify.reminder.all_away":       "レビューしてくれたら嬉しいです...👀\n※ レビュワー全員（%d 人）が休暇中のため、メンションしていません。交代する場合は「変わってほしい！」を押してください。",
 	"notify.out_of_hours_reminder":   "%s レビューしてくれたら嬉しいです...👀\n\n営業時間外のため、次回のリマインドは翌営業日に送信します。",
 
 	"notify.reminder_paused.1h":      "はい！1時間リマインドをストップします！",
@@ -391,6 +393,7 @@ var messagesJa = map[string]string{
 
 	"notify.reviewer_auto_assigned":  "自動でレビュワーが割り当てられました: %s レビューをお願いします！",
 	"notify.reviewer_changed":        "レビュワーを変更しました: %s → %s さん、よろしくお願いします！",
+	"notify.reviewer_already_replaced": "このレビュワーは既に交代済みか、レビューを終えています。",
 	"notify.cannot_change_reviewer":  "レビュワーが1人しか登録されていないため、変更できません。他のレビュワーを登録してください。",
 
 	"notify.task_completed":   "✅ *%s*\n🔗 %s\n\n*レビュー完了*: このPRのラベルが外れたため、レビュータスクを終了しました。",

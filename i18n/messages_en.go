@@ -380,6 +380,8 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"notify.business_hours_morning":  "🌅 *Good morning!* %s\n\n📋 Please review this PR. %s",
 	"notify.reviewer_in_morning":     "\n\n🎯 *Reviewer*: %s, please take a look!",
 	"notify.reminder":                "%s Would love a review! 👀",
+	"notify.reminder.away_note":      "\n* Not mentioning %d reviewer(s) on leave. Press \"Change Reviewer!\" to hand the review over.",
+	"notify.reminder.all_away":       "Would love a review! 👀\n* All reviewers (%d) are on leave, so nobody was mentioned. Press \"Change Reviewer!\" to hand the review over.",
 	"notify.out_of_hours_reminder":   "%s Would love a review! 👀\n\nOutside business hours - next reminder will be sent on the next business day.",
 
 	"notify.reminder_paused.1h":      "Got it! Pausing reminders for 1 hour!",
@@ -391,6 +393,7 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 
 	"notify.reviewer_auto_assigned":  "Reviewer auto-assigned: %s Please review!",
 	"notify.reviewer_changed":        "Reviewer changed: %s → %s, please take a look!",
+	"notify.reviewer_already_replaced": "This reviewer has already been replaced or finished reviewing.",
 	"notify.cannot_change_reviewer":  "Cannot change reviewer - only one reviewer is registered. Please add more reviewers.",
 
 	"notify.task_completed":   "✅ *%s*\n🔗 %s\n\n*Review Complete*: The review task has been closed because the PR label was removed.",

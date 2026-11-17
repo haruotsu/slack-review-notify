@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -303,6 +304,18 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			if err := db.Where("id = ?", taskID).First(&taskToUpdate).Error; err != nil {
 				log.Printf("task id %s not found: %v", taskID, err)
 				c.JSON(http.StatusNotFound, gin.H{"error": "task not found by ID"})
+				return
+			}
+
+			// Every reminder leaves a button naming the absent reviewer, so a
+			// stale one can arrive after that reviewer was already swapped out or
+			// finished; acting on it would announce a swap that changes nothing.
+			if replacingReviewerID != "" && !slices.Contains(services.GetPendingReviewers(taskToUpdate), replacingReviewerID) {
+				t := i18n.L(taskToUpdate.Language)
+				if err := services.PostEphemeral(taskToUpdate.SlackChannel, payload.User.ID, t("notify.reviewer_already_replaced")); err != nil {
+					log.Printf("already-replaced notice error: %v", err)
+				}
+				c.Status(http.StatusOK)
 				return
 			}
 
