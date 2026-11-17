@@ -165,6 +165,20 @@ func TestChangeReviewerModal_SingleReviewer_BlankSuccessorDraws(t *testing.T) {
 	assert.Equal(t, got.Reviewer, got.Reviewers)
 }
 
+func TestChangeReviewerModal_LegacyTaskWithNullReviewersColumn(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+	db := setupTestDB(t)
+	seedMultiReviewerTask(t, db)
+	require.NoError(t, db.Exec("UPDATE review_tasks SET reviewers = NULL WHERE id = ?", "task-multi").Error)
+
+	submitChangeReviewerModal(t, db, "task-multi", "UAAA", "UCCC")
+
+	var got models.ReviewTask
+	require.NoError(t, db.Where("id = ?", "task-multi").First(&got).Error)
+	assert.Equal(t, "UCCC", got.Reviewer, "reviewers 列追加前のタスクも交代できること")
+}
+
 func TestChangeReviewerModal_SingleReviewer_StaleTargetShowsErrorOnSuccessorBlock(t *testing.T) {
 	services.IsTestMode = true
 	defer func() { services.IsTestMode = false }()
