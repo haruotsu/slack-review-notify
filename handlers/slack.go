@@ -132,6 +132,21 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		if actionID == services.OpenMenuActionID {
+			handleOpenMenu(c, db, payload)
+			return
+		}
+
+		if strings.HasPrefix(actionID, services.MenuActionPrefix) {
+			handleMenuAction(c, db, payload)
+			return
+		}
+
+		if actionID == services.MenuUnsetAwayActionID {
+			handleMenuUnsetAway(c, db, payload)
+			return
+		}
+
 		// "🌴 Manage availability" button → open the away-management modal.
 		if actionID == services.OpenAwayManagementActionID {
 			handleOpenAwayManagement(c, db, payload)

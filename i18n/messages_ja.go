@@ -24,6 +24,7 @@ var messagesJa = map[string]string{
 • [ラベル名] show - 指定ラベルの詳細設定を表示
 • show-my-reviews - 自分宛ての未完了レビュー依頼を全チャンネルから表示
 • help - このヘルプを表示
+• menu（または引数なし） - 操作メニューをモーダルで開く（以下の操作をボタンから実行）
 
 *リポジトリ・メンション*
 • [ラベル名] add-repo owner/repo1,owner/repo2 - 対象リポジトリを追加（必須）
@@ -283,6 +284,9 @@ var messagesJa = map[string]string{
 	"modal.label_select.create_new":      "+ 新規ラベルを作成…",
 	"modal.new_label_name":               "新しいラベル名",
 	"modal.new_label_name.hint":          "GitHub PR に付与されるラベル名と一致させる必要があります。",
+	"modal.rename_label":                 "ラベル名を変更",
+	"modal.rename_label.hint":            "変更する場合だけ新しいラベル名を入力します。空欄ならラベル名は変わりません。",
+	"modal.rename_label.reserved":        "このラベル名は使用できません。",
 	"modal.default_mention_user":         "メンション先 (個人)",
 	"modal.default_mention_user.hint":    "Slack のユーザーピッカーから個人を選択。それ以外 (サブチーム / 装飾テキスト) は下の欄。",
 	"modal.default_mention_text":         "メンション先 (その他)",
@@ -319,6 +323,33 @@ var messagesJa = map[string]string{
 	"modal.deleted":                      "ラベル「%s」の設定を削除しました 🗑️",
 	"modal.open_button.new":              "➕ 新規ラベル設定を追加",
 	"modal.open_button.edit":             "⚙️ `%s` の設定を編集",
+
+	// ==================== Menu Modal ====================
+	"modal.menu.open_button":                "メニューを開く",
+	"modal.menu.title":                      "Review通知Bot メニュー",
+	"modal.menu.close":                      "閉じる",
+	"modal.menu.back":                       "戻る",
+	"modal.menu.header":                     "操作を選んでください。ボタンを押すと対応する画面が開きます。",
+	"modal.menu.section.view":               "*見る*",
+	"modal.menu.section.edit":               "*設定する*",
+	"modal.menu.op.show_labels":             "全ラベル設定",
+	"modal.menu.op.show_label_details":      "ラベル詳細",
+	"modal.menu.op.show_my_reviews":         "自分宛てレビュー",
+	"modal.menu.op.show_reviewers":          "レビュワー一覧",
+	"modal.menu.op.show_availability":       "休暇一覧",
+	"modal.menu.op.show_user_mappings":      "ユーザーマッピング一覧",
+	"modal.menu.op.edit_settings":           "ラベル設定を編集",
+	"modal.menu.op.new_label":               "新規ラベル",
+	"modal.menu.op.away":                    "休暇管理",
+	"modal.menu.op.user_mapping":            "ユーザーマッピング",
+	"modal.menu.availability.unset":         "解除",
+	"modal.menu.availability.confirm.title": "休暇を解除",
+	"modal.menu.availability.confirm.text":  "この休暇を解除します。よろしいですか？",
+	"modal.menu.availability.confirm.ok":    "解除する",
+	"modal.menu.availability.confirm.deny":  "やめる",
+	"modal.menu.availability.unset_done":    "<@%s> の休暇（%s）を解除しました",
+	"modal.menu.truncated":                  "ほか %d 件は表示しきれませんでした。",
+	"modal.menu.truncated_text":             "表示しきれない分は省略しました。",
 
 	// ==================== Away Management Modal ====================
 	"modal.away.open_button":      "🌴 休暇管理を開く",

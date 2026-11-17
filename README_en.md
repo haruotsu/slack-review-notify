@@ -100,6 +100,7 @@ Full command list (also available via `/slack-review-notify help`)
 Command format: `/slack-review-notify [label-name] subcommand [args]`
 
 - `/slack-review-notify help`: Show command help
+- `/slack-review-notify` (no arguments) or `/slack-review-notify menu`: Open the operation menu as a modal. Every operation below can be picked from its buttons: the "View" group shows label settings, your review requests, reviewers, leave and user mappings inside the modal, and the "Configure" group opens the label settings, leave and user mapping modals. The same menu opens from the **Open menu** button under `help`. In the leave list each period has a **Remove** button, and the label settings modal has a "Rename label" field.
 - `/slack-review-notify show`: Show all label configurations for the channel
 
 **Omitting [label-name] uses the default label "needs-review"**

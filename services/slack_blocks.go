@@ -15,6 +15,9 @@ const (
 	SlackSectionTextLimit = 3000
 	SlackButtonTextLimit  = 75
 	SlackMaxBlocks        = 50
+	// Modals have their own, larger block cap; SlackMaxBlocks is the one for messages.
+	SlackModalMaxBlocks  = 100
+	SlackModalTitleLimit = 24
 )
 
 // PauseOption is a struct for reminder pause options

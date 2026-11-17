@@ -100,6 +100,19 @@ func pickModalLanguage(configs []*models.ChannelConfig, selectedLabel string) st
 	return "ja"
 }
 
+// settingsModalView builds the settings modal for one channel with the given
+// label (or the create-new sentinel) preselected.
+func settingsModalView(db *gorm.DB, channelID, userID, selectedLabel string) map[string]any {
+	configs := loadChannelConfigs(db, channelID)
+	return services.BuildSettingsModalView(services.SettingsModalInputs{
+		ChannelID:     channelID,
+		UserID:        userID,
+		SelectedLabel: selectedLabel,
+		Configs:       configs,
+		Lang:          pickModalLanguage(configs, selectedLabel),
+	})
+}
+
 // handleOpenSettings is invoked when the user clicks an "Open Settings" button.
 // The button's value carries the initially-selected label (or the create-new
 // sentinel). We load all the channel's label configs and open the modal with
@@ -113,16 +126,7 @@ func handleOpenSettings(c *gin.Context, db *gorm.DB, payload SlackActionPayload)
 		selectedLabel = "needs-review"
 	}
 
-	configs := loadChannelConfigs(db, channelID)
-	lang := pickModalLanguage(configs, selectedLabel)
-
-	view := services.BuildSettingsModalView(services.SettingsModalInputs{
-		ChannelID:     channelID,
-		UserID:        userID,
-		SelectedLabel: selectedLabel,
-		Configs:       configs,
-		Lang:          lang,
-	})
+	view := settingsModalView(db, channelID, userID, selectedLabel)
 	triggerID := payload.TriggerID
 
 	go func() {
@@ -156,16 +160,7 @@ func handleLabelSelectChanged(c *gin.Context, db *gorm.DB, payload SlackActionPa
 		newSelected = services.CreateNewLabelSentinel
 	}
 
-	configs := loadChannelConfigs(db, meta.ChannelID)
-	lang := pickModalLanguage(configs, newSelected)
-
-	view := services.BuildSettingsModalView(services.SettingsModalInputs{
-		ChannelID:     meta.ChannelID,
-		UserID:        meta.UserID,
-		SelectedLabel: newSelected,
-		Configs:       configs,
-		Lang:          lang,
-	})
+	view := settingsModalView(db, meta.ChannelID, meta.UserID, newSelected)
 
 	viewID := payload.View.ID
 	go func() {
@@ -258,8 +253,30 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 		}
 	}
 
+	// A rename must not silently take over another label's row either.
+	if form.RenameTo != "" {
+		var dup models.ChannelConfig
+		if err := db.Where("slack_channel_id = ? AND label_name = ?", meta.ChannelID, form.RenameTo).First(&dup).Error; err == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"response_action": "errors",
+				"errors":          gin.H{form.RenameBlockID: i18n.TWithLang(form.Language, "cmd.set_label.already_exists", form.RenameTo)},
+			})
+			return
+		}
+	}
+
 	var cfg models.ChannelConfig
 	result := db.Where("slack_channel_id = ? AND label_name = ?", meta.ChannelID, form.LabelName).First(&cfg)
+	if result.Error != nil && form.RenameTo != "" {
+		// The label was removed while the modal was open. Falling through would
+		// create a fresh row under the new name and announce a rename that never
+		// happened.
+		c.JSON(http.StatusOK, gin.H{
+			"response_action": "errors",
+			"errors":          gin.H{form.RenameBlockID: i18n.TWithLang(form.Language, "cmd.set_label.no_config", form.LabelName)},
+		})
+		return
+	}
 	if result.Error != nil {
 		cfg = models.ChannelConfig{
 			ID:             uuid.NewString(),
@@ -283,6 +300,9 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 	}
 	cfg.IsActive = form.IsActive
 	cfg.UpdatedAt = now
+	if form.RenameTo != "" {
+		cfg.LabelName = form.RenameTo
+	}
 
 	if result.Error != nil {
 		if err := db.Create(&cfg).Error; err != nil {
@@ -306,7 +326,10 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 
 	if !services.IsTestMode {
 		// Post visibly so the whole channel sees the config change.
-		msg := i18n.TWithLang(form.Language, "modal.saved", form.LabelName)
+		msg := i18n.TWithLang(form.Language, "modal.saved", cfg.LabelName)
+		if form.RenameTo != "" {
+			msg = i18n.TWithLang(form.Language, "cmd.set_label.success", form.LabelName, form.RenameTo) + "\n" + msg
+		}
 		if err := services.PostChannelMessage(meta.ChannelID, msg); err != nil {
 			log.Printf("settings saved confirmation post failed: %v", err)
 		}
