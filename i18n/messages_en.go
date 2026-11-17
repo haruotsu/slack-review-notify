@@ -196,6 +196,23 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"modal.user_mapping.deleted":                     "Deleted mapping for GitHub user `%s`.",
 	"modal.user_mapping.delete_not_found":            "No mapping found for GitHub user `%s`.",
 
+	// ==================== Change Reviewer Modal ====================
+	"modal.change_reviewer.title":                      "Change Reviewer",
+	"modal.change_reviewer.submit":                     "Change",
+	"modal.change_reviewer.close":                      "Cancel",
+	"modal.change_reviewer.header":                     "*%s*\n<%s>",
+	"modal.change_reviewer.target":                     "Reviewer to replace",
+	"modal.change_reviewer.new":                        "New reviewer",
+	"modal.change_reviewer.new.hint":                   "Leave blank to pick one at random from the reviewer list.",
+	"modal.change_reviewer.error.target_required":      "Please pick the reviewer to replace.",
+	"modal.change_reviewer.error.target_not_assigned":  "This reviewer is no longer assigned. Please reopen the modal.",
+	"modal.change_reviewer.error.no_candidate":         "No one is left to pick at random. Please choose the new reviewer directly.",
+	"modal.change_reviewer.error.new_not_resolved":     "Could not resolve the Slack user ID.",
+	"modal.change_reviewer.error.new_is_author":        "The PR author cannot be a reviewer.",
+	"modal.change_reviewer.error.new_already_assigned": "This user is already a reviewer.",
+	"modal.change_reviewer.error.task_not_found":       "Task not found.",
+	"modal.change_reviewer.error.save_failed":          "Failed to save. Please try again in a moment.",
+
 	"cmd.map_user.usage":        "Usage: /slack-review-notify map-user <github-username> @slack-user\nExample: /slack-review-notify map-user octocat @user",
 	"cmd.map_user.invalid":      "Please specify both a GitHub username and a Slack user ID.",
 	"cmd.map_user.updated":      "Updated mapping for GitHub user `%s` to <@%s>.",

@@ -196,6 +196,23 @@ var messagesJa = map[string]string{
 	"modal.user_mapping.deleted":                     "GitHubユーザー `%s` のマッピングを削除しました。",
 	"modal.user_mapping.delete_not_found":            "GitHubユーザー `%s` のマッピングは存在しません。",
 
+	// ==================== Change Reviewer Modal ====================
+	"modal.change_reviewer.title":                      "レビュワー変更",
+	"modal.change_reviewer.submit":                     "変更する",
+	"modal.change_reviewer.close":                      "キャンセル",
+	"modal.change_reviewer.header":                     "*%s*\n<%s>",
+	"modal.change_reviewer.target":                     "交代するレビュワー",
+	"modal.change_reviewer.new":                        "新しいレビュワー",
+	"modal.change_reviewer.new.hint":                   "空欄のままにするとレビュワーリストからランダムに選びます。",
+	"modal.change_reviewer.error.target_required":      "交代するレビュワーを選んでください。",
+	"modal.change_reviewer.error.target_not_assigned":  "このレビュワーは既に担当から外れています。モーダルを開き直してください。",
+	"modal.change_reviewer.error.no_candidate":         "ランダムに選べる候補がいません。新しいレビュワーを直接指定してください。",
+	"modal.change_reviewer.error.new_not_resolved":     "SlackユーザーIDが解決できませんでした。",
+	"modal.change_reviewer.error.new_is_author":        "PR作成者はレビュワーにできません。",
+	"modal.change_reviewer.error.new_already_assigned": "このユーザーは既にレビュワーです。",
+	"modal.change_reviewer.error.task_not_found":       "タスクが見つかりませんでした。",
+	"modal.change_reviewer.error.save_failed":          "保存に失敗しました。時間をおいて再度お試しください。",
+
 	"cmd.map_user.usage":        "使用方法: /slack-review-notify map-user <github-username> @slack-user\n例: /slack-review-notify map-user octocat @user",
 	"cmd.map_user.invalid":      "GitHubユーザー名とSlackユーザーIDの両方を指定してください。",
 	"cmd.map_user.updated":      "GitHubユーザー `%s` のマッピングを <@%s> に更新しました。",

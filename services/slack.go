@@ -1034,10 +1034,10 @@ func formatReviewerMentions(reviewerIDs string) string {
 }
 
 // SendReviewerChangedMessage notifies that the reviewer has been changed
-func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID string) error {
+func SendReviewerChangedMessage(task models.ReviewTask, oldReviewerID, newReviewerID string) error {
 	t := i18n.L(task.Language)
 	oldMentions := formatReviewerMentions(oldReviewerID)
-	newMentions := formatReviewerMentions(task.Reviewer)
+	newMentions := formatReviewerMentions(newReviewerID)
 
 	message := t("notify.reviewer_changed", oldMentions, newMentions)
 	return PostToThread(task.SlackChannel, task.SlackTS, message)
