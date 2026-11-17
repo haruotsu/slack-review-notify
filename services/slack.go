@@ -791,7 +791,7 @@ func BuildReviewerReminderBlocks(task models.ReviewTask, awayIDs []string) []map
 	// The plain change button replaces task.Reviewer, who may be someone still
 	// at work; naming the absent reviewer in the value makes the swap hit them.
 	// With several absent, one per press: the next reminder targets the next.
-	changeButton := CreateButton(t("button.change_reviewer"), "change_reviewer", task.ID+":"+awayReviewers[0], "danger")
+	changeButton := CreateChangeReviewerButton(task.ID+":"+awayReviewers[0], task.Language)
 	return CreateMessageWithActionsBlocks(message, changeButton, pauseSelect)
 }
 
