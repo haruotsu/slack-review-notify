@@ -101,6 +101,10 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			handleUserMappingModalSubmission(c, db, payload)
 			return
 		}
+		if payload.Type == "view_submission" && payload.View != nil && payload.View.CallbackID == services.ChangeReviewerModalCallbackID {
+			handleChangeReviewerModalSubmission(c, db, payload)
+			return
+		}
 
 		slackUserID := payload.User.ID
 		ts := payload.Message.Ts
@@ -308,38 +312,13 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				db.Save(&taskToUpdate)
 			}
 
-			// Exclusions: PR author + other current reviewers
-			excludeIDs := []string{}
-			if taskToUpdate.PRAuthorSlackID != "" {
-				excludeIDs = append(excludeIDs, taskToUpdate.PRAuthorSlackID)
-			}
-			if taskToUpdate.Reviewers != "" {
-				for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
-					if trimmed := strings.TrimSpace(id); trimmed != "" {
-						excludeIDs = append(excludeIDs, trimmed)
-					}
-				}
-			} else if taskToUpdate.Reviewer != "" {
-				excludeIDs = append(excludeIDs, taskToUpdate.Reviewer)
+			if replacingReviewerID == "" && services.UsesChangeReviewerModal(taskToUpdate) {
+				handleOpenChangeReviewerModal(c, payload, taskToUpdate)
+				return
 			}
 
-			// Select one new reviewer
-			newReviewerIDs := services.SelectRandomReviewers(db, taskToUpdate.SlackChannel, taskToUpdate.LabelName, 1, excludeIDs)
-
-			// No real candidates if SelectRandomReviewers only returned DefaultMentionID
-			noRealCandidate := false
-			if len(newReviewerIDs) == 0 {
-				noRealCandidate = true
-			} else {
-				var cfg models.ChannelConfig
-				if err := db.Where("slack_channel_id = ? AND label_name = ?", taskToUpdate.SlackChannel, taskToUpdate.LabelName).First(&cfg).Error; err == nil {
-					if cfg.ReviewerList != "" && len(newReviewerIDs) == 1 && newReviewerIDs[0] == cfg.DefaultMentionID {
-						noRealCandidate = true
-					}
-				}
-			}
-
-			if noRealCandidate {
+			newReviewerID, ok := services.DrawReplacementReviewer(db, taskToUpdate, false)
+			if !ok {
 				t := i18n.L(taskToUpdate.Language)
 				message := t("notify.cannot_change_reviewer")
 				if err := services.PostToThread(taskToUpdate.SlackChannel, taskToUpdate.SlackTS, message); err != nil {
@@ -348,48 +327,17 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				c.Status(http.StatusOK)
 				return
 			}
-			newReviewerID := newReviewerIDs[0]
 
-			// Save the old reviewer ID
 			oldReviewerID := taskToUpdate.Reviewer
-
-			// Update the Reviewers field
-			if replacingReviewerID != "" && taskToUpdate.Reviewers != "" {
-				// Replace a specific reviewer
-				var updatedReviewers []string
-				for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
-					trimmed := strings.TrimSpace(id)
-					if trimmed == replacingReviewerID {
-						updatedReviewers = append(updatedReviewers, newReviewerID)
-					} else {
-						updatedReviewers = append(updatedReviewers, trimmed)
-					}
-				}
-				taskToUpdate.Reviewers = strings.Join(updatedReviewers, ",")
+			if replacingReviewerID != "" {
 				oldReviewerID = replacingReviewerID
-			} else {
-				// Backward compatibility: single reviewer change
-				if taskToUpdate.Reviewers != "" {
-					var updatedReviewers []string
-					for _, id := range strings.Split(taskToUpdate.Reviewers, ",") {
-						trimmed := strings.TrimSpace(id)
-						if trimmed == taskToUpdate.Reviewer {
-							updatedReviewers = append(updatedReviewers, newReviewerID)
-						} else {
-							updatedReviewers = append(updatedReviewers, trimmed)
-						}
-					}
-					taskToUpdate.Reviewers = strings.Join(updatedReviewers, ",")
-				}
 			}
 
-			// Update the Reviewer field (backward compatibility)
-			taskToUpdate.Reviewer = newReviewerID
+			services.ReplaceTaskReviewer(&taskToUpdate, oldReviewerID, newReviewerID)
 			taskToUpdate.UpdatedAt = time.Now()
 			db.Save(&taskToUpdate)
 
-			// Notify that the reviewer has been changed
-			err := services.SendReviewerChangedMessage(taskToUpdate, oldReviewerID)
+			err := services.SendReviewerChangedMessage(taskToUpdate, oldReviewerID, newReviewerID)
 			if err != nil {
 				log.Printf("reviewer change notification error: %v", err)
 			}
