@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"slack-review-notify/i18n"
 	"slack-review-notify/models"
 
 	"github.com/h2non/gock"
@@ -33,16 +34,33 @@ func reminderActionIDs(blocks []map[string]interface{}) []string {
 	return ids
 }
 
+func changeButtonValue(t *testing.T, blocks []map[string]interface{}) string {
+	t.Helper()
+	for _, b := range blocks {
+		if b["type"] != "actions" {
+			continue
+		}
+		for _, e := range b["elements"].([]map[string]interface{}) {
+			if e["action_id"] == "change_reviewer" {
+				return e["value"].(string)
+			}
+		}
+	}
+	t.Fatal("change_reviewer button not found")
+	return ""
+}
+
 func TestBuildReviewerReminderBlocks(t *testing.T) {
 	task := models.ReviewTask{ID: "task-1", Reviewer: "UAAA", Reviewers: "UAAA,UBBB", Language: "ja"}
 
 	t.Run("休暇中のレビュワーがいなければ従来どおり全員をメンションする", func(t *testing.T) {
-		blocks := BuildReviewerReminderBlocks(task, nil)
+		blocks := BuildReviewerReminderBlocks(task, []string{"UOTHER"})
 
-		text := reminderText(t, blocks)
-		assert.Contains(t, text, "<@UAAA> <@UBBB>")
-		assert.NotContains(t, text, "休暇中")
-		assert.Equal(t, []string{"pause_reminder"}, reminderActionIDs(blocks))
+		expected := CreateMessageWithActionBlocks(
+			i18n.L("ja")("notify.reminder", "<@UAAA> <@UBBB>"),
+			CreateAllOptionsPauseReminderSelect("task-1", "pause_reminder", i18n.L("ja")("button.stop_reminder"), "ja"),
+		)
+		assert.Equal(t, expected, blocks)
 	})
 
 	t.Run("休暇中のレビュワーはメンションせず人数だけ案内し交代ボタンを出す", func(t *testing.T) {
@@ -55,6 +73,19 @@ func TestBuildReviewerReminderBlocks(t *testing.T) {
 		assert.Equal(t, []string{"change_reviewer", "pause_reminder"}, reminderActionIDs(blocks))
 	})
 
+	t.Run("交代ボタンは task.Reviewer ではなく休暇中のレビュワーを交代対象にする", func(t *testing.T) {
+		blocks := BuildReviewerReminderBlocks(task, []string{"UBBB"})
+
+		assert.Equal(t, "task-1:UBBB", changeButtonValue(t, blocks),
+			"値だけで ID を運べば画面に出ず通知も飛ばない")
+	})
+
+	t.Run("複数が休暇中なら交代ボタンは1人目を対象にする", func(t *testing.T) {
+		blocks := BuildReviewerReminderBlocks(task, []string{"UBBB", "UAAA"})
+
+		assert.Equal(t, "task-1:UAAA", changeButtonValue(t, blocks))
+	})
+
 	t.Run("全員が休暇中なら誰もメンションしない", func(t *testing.T) {
 		blocks := BuildReviewerReminderBlocks(task, []string{"UAAA", "UBBB"})
 
@@ -62,6 +93,15 @@ func TestBuildReviewerReminderBlocks(t *testing.T) {
 		assert.NotContains(t, text, "<@")
 		assert.Contains(t, text, "レビュワー全員（2 人）が休暇中")
 		assert.Equal(t, []string{"change_reviewer", "pause_reminder"}, reminderActionIDs(blocks))
+	})
+
+	t.Run("全員承認済みなら休暇中でも休暇扱いの案内を出さない", func(t *testing.T) {
+		allApproved := task
+		allApproved.ApprovedBy = "UAAA,UBBB"
+
+		text := reminderText(t, BuildReviewerReminderBlocks(allApproved, []string{"UAAA"}))
+
+		assert.NotContains(t, text, "休暇中")
 	})
 
 	t.Run("承認済みのレビュワーは休暇の有無に関係なく数えない", func(t *testing.T) {
@@ -137,4 +177,9 @@ func TestSendReviewerReminderMessage_SkipsReviewerWhoWentOnLeaveAfterAssignment(
 	text := blocks[0].(map[string]interface{})["text"].(map[string]interface{})["text"].(string)
 	assert.NotContains(t, text, "<@UAAA>", "休暇に入ったレビュワーにはメンションしない")
 	assert.Contains(t, text, "<@UBBB>")
+	assert.Contains(t, text, "休暇中のレビュワー 1 人")
+
+	b, err := json.Marshal(posted["blocks"])
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"value":"task-1:UAAA"`, "交代ボタンが休暇中の人を対象にしていること")
 }

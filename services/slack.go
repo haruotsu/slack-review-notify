@@ -743,7 +743,6 @@ func PostToThreadWithButtons(channel, ts, message string, taskID, lang string) e
 	return nil
 }
 
-// SendReviewerReminderMessage sends a reminder message to reviewers
 // BuildReviewerReminderBlocks builds the business-hours reminder. Reviewers who
 // are on leave now are left out of the mentions, even though they were
 // available when assigned, and only their count is shown: rendering their name
@@ -751,41 +750,52 @@ func PostToThreadWithButtons(channel, ts, message string, taskID, lang string) e
 // app deliberately does without.
 func BuildReviewerReminderBlocks(task models.ReviewTask, awayIDs []string) []map[string]interface{} {
 	t := i18n.L(task.Language)
+	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder", t("button.stop_reminder"), task.Language)
 
 	// Mention only reviewers who have not yet approved
-	targets := GetPendingReviewers(task)
-	if len(targets) == 0 && task.Reviewer != "" {
-		targets = []string{task.Reviewer}
+	pending := GetPendingReviewers(task)
+	if len(pending) == 0 {
+		// Everyone has approved: leave the fallback mention untouched rather
+		// than reporting an approved reviewer as one skipped for being on leave.
+		var mentionText string
+		if task.Reviewer != "" {
+			mentionText = fmt.Sprintf("<@%s>", task.Reviewer)
+		}
+		return CreateMessageWithActionBlocks(t("notify.reminder", mentionText), pauseSelect)
 	}
 
 	away := make(map[string]bool, len(awayIDs))
 	for _, id := range awayIDs {
 		away[id] = true
 	}
-	var mentionParts []string
-	awayCount := 0
-	for _, id := range targets {
+	var mentionParts, awayReviewers []string
+	for _, id := range pending {
 		if away[id] {
-			awayCount++
+			awayReviewers = append(awayReviewers, id)
 			continue
 		}
 		mentionParts = append(mentionParts, fmt.Sprintf("<@%s>", id))
 	}
 
-	pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder", t("button.stop_reminder"), task.Language)
-	if awayCount == 0 {
+	if len(awayReviewers) == 0 {
 		return CreateMessageWithActionBlocks(t("notify.reminder", strings.Join(mentionParts, " ")), pauseSelect)
 	}
 
 	var message string
 	if len(mentionParts) > 0 {
-		message = t("notify.reminder", strings.Join(mentionParts, " ")) + t("notify.reminder.away_note", awayCount)
+		message = t("notify.reminder", strings.Join(mentionParts, " ")) + t("notify.reminder.away_note", len(awayReviewers))
 	} else {
-		message = t("notify.reminder.all_away", awayCount)
+		message = t("notify.reminder.all_away", len(awayReviewers))
 	}
-	return CreateMessageWithActionsBlocks(message, CreateChangeReviewerButton(task.ID, task.Language), pauseSelect)
+
+	// The plain change button replaces task.Reviewer, who may be someone still
+	// at work; naming the absent reviewer in the value makes the swap hit them.
+	// With several absent, one per press: the next reminder targets the next.
+	changeButton := CreateButton(t("button.change_reviewer"), "change_reviewer", task.ID+":"+awayReviewers[0], "danger")
+	return CreateMessageWithActionsBlocks(message, changeButton, pauseSelect)
 }
 
+// SendReviewerReminderMessage sends a reminder message to reviewers
 func SendReviewerReminderMessage(db *gorm.DB, task models.ReviewTask) error {
 	// Check if the channel is archived
 	isArchived, err := IsChannelArchived(task.SlackChannel)
