@@ -115,6 +115,9 @@ func TestHandleSlackAction_ChangeReviewer_MultipleLabels(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	// Get task from DB and verify
+	// The button only opens the modal; leaving the successor blank draws one at random.
+	submitChangeReviewerModal(t, db, "test-task-1", "U33333", "")
+
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-task-1").First(&updatedTask)
 
@@ -305,6 +308,9 @@ func TestHandleSlackAction_ChangeReviewer_NoLabelName(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	// Get task from DB and verify
+	// The button only opens the modal; leaving the successor blank draws one at random.
+	submitChangeReviewerModal(t, db, "test-task-3", "U11111", "")
+
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-task-3").First(&updatedTask)
 
@@ -399,6 +405,9 @@ func TestHandleSlackAction_ChangeReviewer_EnglishLanguage(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	// Verify reviewer was changed
+	// The button only opens the modal; leaving the successor blank draws one at random.
+	submitChangeReviewerModal(t, db, "test-task-en-1", "U11111", "")
+
 	var updatedTask models.ReviewTask
 	db.Where("id = ?", "test-task-en-1").First(&updatedTask)
 	assert.NotEqual(t, "U11111", updatedTask.Reviewer)

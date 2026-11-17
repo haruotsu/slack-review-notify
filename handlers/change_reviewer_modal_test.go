@@ -91,6 +91,94 @@ func changeReviewerSubmission(taskID, target, newUser string) map[string]any {
 	}
 }
 
+// singleReviewerSubmission mirrors what Slack posts for the single-reviewer
+// modal: the target lives only in private_metadata, so there is no target block.
+func singleReviewerSubmission(taskID, fixedTarget, newUser string) map[string]any {
+	p := changeReviewerSubmission(taskID, "", newUser)
+	view := p["view"].(map[string]any)
+	view["private_metadata"] = services.EncodeChangeReviewerModalMetadata(services.ChangeReviewerModalMetadata{TaskID: taskID, FixedTarget: fixedTarget})
+	delete(view["state"].(map[string]any)["values"].(map[string]any), services.ChangeReviewerTargetBlockID)
+	return p
+}
+
+func submitChangeReviewerModal(t *testing.T, db *gorm.DB, taskID, fixedTarget, newUser string) {
+	t.Helper()
+	w := postSlackAction(t, db, singleReviewerSubmission(taskID, fixedTarget, newUser))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotContains(t, w.Body.String(), "response_action", "モーダル送信がエラーにならないこと: %s", w.Body.String())
+}
+
+func seedSingleReviewerTask(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	seedMultiReviewerTask(t, db)
+	require.NoError(t, db.Model(&models.ReviewTask{}).Where("id = ?", "task-multi").
+		Updates(map[string]any{"reviewers": "UAAA"}).Error)
+}
+
+func TestChangeReviewerButton_SingleReviewer_OpensModalWithoutReassigning(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+	db := setupTestDB(t)
+	seedSingleReviewerTask(t, db)
+
+	w := postSlackAction(t, db, map[string]any{
+		"type":       "block_actions",
+		"trigger_id": "trigger-1",
+		"user":       map[string]any{"id": "U99999"},
+		"actions":    []map[string]any{{"action_id": "change_reviewer", "value": "task-multi"}},
+		"container":  map[string]any{"channel_id": "C12345"},
+		"message":    map[string]any{"ts": "1234.5678"},
+	})
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var got models.ReviewTask
+	require.NoError(t, db.Where("id = ?", "task-multi").First(&got).Error)
+	assert.Equal(t, "UAAA", got.Reviewers)
+	assert.Equal(t, "UAAA", got.Reviewer)
+}
+
+func TestChangeReviewerModal_SingleReviewer_ManualSuccessor(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+	db := setupTestDB(t)
+	seedSingleReviewerTask(t, db)
+
+	submitChangeReviewerModal(t, db, "task-multi", "UAAA", "UOUTSIDER")
+
+	var got models.ReviewTask
+	require.NoError(t, db.Where("id = ?", "task-multi").First(&got).Error)
+	assert.Equal(t, "UOUTSIDER", got.Reviewers)
+	assert.Equal(t, "UOUTSIDER", got.Reviewer)
+}
+
+func TestChangeReviewerModal_SingleReviewer_BlankSuccessorDraws(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+	db := setupTestDB(t)
+	seedSingleReviewerTask(t, db)
+
+	submitChangeReviewerModal(t, db, "task-multi", "UAAA", "")
+
+	var got models.ReviewTask
+	require.NoError(t, db.Where("id = ?", "task-multi").First(&got).Error)
+	assert.Contains(t, []string{"UBBB", "UCCC", "UDDD"}, got.Reviewer)
+	assert.Equal(t, got.Reviewer, got.Reviewers)
+}
+
+func TestChangeReviewerModal_SingleReviewer_StaleTargetShowsErrorOnSuccessorBlock(t *testing.T) {
+	services.IsTestMode = true
+	defer func() { services.IsTestMode = false }()
+	db := setupTestDB(t)
+	seedSingleReviewerTask(t, db)
+
+	w := postSlackAction(t, db, singleReviewerSubmission("task-multi", "UGONE", "UCCC"))
+
+	assert.Contains(t, w.Body.String(), `"response_action":"errors"`)
+	assert.Contains(t, w.Body.String(), services.ChangeReviewerNewBlockID,
+		"交代対象の入力欄が無いモーダルでは、後任欄にエラーを出す")
+	assert.NotContains(t, w.Body.String(), services.ChangeReviewerTargetBlockID)
+}
+
 func TestChangeReviewerButton_MultipleReviewers_OpensModalWithoutReassigning(t *testing.T) {
 	services.IsTestMode = true
 	defer func() { services.IsTestMode = false }()

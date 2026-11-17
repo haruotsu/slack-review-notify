@@ -22,8 +22,22 @@ const (
 // slackRadioButtonsMaxOptions is Block Kit's hard cap on radio_buttons options.
 const slackRadioButtonsMaxOptions = 10
 
+// FixedTarget is set when the task had a single reviewer at open time: the
+// modal shows that reviewer as read-only text, so the submission carries no
+// target selection of its own.
 type ChangeReviewerModalMetadata struct {
-	TaskID string `json:"t"`
+	TaskID      string `json:"t"`
+	FixedTarget string `json:"o,omitempty"`
+}
+
+// ErrorBlockForTarget is where target-related errors are shown. With a fixed
+// target there is no target input block, and Slack only attaches
+// response_action errors to input blocks.
+func (m ChangeReviewerModalMetadata) ErrorBlockForTarget() string {
+	if m.FixedTarget != "" {
+		return ChangeReviewerNewBlockID
+	}
+	return ChangeReviewerTargetBlockID
 }
 
 func EncodeChangeReviewerModalMetadata(m ChangeReviewerModalMetadata) string {
@@ -100,13 +114,13 @@ func TaskReviewerIDs(task models.ReviewTask) []string {
 	return ids
 }
 
-// HasMultipleReviewers reports whether the task should use the modal flow
-// (pick who to replace) instead of the one-click random re-draw.
+// UsesChangeReviewerModal reports whether the button should open the modal
+// instead of the one-click random re-draw.
 // Above the radio_buttons cap the modal cannot render, so those tasks keep the
 // random re-draw rather than opening a view Slack would reject.
-func HasMultipleReviewers(task models.ReviewTask) bool {
+func UsesChangeReviewerModal(task models.ReviewTask) bool {
 	n := len(TaskReviewerIDs(task))
-	return n >= 2 && n <= slackRadioButtonsMaxOptions
+	return n >= 1 && n <= slackRadioButtonsMaxOptions
 }
 
 // ReplaceTaskReviewer swaps oldID for newID in the task's reviewer fields.
@@ -145,13 +159,8 @@ func BuildChangeReviewerModalView(task models.ReviewTask) map[string]any {
 		return map[string]any{"type": "plain_text", "text": s}
 	}
 
-	var options []map[string]any
-	for _, id := range TaskReviewerIDs(task) {
-		options = append(options, map[string]any{
-			"text":  map[string]any{"type": "mrkdwn", "text": "<@" + id + ">"},
-			"value": id,
-		})
-	}
+	reviewerIDs := TaskReviewerIDs(task)
+	meta := ChangeReviewerModalMetadata{TaskID: task.ID}
 
 	blocks := []map[string]any{
 		{
@@ -161,7 +170,26 @@ func BuildChangeReviewerModalView(task models.ReviewTask) map[string]any {
 				"text": t("modal.change_reviewer.header", escapeMrkdwn(task.Title), task.PRURL),
 			},
 		},
-		{
+	}
+
+	if len(reviewerIDs) == 1 {
+		meta.FixedTarget = reviewerIDs[0]
+		blocks = append(blocks, map[string]any{
+			"type": "section",
+			"text": map[string]any{
+				"type": "mrkdwn",
+				"text": t("modal.change_reviewer.target_fixed", "<@"+reviewerIDs[0]+">"),
+			},
+		})
+	} else {
+		var options []map[string]any
+		for _, id := range reviewerIDs {
+			options = append(options, map[string]any{
+				"text":  map[string]any{"type": "mrkdwn", "text": "<@" + id + ">"},
+				"value": id,
+			})
+		}
+		blocks = append(blocks, map[string]any{
 			"type":     "input",
 			"block_id": ChangeReviewerTargetBlockID,
 			"label":    plainText(t("modal.change_reviewer.target")),
@@ -170,8 +198,11 @@ func BuildChangeReviewerModalView(task models.ReviewTask) map[string]any {
 				"action_id": ChangeReviewerTargetBlockID,
 				"options":   options,
 			},
-		},
-		{
+		})
+	}
+
+	blocks = append(blocks,
+		map[string]any{
 			"type":     "input",
 			"block_id": ChangeReviewerNewBlockID,
 			"optional": true,
@@ -182,12 +213,12 @@ func BuildChangeReviewerModalView(task models.ReviewTask) map[string]any {
 				"action_id": ChangeReviewerNewBlockID,
 			},
 		},
-	}
+	)
 
 	return map[string]any{
 		"type":             "modal",
 		"callback_id":      ChangeReviewerModalCallbackID,
-		"private_metadata": EncodeChangeReviewerModalMetadata(ChangeReviewerModalMetadata{TaskID: task.ID}),
+		"private_metadata": EncodeChangeReviewerModalMetadata(meta),
 		"title":            plainText(t("modal.change_reviewer.title")),
 		"submit":           plainText(t("modal.change_reviewer.submit")),
 		"close":            plainText(t("modal.change_reviewer.close")),
@@ -198,12 +229,12 @@ func BuildChangeReviewerModalView(task models.ReviewTask) map[string]any {
 // ParseChangeReviewerModalSubmission validates the submission against the
 // task as it is now, not as it was when the modal opened: another user may have
 // swapped reviewers in the meantime.
-func ParseChangeReviewerModalSubmission(values map[string]map[string]ViewStateValue, task models.ReviewTask) (*ChangeReviewerForm, error) {
+func ParseChangeReviewerModalSubmission(values map[string]map[string]ViewStateValue, task models.ReviewTask, meta ChangeReviewerModalMetadata) (*ChangeReviewerForm, error) {
 	t := i18n.L(task.Language)
 	errs := map[string]string{}
 
-	form := &ChangeReviewerForm{}
-	if v, ok := values[ChangeReviewerTargetBlockID][ChangeReviewerTargetBlockID]; ok && v.SelectedOption != nil {
+	form := &ChangeReviewerForm{OldReviewerID: meta.FixedTarget}
+	if v, ok := values[ChangeReviewerTargetBlockID][ChangeReviewerTargetBlockID]; ok && v.SelectedOption != nil && meta.FixedTarget == "" {
 		form.OldReviewerID = v.SelectedOption.Value
 	}
 	if v, ok := values[ChangeReviewerNewBlockID][ChangeReviewerNewBlockID]; ok {
@@ -221,13 +252,6 @@ func ParseChangeReviewerModalSubmission(values map[string]map[string]ViewStateVa
 	}
 
 	switch {
-	case form.OldReviewerID == "":
-		errs[ChangeReviewerTargetBlockID] = t("modal.change_reviewer.error.target_required")
-	case !isCurrent(form.OldReviewerID):
-		errs[ChangeReviewerTargetBlockID] = t("modal.change_reviewer.error.target_not_assigned")
-	}
-
-	switch {
 	case form.NewReviewerID == "":
 		// Left blank on purpose: the caller draws a successor at random.
 	case !LooksLikeResolvedSlackUserID(form.NewReviewerID):
@@ -236,6 +260,15 @@ func ParseChangeReviewerModalSubmission(values map[string]map[string]ViewStateVa
 		errs[ChangeReviewerNewBlockID] = t("modal.change_reviewer.error.new_is_author")
 	case isCurrent(form.NewReviewerID):
 		errs[ChangeReviewerNewBlockID] = t("modal.change_reviewer.error.new_already_assigned")
+	}
+
+	// Checked after the successor so that, with a fixed target sharing the
+	// successor's block, the stale-modal message wins over a successor error.
+	switch {
+	case form.OldReviewerID == "":
+		errs[meta.ErrorBlockForTarget()] = t("modal.change_reviewer.error.target_required")
+	case !isCurrent(form.OldReviewerID):
+		errs[meta.ErrorBlockForTarget()] = t("modal.change_reviewer.error.target_not_assigned")
 	}
 
 	if len(errs) > 0 {

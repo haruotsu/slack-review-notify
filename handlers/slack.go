@@ -306,15 +306,15 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 
-			if replacingReviewerID == "" && services.HasMultipleReviewers(taskToUpdate) {
-				handleOpenChangeReviewerModal(c, payload, taskToUpdate)
-				return
-			}
-
 			// Use default value if LabelName is not set on existing task
 			if taskToUpdate.LabelName == "" {
 				taskToUpdate.LabelName = "needs-review"
 				db.Save(&taskToUpdate)
+			}
+
+			if replacingReviewerID == "" && services.UsesChangeReviewerModal(taskToUpdate) {
+				handleOpenChangeReviewerModal(c, payload, taskToUpdate)
+				return
 			}
 
 			newReviewerID, ok := services.DrawReplacementReviewer(db, taskToUpdate, false)

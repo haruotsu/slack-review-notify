@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"slack-review-notify/models"
@@ -37,23 +38,23 @@ func multiReviewerTask() models.ReviewTask {
 	}
 }
 
-func TestHasMultipleReviewers(t *testing.T) {
+func TestUsesChangeReviewerModal(t *testing.T) {
 	tests := []struct {
 		name string
 		task models.ReviewTask
 		want bool
 	}{
 		{"2人以上なら true", models.ReviewTask{Reviewers: "U1,U2"}, true},
-		{"1人なら false", models.ReviewTask{Reviewers: "U1"}, false},
-		{"Reviewers 未設定の旧タスクは false", models.ReviewTask{Reviewer: "U1"}, false},
-		{"空要素は数えない", models.ReviewTask{Reviewers: "U1, ,"}, false},
-		{"重複は1人と数える", models.ReviewTask{Reviewers: "U1,U1"}, false},
+		{"1人でも true", models.ReviewTask{Reviewers: "U1"}, true},
+		{"Reviewers 未設定の旧タスクも Reviewer がいれば true", models.ReviewTask{Reviewer: "U1"}, true},
+		{"レビュワー不在なら交代対象がいないので false", models.ReviewTask{}, false},
+		{"空要素だけなら false", models.ReviewTask{Reviewers: " , ,"}, false},
 		{"radio_buttons の上限10人までは true", models.ReviewTask{Reviewers: "U1,U2,U3,U4,U5,U6,U7,U8,U9,U10"}, true},
 		{"上限を超えるとモーダルを描画できないので false", models.ReviewTask{Reviewers: "U1,U2,U3,U4,U5,U6,U7,U8,U9,U10,U11"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, HasMultipleReviewers(tt.task))
+			assert.Equal(t, tt.want, UsesChangeReviewerModal(tt.task))
 		})
 	}
 }
@@ -132,14 +133,14 @@ func TestParseChangeReviewerModalSubmission(t *testing.T) {
 	task := multiReviewerTask()
 
 	t.Run("妥当な入力をパースできる", func(t *testing.T) {
-		form, err := ParseChangeReviewerModalSubmission(changeReviewerValues("UBBB", "UNEW1"), task)
+		form, err := ParseChangeReviewerModalSubmission(changeReviewerValues("UBBB", "UNEW1"), task, ChangeReviewerModalMetadata{TaskID: task.ID})
 		require.NoError(t, err)
 		assert.Equal(t, "UBBB", form.OldReviewerID)
 		assert.Equal(t, "UNEW1", form.NewReviewerID)
 	})
 
 	t.Run("後任が空欄ならランダム抽選を意味する空文字で返る", func(t *testing.T) {
-		form, err := ParseChangeReviewerModalSubmission(changeReviewerValues("UBBB", ""), task)
+		form, err := ParseChangeReviewerModalSubmission(changeReviewerValues("UBBB", ""), task, ChangeReviewerModalMetadata{TaskID: task.ID})
 		require.NoError(t, err)
 		assert.Equal(t, "UBBB", form.OldReviewerID)
 		assert.Equal(t, "", form.NewReviewerID)
@@ -160,10 +161,66 @@ func TestParseChangeReviewerModalSubmission(t *testing.T) {
 	}
 	for _, tc := range errCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseChangeReviewerModalSubmission(changeReviewerValues(tc.target, tc.newUser), task)
+			_, err := ParseChangeReviewerModalSubmission(changeReviewerValues(tc.target, tc.newUser), task, ChangeReviewerModalMetadata{TaskID: task.ID})
 			var ve *ModalValidationError
 			require.True(t, errors.As(err, &ve), "ModalValidationError が返ること: %v", err)
 			assert.Contains(t, ve.Errors, tc.blockID)
 		})
 	}
+}
+
+func TestTaskReviewerIDs_DropsDuplicates(t *testing.T) {
+	assert.Equal(t, []string{"U1", "U2"}, TaskReviewerIDs(models.ReviewTask{Reviewers: "U1,U2,U1"}))
+}
+
+func TestBuildChangeReviewerModalView_SingleReviewer(t *testing.T) {
+	task := multiReviewerTask()
+	task.Reviewers = "UAAA"
+
+	view := BuildChangeReviewerModalView(task)
+
+	meta, err := DecodeChangeReviewerModalMetadata(view["private_metadata"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, "UAAA", meta.FixedTarget, "交代対象は選ばせずメタデータで運ぶ")
+
+	var hasTargetInput, hasNewInput bool
+	var texts []string
+	for _, b := range view["blocks"].([]map[string]any) {
+		switch b["block_id"] {
+		case ChangeReviewerTargetBlockID:
+			hasTargetInput = true
+		case ChangeReviewerNewBlockID:
+			hasNewInput = true
+		}
+		if txt, ok := b["text"].(map[string]any); ok {
+			texts = append(texts, txt["text"].(string))
+		}
+	}
+	assert.False(t, hasTargetInput, "1人なら交代対象の選択欄は出さない")
+	assert.True(t, hasNewInput)
+	assert.Contains(t, strings.Join(texts, "\n"), "<@UAAA>", "交代対象は表示だけする")
+}
+
+func TestParseChangeReviewerModalSubmission_FixedTarget(t *testing.T) {
+	task := multiReviewerTask()
+	task.Reviewers = "UAAA"
+	meta := ChangeReviewerModalMetadata{TaskID: task.ID, FixedTarget: "UAAA"}
+	values := map[string]map[string]ViewStateValue{
+		ChangeReviewerNewBlockID: {ChangeReviewerNewBlockID: {Type: "users_select", SelectedUser: "UNEW1"}},
+	}
+
+	t.Run("メタデータの交代対象を使う", func(t *testing.T) {
+		form, err := ParseChangeReviewerModalSubmission(values, task, meta)
+		require.NoError(t, err)
+		assert.Equal(t, "UAAA", form.OldReviewerID)
+		assert.Equal(t, "UNEW1", form.NewReviewerID)
+	})
+
+	t.Run("交代対象が既に外れていたら後任欄にエラーを出す", func(t *testing.T) {
+		stale := ChangeReviewerModalMetadata{TaskID: task.ID, FixedTarget: "UGONE"}
+		_, err := ParseChangeReviewerModalSubmission(values, task, stale)
+		var ve *ModalValidationError
+		require.True(t, errors.As(err, &ve))
+		assert.Equal(t, map[string]string{ChangeReviewerNewBlockID: "このレビュワーは既に担当から外れています。モーダルを開き直してください。"}, ve.Errors)
+	})
 }

@@ -202,6 +202,7 @@ var messagesJa = map[string]string{
 	"modal.change_reviewer.close":                      "キャンセル",
 	"modal.change_reviewer.header":                     "*%s*\n<%s>",
 	"modal.change_reviewer.target":                     "交代するレビュワー",
+	"modal.change_reviewer.target_fixed":               "*交代するレビュワー*: %s",
 	"modal.change_reviewer.new":                        "新しいレビュワー",
 	"modal.change_reviewer.new.hint":                   "空欄のままにするとレビュワーリストからランダムに選びます。",
 	"modal.change_reviewer.error.target_required":      "交代するレビュワーを選んでください。",

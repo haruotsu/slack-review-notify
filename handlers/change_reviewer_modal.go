@@ -38,18 +38,18 @@ func handleChangeReviewerModalSubmission(c *gin.Context, db *gorm.DB, payload Sl
 	meta, err := services.DecodeChangeReviewerModalMetadata(payload.View.PrivateMetadata)
 	if err != nil || meta.TaskID == "" {
 		log.Printf("change-reviewer view_submission has invalid private_metadata: %q (err=%v)", payload.View.PrivateMetadata, err)
-		respondErr(services.ChangeReviewerTargetBlockID, i18n.T("modal.change_reviewer.error.task_not_found"))
+		respondErr(services.ChangeReviewerNewBlockID, i18n.T("modal.change_reviewer.error.task_not_found"))
 		return
 	}
 
 	var task models.ReviewTask
 	if err := db.Where("id = ?", meta.TaskID).First(&task).Error; err != nil {
 		log.Printf("change-reviewer: task id %s not found: %v", meta.TaskID, err)
-		respondErr(services.ChangeReviewerTargetBlockID, i18n.T("modal.change_reviewer.error.task_not_found"))
+		respondErr(services.ChangeReviewerNewBlockID, i18n.T("modal.change_reviewer.error.task_not_found"))
 		return
 	}
 
-	form, err := services.ParseChangeReviewerModalSubmission(payload.View.State.Values, task)
+	form, err := services.ParseChangeReviewerModalSubmission(payload.View.State.Values, task, meta)
 	if err != nil {
 		var ve *services.ModalValidationError
 		if errors.As(err, &ve) {
@@ -60,7 +60,7 @@ func handleChangeReviewerModalSubmission(c *gin.Context, db *gorm.DB, payload Sl
 			return
 		}
 		log.Printf("change-reviewer parse error: %v", err)
-		respondErr(services.ChangeReviewerTargetBlockID, i18n.TWithLang(task.Language, "modal.change_reviewer.error.save_failed"))
+		respondErr(services.ChangeReviewerNewBlockID, i18n.TWithLang(task.Language, "modal.change_reviewer.error.save_failed"))
 		return
 	}
 
@@ -91,11 +91,11 @@ func handleChangeReviewerModalSubmission(c *gin.Context, db *gorm.DB, payload Sl
 		})
 	if res.Error != nil {
 		log.Printf("change-reviewer: save failed: task=%s err=%v", task.ID, res.Error)
-		respondErr(services.ChangeReviewerTargetBlockID, i18n.TWithLang(task.Language, "modal.change_reviewer.error.save_failed"))
+		respondErr(services.ChangeReviewerNewBlockID, i18n.TWithLang(task.Language, "modal.change_reviewer.error.save_failed"))
 		return
 	}
 	if res.RowsAffected == 0 {
-		respondErr(services.ChangeReviewerTargetBlockID, i18n.TWithLang(task.Language, "modal.change_reviewer.error.target_not_assigned"))
+		respondErr(meta.ErrorBlockForTarget(), i18n.TWithLang(task.Language, "modal.change_reviewer.error.target_not_assigned"))
 		return
 	}
 

@@ -202,6 +202,7 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"modal.change_reviewer.close":                      "Cancel",
 	"modal.change_reviewer.header":                     "*%s*\n<%s>",
 	"modal.change_reviewer.target":                     "Reviewer to replace",
+	"modal.change_reviewer.target_fixed":               "*Reviewer to replace*: %s",
 	"modal.change_reviewer.new":                        "New reviewer",
 	"modal.change_reviewer.new.hint":                   "Leave blank to pick one at random from the reviewer list.",
 	"modal.change_reviewer.error.target_required":      "Please pick the reviewer to replace.",
