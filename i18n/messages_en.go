@@ -380,6 +380,8 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"notify.business_hours_morning":  "🌅 *Good morning!* %s\n\n📋 Please review this PR. %s",
 	"notify.reviewer_in_morning":     "\n\n🎯 *Reviewer*: %s, please take a look!",
 	"notify.reminder":                "%s Would love a review! 👀",
+	"notify.reminder.away_note":      "\n* Not mentioning %d reviewer(s) on leave. Press \"Change Reviewer!\" to hand the review over.",
+	"notify.reminder.all_away":       "Would love a review! 👀\n* All reviewers (%d) are on leave, so nobody was mentioned. Press \"Change Reviewer!\" to hand the review over.",
 	"notify.out_of_hours_reminder":   "%s Would love a review! 👀\n\nOutside business hours - next reminder will be sent on the next business day.",
 
 	"notify.reminder_paused.1h":      "Got it! Pausing reminders for 1 hour!",
