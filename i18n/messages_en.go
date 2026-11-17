@@ -24,7 +24,7 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 • [label-name] show - Show detailed settings for one label
 • show-my-reviews - Show your unfinished review requests across all channels
 • help - Show this help
-• menu - Open the operation menu as a modal (run the operations below from buttons)
+• menu (or no arguments) - Open the operation menu as a modal (run the operations below from buttons)
 
 *Repositories and mentions*
 • [label-name] add-repo owner/repo1,owner/repo2 - Add target repositories (required)

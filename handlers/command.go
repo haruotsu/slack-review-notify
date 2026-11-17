@@ -80,14 +80,12 @@ func HandleSlackCommand(db *gorm.DB) gin.HandlerFunc {
 			// Split text with quote support
 			parts := parseCommand(text)
 
+			// The bare command opens the menu rather than the help text: someone
+			// who typed no subcommand is looking for what they can do, and the
+			// menu lets them do it instead of reading how to type it.
 			if len(parts) == 0 {
-				// Show help when no arguments are provided
-				var emptyHelpConfig models.ChannelConfig
-				emptyHelpLang := "ja"
-				if err := db.Where("slack_channel_id = ?", channelID).First(&emptyHelpConfig).Error; err == nil {
-					emptyHelpLang = getLang(&emptyHelpConfig)
-				}
-				showHelp(c, db, channelID, emptyHelpLang)
+				openMenuModal(db, c.PostForm("trigger_id"), channelID, userID)
+				c.Status(http.StatusOK)
 				return
 			}
 

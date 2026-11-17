@@ -24,11 +24,11 @@ func openMenuModal(db *gorm.DB, triggerID, channelID, userID string) {
 	}
 	view := menuModalView(db, channelID, userID)
 
-	go func() {
+	runAsync(func() {
 		if err := services.OpenView(triggerID, view); err != nil {
 			log.Printf("menu views.open failed: %v", err)
 		}
-	}()
+	})
 }
 
 func menuModalView(db *gorm.DB, channelID, userID string) map[string]any {
@@ -51,11 +51,11 @@ func handleMenuAction(c *gin.Context, db *gorm.DB, payload SlackActionPayload) {
 	}
 	triggerID := payload.TriggerID
 
-	go func() {
+	runAsync(func() {
 		if err := services.PushView(triggerID, view); err != nil {
 			log.Printf("menu views.push failed: %v", err)
 		}
-	}()
+	})
 
 	c.Status(http.StatusOK)
 }
@@ -188,7 +188,7 @@ func handleMenuUnsetAway(c *gin.Context, db *gorm.DB, payload SlackActionPayload
 
 	view := menuAvailabilityView(db, meta, lang)
 	viewID := payload.View.ID
-	go func() {
+	runAsync(func() {
 		// Posted from the background like the view update: Slack shows the
 		// clicker an error unless the action is acknowledged within seconds.
 		if notice != "" {
@@ -199,7 +199,7 @@ func handleMenuUnsetAway(c *gin.Context, db *gorm.DB, payload SlackActionPayload
 		if err := services.UpdateView(viewID, view); err != nil {
 			log.Printf("menu availability views.update failed: %v", err)
 		}
-	}()
+	})
 
 	c.Status(http.StatusOK)
 }

@@ -40,23 +40,43 @@ func viewText(t *testing.T, view map[string]any) string {
 	return string(b)
 }
 
-func TestMenuCommand_OpensTheMenuWithoutPostingAMessage(t *testing.T) {
-	db := setupTestDB(t)
-	router := setupTestRouter(db)
-
+func menuCommandForm(text string) url.Values {
 	form := url.Values{}
 	form.Add("command", "/slack-review-notify")
-	form.Add("text", "menu")
+	form.Add("text", text)
 	form.Add("channel_id", "C12345")
 	form.Add("user_id", "U12345")
-	form.Add("trigger_id", "trigger-xyz")
-	req := httptest.NewRequest("POST", "/slack/command", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	form.Add("trigger_id", "trigger-command")
+	return form
+}
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Empty(t, w.Body.String(), "the modal is the response; any body would also post a message")
+func TestCommand_OpensTheMenuWhenGivenNoArgumentsOrMenu(t *testing.T) {
+	for name, text := range map[string]string{"no arguments": "", "only spaces": "  ", "menu": "menu", "menu after a label": "bug menu"} {
+		t.Run(name, func(t *testing.T) {
+			db := setupTestDB(t)
+			router := setupTestRouter(db)
+			calls := startFakeSlack(t)
+
+			w := postSignedForm(t, router, "/slack/command", menuCommandForm(text))
+
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.Empty(t, w.Body.String(), "the modal is the response; any body would also post a message")
+			call := nextSlackCall(t, calls)
+			assert.Equal(t, "/views.open", call.Path)
+			assert.Equal(t, "trigger-command", call.Body["trigger_id"])
+			view := slackCallView(t, call)
+			assert.Equal(t, services.MenuModalCallbackID, view["callback_id"])
+			assert.Equal(t, `{"c":"C12345","u":"U12345"}`, view["private_metadata"])
+		})
+	}
+}
+
+func TestHelpCommand_StillShowsTheHelpText(t *testing.T) {
+	db := setupTestDB(t)
+
+	resp := postHelpCommand(t, db, "C12345")
+
+	assert.Contains(t, resp.Text, "Review通知Bot設定コマンド")
 }
 
 func TestHelpCommand_IncludesOpenMenuButton(t *testing.T) {

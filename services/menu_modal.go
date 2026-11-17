@@ -164,11 +164,15 @@ func BuildMenuAvailabilityView(meta MenuModalMetadata, lang string, rows []MenuA
 		return menuResultView(meta, lang, title, []map[string]any{menuSection(t("cmd.show_availability.empty"))})
 	}
 
-	// The header takes one block; the truncation note takes another, but only
-	// when something is actually left out.
+	const (
+		headerBlocks       = 1
+		truncationBlocks   = 1
+		maxRowsWithoutNote = SlackModalMaxBlocks - headerBlocks
+		maxRowsWithNote    = maxRowsWithoutNote - truncationBlocks
+	)
 	shown := rows
-	if len(shown) > SlackModalMaxBlocks-1 {
-		shown = shown[:SlackModalMaxBlocks-2]
+	if len(shown) > maxRowsWithoutNote {
+		shown = shown[:maxRowsWithNote]
 	}
 
 	blocks := []map[string]any{menuSection(t("cmd.show_availability.header"))}
