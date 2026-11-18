@@ -594,6 +594,22 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	}
 }
 
+// approved は対象にしない: bot による自動承認を必要承認数に数えている
+// チームの運用を変えてしまうため、リマインドを止めてしまう commented /
+// changes_requested だけを人間のレビューと区別する。
+// マシンユーザー（通常アカウントで動く bot）は type が "User" なので検出できない。
+func isFeedbackFromNonReviewer(pr *github.PullRequest, review *github.PullRequestReview) bool {
+	state := review.GetState()
+	if state != "commented" && state != "changes_requested" {
+		return false
+	}
+	reviewer := review.GetUser()
+	if reviewer.GetType() == "Bot" {
+		return true
+	}
+	return reviewer.GetLogin() != "" && reviewer.GetLogin() == pr.GetUser().GetLogin()
+}
+
 // handleReviewSubmittedEvent handles the event when a review is submitted
 func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestReviewEvent) {
 	pr := e.PullRequest
@@ -614,6 +630,12 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	reviewState := review.GetState()
 	if reviewState != "approved" && reviewState != "changes_requested" && reviewState != "commented" && reviewState != "dismissed" {
 		log.Printf("review state %s is not handled", reviewState)
+		return
+	}
+
+	if isFeedbackFromNonReviewer(pr, review) {
+		log.Printf("review feedback from bot or PR author is not a human review, skipping: repo=%s, pr=%d, reviewer=%s, state=%s",
+			repoFullName, pr.GetNumber(), review.GetUser().GetLogin(), reviewState)
 		return
 	}
 
