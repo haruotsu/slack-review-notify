@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-github/v71/github"
 	"github.com/h2non/gock"
 	"github.com/stretchr/testify/assert"
+	"gorm.io/gorm"
 )
 
 func TestUnlabeledEventWithExistingTask(t *testing.T) {
@@ -2200,4 +2201,557 @@ func TestHandleReviewRequestedEvent_SkipsWhenSenderEqualsReviewer(t *testing.T) 
 	assert.Equal(t, "in_review", updatedTask.Status, "Completed task should still be reverted to in_review")
 	assert.False(t, updatedTask.PendingReReviewNotify, "Should not defer when sender equals reviewer")
 	assert.False(t, gock.IsDone(), "No re-review notification should be sent when sender equals reviewer")
+}
+
+func postReviewSubmitted(t *testing.T, db *gorm.DB, payload string) *httptest.ResponseRecorder {
+	t.Helper()
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request_review")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+	return w
+}
+
+// A partial approval leaves the task in_review, so a pending re-review notification
+// queued overnight would still fire the next morning unless it is cleared here.
+func TestHandleReviewSubmittedEvent_PartialApprovalClearsPendingReReview(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Times(2).
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	config := models.ChannelConfig{
+		ID:                "config-partial-pending",
+		SlackChannelID:    "C_PARTIAL_PENDING",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		RequiredApprovals: 2,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{
+		ID:             "mapping-partial-pending",
+		GithubUsername: "reviewer1",
+		SlackUserID:    "UREVIEWER1",
+	})
+
+	task := models.ReviewTask{
+		ID:                      "partial-pending-task",
+		PRURL:                   "https://github.com/owner/repo/pull/910",
+		Repo:                    "owner/repo",
+		PRNumber:                910,
+		Title:                   "Partial approval with pending re-review",
+		SlackTS:                 "1234.9100",
+		SlackChannel:            "C_PARTIAL_PENDING",
+		Reviewer:                "UREVIEWER1",
+		Reviewers:               "UREVIEWER1,UREVIEWER2",
+		Status:                  "in_review",
+		LabelName:               "needs-review",
+		PendingReReviewNotify:   true,
+		PendingReReviewSender:   "<@USENDER>",
+		PendingReReviewReviewer: "<@UREVIEWER1>",
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 910, "html_url": "https://github.com/owner/repo/pull/910"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "approved", "user": {"login": "reviewer1"}}
+	}`
+
+	assert.Equal(t, http.StatusOK, postReviewSubmitted(t, db, payload).Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "partial-pending-task").First(&updated)
+	assert.Equal(t, "in_review", updated.Status, "partial approval keeps the task in_review")
+	assert.False(t, updated.PendingReReviewNotify, "reviewing must clear the pending re-review flag")
+	assert.Empty(t, updated.PendingReReviewSender)
+	assert.Empty(t, updated.PendingReReviewReviewer)
+}
+
+func TestHandleReviewSubmittedEvent_FullApprovalClearsPendingReReview(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Times(2).
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	config := models.ChannelConfig{
+		ID:                "config-full-pending",
+		SlackChannelID:    "C_FULL_PENDING",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		RequiredApprovals: 1,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{
+		ID:             "mapping-full-pending",
+		GithubUsername: "reviewer1",
+		SlackUserID:    "UREVIEWER1",
+	})
+
+	task := models.ReviewTask{
+		ID:                      "full-pending-task",
+		PRURL:                   "https://github.com/owner/repo/pull/911",
+		Repo:                    "owner/repo",
+		PRNumber:                911,
+		Title:                   "Full approval with pending re-review",
+		SlackTS:                 "1234.9110",
+		SlackChannel:            "C_FULL_PENDING",
+		Reviewer:                "UREVIEWER1",
+		Status:                  "in_review",
+		LabelName:               "needs-review",
+		PendingReReviewNotify:   true,
+		PendingReReviewSender:   "<@USENDER>",
+		PendingReReviewReviewer: "<@UREVIEWER1>",
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 911, "html_url": "https://github.com/owner/repo/pull/911"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "approved", "user": {"login": "reviewer1"}}
+	}`
+
+	assert.Equal(t, http.StatusOK, postReviewSubmitted(t, db, payload).Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "full-pending-task").First(&updated)
+	assert.Equal(t, "completed", updated.Status)
+	assert.False(t, updated.PendingReReviewNotify, "reviewing must clear the pending re-review flag")
+}
+
+func TestHandleReviewSubmittedEvent_ChangesRequestedClearsPendingReReview(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Times(2).
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	config := models.ChannelConfig{
+		ID:               "config-changes-pending",
+		SlackChannelID:   "C_CHANGES_PENDING",
+		LabelName:        "needs-review",
+		DefaultMentionID: "UDEFAULT",
+		IsActive:         true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{
+		ID:             "mapping-changes-pending",
+		GithubUsername: "reviewer1",
+		SlackUserID:    "UREVIEWER1",
+	})
+
+	task := models.ReviewTask{
+		ID:                      "changes-pending-task",
+		PRURL:                   "https://github.com/owner/repo/pull/912",
+		Repo:                    "owner/repo",
+		PRNumber:                912,
+		Title:                   "Changes requested with pending re-review",
+		SlackTS:                 "1234.9120",
+		SlackChannel:            "C_CHANGES_PENDING",
+		Reviewer:                "UREVIEWER1",
+		Status:                  "in_review",
+		LabelName:               "needs-review",
+		PendingReReviewNotify:   true,
+		PendingReReviewSender:   "<@USENDER>",
+		PendingReReviewReviewer: "<@UREVIEWER1>",
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 912, "html_url": "https://github.com/owner/repo/pull/912"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "changes_requested", "user": {"login": "reviewer1"}}
+	}`
+
+	assert.Equal(t, http.StatusOK, postReviewSubmitted(t, db, payload).Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "changes-pending-task").First(&updated)
+	assert.Equal(t, "completed", updated.Status)
+	assert.False(t, updated.PendingReReviewNotify, "reviewing must clear the pending re-review flag")
+}
+
+// End-to-end guard: after a partial approval the next business-day sweep must not send
+// the queued re-review notification.
+func TestPartialApprovalThenBusinessHoursSweep_SendsNoReReviewNotification(t *testing.T) {
+	loc, _ := time.LoadLocation("Asia/Tokyo")
+	if wd := time.Now().In(loc).Weekday(); wd == time.Saturday || wd == time.Sunday {
+		t.Skip("This test requires running on a weekday")
+	}
+
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.OffAll()
+	gock.CleanUnmatchedRequest()
+
+	// Only the two approval-flow messages are expected. A morning re-review notification
+	// would be a third, unmatched request.
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Times(2).
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	config := models.ChannelConfig{
+		ID:                 "config-sweep-pending",
+		SlackChannelID:     "C_SWEEP_PENDING",
+		LabelName:          "needs-review",
+		DefaultMentionID:   "UDEFAULT",
+		RequiredApprovals:  2,
+		IsActive:           true,
+		BusinessHoursStart: "00:00",
+		BusinessHoursEnd:   "23:59",
+		Timezone:           "Asia/Tokyo",
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{
+		ID:             "mapping-sweep-pending",
+		GithubUsername: "reviewer1",
+		SlackUserID:    "UREVIEWER1",
+	})
+
+	task := models.ReviewTask{
+		ID:                      "sweep-pending-task",
+		PRURL:                   "https://github.com/owner/repo/pull/914",
+		Repo:                    "owner/repo",
+		PRNumber:                914,
+		Title:                   "Reviewed overnight, sweep next morning",
+		SlackTS:                 "1234.9140",
+		SlackChannel:            "C_SWEEP_PENDING",
+		Reviewer:                "UREVIEWER1",
+		Reviewers:               "UREVIEWER1,UREVIEWER2",
+		Status:                  "in_review",
+		LabelName:               "needs-review",
+		PendingReReviewNotify:   true,
+		PendingReReviewSender:   "<@USENDER>",
+		PendingReReviewReviewer: "<@UREVIEWER1>",
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 914, "html_url": "https://github.com/owner/repo/pull/914"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "approved", "user": {"login": "reviewer1"}}
+	}`
+
+	assert.Equal(t, http.StatusOK, postReviewSubmitted(t, db, payload).Code)
+
+	services.CheckPendingReReviewNotifications(db)
+
+	assert.False(t, gock.HasUnmatchedRequest(), "no re-review notification should be sent after the review was done")
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "sweep-pending-task").First(&updated)
+	assert.False(t, updated.PendingReReviewNotify)
+}
+
+// A dismissal revokes an approval, so the queued re-review notification must survive.
+func TestHandleReviewSubmittedEvent_DismissedKeepsPendingReReview(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+
+	config := models.ChannelConfig{
+		ID:                "config-dismiss-pending",
+		SlackChannelID:    "C_DISMISS_PENDING",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		RequiredApprovals: 2,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{
+		ID:             "mapping-dismiss-pending",
+		GithubUsername: "reviewer1",
+		SlackUserID:    "UREVIEWER1",
+	})
+
+	task := models.ReviewTask{
+		ID:                      "dismiss-pending-task",
+		PRURL:                   "https://github.com/owner/repo/pull/913",
+		Repo:                    "owner/repo",
+		PRNumber:                913,
+		Title:                   "Dismissed with pending re-review",
+		SlackTS:                 "1234.9130",
+		SlackChannel:            "C_DISMISS_PENDING",
+		Reviewer:                "UREVIEWER1",
+		ApprovedBy:              "UREVIEWER1",
+		Status:                  "in_review",
+		LabelName:               "needs-review",
+		PendingReReviewNotify:   true,
+		PendingReReviewSender:   "<@USENDER>",
+		PendingReReviewReviewer: "<@UREVIEWER1>",
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 913, "html_url": "https://github.com/owner/repo/pull/913"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "dismissed", "user": {"login": "reviewer1"}}
+	}`
+
+	assert.Equal(t, http.StatusOK, postReviewSubmitted(t, db, payload).Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "dismiss-pending-task").First(&updated)
+	assert.Equal(t, "in_review", updated.Status)
+	assert.True(t, updated.PendingReReviewNotify, "dismissal must keep the pending re-review notification")
+	assert.Equal(t, "<@USENDER>", updated.PendingReReviewSender)
+	assert.Equal(t, "<@UREVIEWER1>", updated.PendingReReviewReviewer)
+}
+
+// pending re-review pairs are per-requested-reviewer, so an approval by someone else
+// does not satisfy them and they must survive a partial approval.
+func TestHandleReviewSubmittedEvent_PartialApprovalKeepsPendingReReviewForOtherReviewer(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Times(2).
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	config := models.ChannelConfig{
+		ID:                "config-partial-other",
+		SlackChannelID:    "C_PARTIAL_OTHER",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		RequiredApprovals: 2,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{
+		ID:             "mapping-partial-other",
+		GithubUsername: "reviewer1",
+		SlackUserID:    "UREVIEWER1",
+	})
+
+	task := models.ReviewTask{
+		ID:                      "partial-other-task",
+		PRURL:                   "https://github.com/owner/repo/pull/915",
+		Repo:                    "owner/repo",
+		PRNumber:                915,
+		Title:                   "Partial approval by a different reviewer",
+		SlackTS:                 "1234.9150",
+		SlackChannel:            "C_PARTIAL_OTHER",
+		Reviewer:                "UREVIEWER1",
+		Reviewers:               "UREVIEWER1,UREVIEWER2",
+		Status:                  "in_review",
+		LabelName:               "needs-review",
+		PendingReReviewNotify:   true,
+		PendingReReviewSender:   "<@USENDER>",
+		PendingReReviewReviewer: "<@UREVIEWER2>",
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 915, "html_url": "https://github.com/owner/repo/pull/915"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "approved", "user": {"login": "reviewer1"}}
+	}`
+
+	assert.Equal(t, http.StatusOK, postReviewSubmitted(t, db, payload).Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "partial-other-task").First(&updated)
+	assert.Equal(t, "in_review", updated.Status)
+	assert.True(t, updated.PendingReReviewNotify, "a request addressed to another reviewer must survive")
+	assert.Equal(t, "<@USENDER>", updated.PendingReReviewSender)
+	assert.Equal(t, "<@UREVIEWER2>", updated.PendingReReviewReviewer)
+}
+
+func TestHandleReviewSubmittedEvent_PartialApprovalClearsOnlyMatchingPendingPair(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Times(2).
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	config := models.ChannelConfig{
+		ID:                "config-partial-mixed",
+		SlackChannelID:    "C_PARTIAL_MIXED",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		RequiredApprovals: 3,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	db.Create(&models.UserMapping{
+		ID:             "mapping-partial-mixed",
+		GithubUsername: "reviewer1",
+		SlackUserID:    "UREVIEWER1",
+	})
+
+	task := models.ReviewTask{
+		ID:                      "partial-mixed-task",
+		PRURL:                   "https://github.com/owner/repo/pull/916",
+		Repo:                    "owner/repo",
+		PRNumber:                916,
+		Title:                   "Partial approval with several queued pairs",
+		SlackTS:                 "1234.9160",
+		SlackChannel:            "C_PARTIAL_MIXED",
+		Reviewer:                "UREVIEWER1",
+		Reviewers:               "UREVIEWER1,UREVIEWER2",
+		Status:                  "in_review",
+		LabelName:               "needs-review",
+		PendingReReviewNotify:   true,
+		PendingReReviewSender:   "<@USENDER1>,<@USENDER2>,<@USENDER3>",
+		PendingReReviewReviewer: "<@UREVIEWER2>,<@UREVIEWER1>,<@UREVIEWER3>",
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 916, "html_url": "https://github.com/owner/repo/pull/916"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "approved", "user": {"login": "reviewer1"}}
+	}`
+
+	assert.Equal(t, http.StatusOK, postReviewSubmitted(t, db, payload).Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "partial-mixed-task").First(&updated)
+	assert.True(t, updated.PendingReReviewNotify)
+	assert.Equal(t, "<@USENDER1>,<@USENDER3>", updated.PendingReReviewSender)
+	assert.Equal(t, "<@UREVIEWER2>,<@UREVIEWER3>", updated.PendingReReviewReviewer)
+}
+
+// Without a user mapping the pending pair holds the GitHub login, so the comparison
+// must fall back to the same form.
+func TestHandleReviewSubmittedEvent_PartialApprovalClearsPendingPairByGithubLogin(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() { _ = os.Setenv("SLACK_BOT_TOKEN", originalToken) }()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Times(2).
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	config := models.ChannelConfig{
+		ID:                "config-partial-login",
+		SlackChannelID:    "C_PARTIAL_LOGIN",
+		LabelName:         "needs-review",
+		DefaultMentionID:  "UDEFAULT",
+		RequiredApprovals: 2,
+		IsActive:          true,
+	}
+	db.Create(&config)
+
+	task := models.ReviewTask{
+		ID:                      "partial-login-task",
+		PRURL:                   "https://github.com/owner/repo/pull/917",
+		Repo:                    "owner/repo",
+		PRNumber:                917,
+		Title:                   "Partial approval without a user mapping",
+		SlackTS:                 "1234.9170",
+		SlackChannel:            "C_PARTIAL_LOGIN",
+		Reviewer:                "UREVIEWER1",
+		Reviewers:               "UREVIEWER1,UREVIEWER2",
+		Status:                  "in_review",
+		LabelName:               "needs-review",
+		PendingReReviewNotify:   true,
+		PendingReReviewSender:   "sender1",
+		PendingReReviewReviewer: "reviewer1",
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+	}
+	db.Create(&task)
+
+	payload := `{
+		"action": "submitted",
+		"pull_request": {"number": 917, "html_url": "https://github.com/owner/repo/pull/917"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"review": {"state": "approved", "user": {"login": "reviewer1"}}
+	}`
+
+	assert.Equal(t, http.StatusOK, postReviewSubmitted(t, db, payload).Code)
+
+	var updated models.ReviewTask
+	db.Where("id = ?", "partial-login-task").First(&updated)
+	assert.False(t, updated.PendingReReviewNotify, "the only queued pair was addressed to the approver")
+	assert.Empty(t, updated.PendingReReviewSender)
+	assert.Empty(t, updated.PendingReReviewReviewer)
 }
