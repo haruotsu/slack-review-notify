@@ -169,6 +169,8 @@ When a review is submitted on GitHub, a thank-you message is automatically poste
 - Changes requested: `🔄 reviewer requested changes. Thanks! 👏`
 - Commented: `💬 reviewer left a review comment. Thanks! 👏`
 
+Comments and change requests from bots (GitHub Apps) and from the PR author are ignored: they are not posted to the thread and reminders keep running.
+
 #### Off-Hours Queuing
 When a PR is labeled outside business hours:
 - Notification is held until business hours
