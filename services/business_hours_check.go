@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/haruotsu/go-jpholiday/holiday"
+	holiday "github.com/holiday-jp/holiday_jp-go"
 )
 
 // IsWithinBusinessHours determines whether the given time falls within business hours

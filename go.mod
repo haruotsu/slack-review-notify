@@ -7,7 +7,7 @@ require (
 	github.com/google/go-github/v71 v71.0.0
 	github.com/google/uuid v1.6.0
 	github.com/h2non/gock v1.2.0
-	github.com/haruotsu/go-jpholiday v0.0.4
+	github.com/holiday-jp/holiday_jp-go v0.0.0-20220125203534-53124b4cc19c
 	github.com/joho/godotenv v1.5.1
 	github.com/slack-go/slack v0.16.0
 	github.com/stretchr/testify v1.10.0
