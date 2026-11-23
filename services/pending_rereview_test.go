@@ -31,7 +31,7 @@ func TestCheckPendingReReviewNotifications_SendsDuringBusinessHours(t *testing.T
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 
-	// Create channel config with 24h business hours (always within business hours on weekdays)
+	// Create channel config with 24h business hours and holiday notifications on (always within business hours)
 	config := models.ChannelConfig{
 		ID:                 "config-pending-rr",
 		SlackChannelID:     "C_PENDING_RR",
@@ -39,6 +39,7 @@ func TestCheckPendingReReviewNotifications_SendsDuringBusinessHours(t *testing.T
 		IsActive:           true,
 		BusinessHoursStart: "00:00",
 		BusinessHoursEnd:   "23:59",
+		NotifyOnHolidays:   true, // keep the test independent of weekends and holidays
 		CreatedAt:          time.Now(),
 		UpdatedAt:          time.Now(),
 	}
@@ -246,6 +247,7 @@ func TestCheckPendingReReviewNotifications_MultipleNotifications(t *testing.T) {
 		IsActive:           true,
 		BusinessHoursStart: "00:00",
 		BusinessHoursEnd:   "23:59",
+		NotifyOnHolidays:   true, // keep the test independent of weekends and holidays
 		CreatedAt:          time.Now(),
 		UpdatedAt:          time.Now(),
 	}
@@ -311,6 +313,7 @@ func TestCheckPendingReReviewNotifications_SkipsSamePair(t *testing.T) {
 		IsActive:           true,
 		BusinessHoursStart: "00:00",
 		BusinessHoursEnd:   "23:59",
+		NotifyOnHolidays:   true, // keep the test independent of weekends and holidays
 		CreatedAt:          time.Now(),
 		UpdatedAt:          time.Now(),
 	}
