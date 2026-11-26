@@ -25,18 +25,30 @@ const LabelSelectActionID = "label_select"
 // BuildSettingsModalView renders a new_label_name input below the dropdown.
 const CreateNewLabelSentinel = "__create_new__"
 
-// RenameLabelBlockID returns the block_id of the rename field for one label.
+// SettingsFieldBlockID returns the block_id a settings field is rendered under
+// while labelName (or CreateNewLabelSentinel) is selected in the dropdown.
 //
-// The id is not a constant on purpose. Slack carries a typed value over a
-// views.update whenever the block_id is unchanged, so with a fixed id a name
-// typed while editing one label would still be in the field after the dropdown
-// switched to another, and saving would rename the wrong label. The label is
-// hashed rather than embedded because block_id is capped at 255 characters and
-// a label name is not.
-func RenameLabelBlockID(labelName string) string {
+// The id is not the bare field name on purpose. Slack carries an input's value
+// over a views.update whenever its block_id and action_id are unchanged, and
+// ignores the new initial_value. With fixed ids, switching the dropdown from one
+// label to another would keep the first label's values on screen, and saving
+// would write them onto the label the user had just picked. The label is hashed
+// rather than embedded because block_id is capped at 255 characters and a label
+// name is not.
+func SettingsFieldBlockID(field, labelName string) string {
 	sum := sha1.Sum([]byte(labelName))
-	return "rename_label:" + hex.EncodeToString(sum[:8])
+	return field + ":" + hex.EncodeToString(sum[:8])
 }
+
+// RenameLabelBlockID returns the block_id of the rename field for one label.
+func RenameLabelBlockID(labelName string) string {
+	return SettingsFieldBlockID(renameLabelField, labelName)
+}
+
+const (
+	renameLabelField  = "rename_label"
+	newLabelNameField = "new_label_name"
+)
 
 // SettingsModalMetadata is what we stash in `view.private_metadata`. Channel ID
 // and user ID are stable across re-renders of the modal; the currently-selected
@@ -110,6 +122,7 @@ type SettingsForm struct {
 	LabelName                string
 	RenameTo                 string // new name for an existing label; empty keeps the current name
 	RenameBlockID            string // block the rename field was read from, for reporting errors on it
+	DeleteBlockID            string // block the delete checkbox was read from, for reporting errors on it
 	CreateNew                bool   // true when the user picked the create-new sentinel
 	DeleteConfig             bool   // true when the delete checkbox was checked
 	DefaultMentionID         string
@@ -225,20 +238,49 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		notifyOnHolidays = cfg.NotifyOnHolidays
 	}
 
+	// If the requested SelectedLabel isn't in the channel's configs (e.g. the
+	// help button passes "needs-review" before any config exists), force the
+	// dropdown to start on the create-new option so the user isn't presented
+	// with an unmatched initial selection.
+	initialLabel := in.SelectedLabel
+	if !creatingNew {
+		hasMatch := false
+		for _, c := range in.Configs {
+			if c != nil && c.LabelName == initialLabel {
+				hasMatch = true
+				break
+			}
+		}
+		if !hasMatch {
+			initialLabel = CreateNewLabelSentinel
+			creatingNew = true
+		}
+	}
+
+	// label_select must keep its id: it is the field the user just changed, and
+	// its new value is what this render is for. new_label_name is only rendered
+	// in create-new mode, so there is no other label's value it could carry.
+	blockIDFor := func(field string) string {
+		if field == LabelSelectActionID || field == newLabelNameField {
+			return field
+		}
+		return SettingsFieldBlockID(field, initialLabel)
+	}
+
 	plainText := func(s string) map[string]any {
 		return map[string]any{"type": "plain_text", "text": s}
 	}
-	plainInput := func(blockID, label, hint, initial string, optional bool) map[string]any {
+	plainInput := func(field, label, hint, initial string, optional bool) map[string]any {
 		element := map[string]any{
 			"type":      "plain_text_input",
-			"action_id": blockID,
+			"action_id": field,
 		}
 		if initial != "" {
 			element["initial_value"] = initial
 		}
 		block := map[string]any{
 			"type":     "input",
-			"block_id": blockID,
+			"block_id": blockIDFor(field),
 			"label":    plainText(label),
 			"element":  element,
 		}
@@ -256,10 +298,10 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 			"value": value,
 		}
 	}
-	staticSelect := func(blockID, label string, options []map[string]any, initialValue string, dispatchAction bool) map[string]any {
+	staticSelect := func(field, label string, options []map[string]any, initialValue string, dispatchAction bool) map[string]any {
 		element := map[string]any{
 			"type":      "static_select",
-			"action_id": blockID,
+			"action_id": field,
 			"options":   options,
 		}
 		for _, opt := range options {
@@ -270,7 +312,7 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		}
 		block := map[string]any{
 			"type":     "input",
-			"block_id": blockID,
+			"block_id": blockIDFor(field),
 			"label":    plainText(label),
 			"element":  element,
 		}
@@ -294,25 +336,6 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		labelOptions = append(labelOptions, option(c.LabelName, c.LabelName))
 	}
 	labelOptions = append(labelOptions, option(t("modal.label_select.create_new"), CreateNewLabelSentinel))
-
-	// If the requested SelectedLabel isn't in the channel's configs (e.g. the
-	// help button passes "needs-review" before any config exists), force the
-	// dropdown to start on the create-new option so the user isn't presented
-	// with an unmatched initial selection.
-	initialLabel := in.SelectedLabel
-	if !creatingNew {
-		hasMatch := false
-		for _, c := range in.Configs {
-			if c != nil && c.LabelName == initialLabel {
-				hasMatch = true
-				break
-			}
-		}
-		if !hasMatch {
-			initialLabel = CreateNewLabelSentinel
-			creatingNew = true
-		}
-	}
 
 	langOptions := []map[string]any{
 		option(t("modal.lang.ja"), "ja"),
@@ -340,14 +363,14 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 				"text": t("modal.header"),
 			},
 		},
-		staticSelect("label_select", t("modal.label_select"), labelOptions, initialLabel, true),
+		staticSelect(LabelSelectActionID, t("modal.label_select"), labelOptions, initialLabel, true),
 	}
 
 	if creatingNew {
 		// new_label_name is only rendered in create-new mode so editing an
 		// existing label never silently triggers a rename.
 		blocks = append(blocks, plainInput(
-			"new_label_name",
+			newLabelNameField,
 			t("modal.new_label_name"),
 			t("modal.new_label_name.hint"),
 			"",
@@ -358,7 +381,7 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		// this one moves an existing row, and sharing a block would let a stale
 		// value from one mode act in the other after the dropdown re-renders.
 		blocks = append(blocks, plainInput(
-			RenameLabelBlockID(initialLabel),
+			renameLabelField,
 			t("modal.rename_label"),
 			t("modal.rename_label.hint"),
 			"",
@@ -378,7 +401,7 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 	}
 	mentionUserBlock := map[string]any{
 		"type":     "input",
-		"block_id": "default_mention_user",
+		"block_id": blockIDFor("default_mention_user"),
 		"optional": true,
 		"label":    plainText(t("modal.default_mention_user")),
 		"hint":     plainText(t("modal.default_mention_user.hint")),
@@ -407,7 +430,7 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 	}
 	reviewerBlock := map[string]any{
 		"type":     "input",
-		"block_id": "reviewer_list",
+		"block_id": blockIDFor("reviewer_list"),
 		"optional": true,
 		"label":    plainText(t("modal.reviewer_list")),
 		"hint":     plainText(t("modal.reviewer_list.hint")),
@@ -444,7 +467,7 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 		deleteOption := option(t("modal.delete_config.option"), "yes")
 		blocks = append(blocks, map[string]any{
 			"type":     "input",
-			"block_id": "delete_config",
+			"block_id": blockIDFor("delete_config"),
 			"optional": true,
 			"label":    plainText(t("modal.delete_config")),
 			"element": map[string]any{
@@ -569,9 +592,29 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 		form.LabelName = selected
 	}
 
+	// Each field is read from, and its error reported on, the block rendered for
+	// the label the dropdown was on at submit (see SettingsFieldBlockID).
+	scope := form.LabelName
+	if form.CreateNew {
+		scope = CreateNewLabelSentinel
+	}
+	blockID := func(field string) string {
+		id := SettingsFieldBlockID(field, scope)
+		if _, ok := values[id]; ok {
+			return id
+		}
+		// A modal opened before ids were label-scoped can still be submitted
+		// after a deploy; rejecting it would throw away what the user typed.
+		if _, ok := values[field]; ok {
+			return field
+		}
+		return id
+	}
+
 	// Delete checkbox short-circuits the rest of validation: when the user
 	// asked to delete the row, the other fields don't need to be valid.
-	form.DeleteConfig = checkboxChecked("delete_config", "yes")
+	form.DeleteBlockID = blockID("delete_config")
+	form.DeleteConfig = checkboxChecked(form.DeleteBlockID, "yes")
 	if form.DeleteConfig && !form.CreateNew {
 		// Still need the label name to know what to delete; selectField above
 		// already set it. No further validation needed.
@@ -586,66 +629,66 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 	// as-is. We don't try to resolve the text to an ID — existing channel
 	// configs commonly use decorative text here, and buildMentionText handles
 	// the routing at message-render time.
-	if user := selectedUser("default_mention_user"); user != "" {
+	if user := selectedUser(blockID("default_mention_user")); user != "" {
 		form.DefaultMentionID = user
 	} else {
-		form.DefaultMentionID = strings.TrimSpace(field("default_mention_text"))
+		form.DefaultMentionID = strings.TrimSpace(field(blockID("default_mention_text")))
 	}
 
 	// Reviewer pool: multi_users_select for picked users + free-text CSV for
 	// anything else (legacy bare names, decorative entries). The two lists are
 	// concatenated, with picker IDs first, and stored as a single CSV.
-	pickerReviewers := selectedUsers("reviewer_list")
-	textReviewers := normalizeCSV(field("reviewer_list_text"))
+	pickerReviewers := selectedUsers(blockID("reviewer_list"))
+	textReviewers := normalizeCSV(field(blockID("reviewer_list_text")))
 	merged := make([]string, 0, len(pickerReviewers)+1)
 	merged = append(merged, pickerReviewers...)
 	if textReviewers != "" {
 		merged = append(merged, strings.Split(textReviewers, ",")...)
 	}
 	form.ReviewerList = strings.Join(merged, ",")
-	form.RepositoryList = normalizeCSV(field("repository_list"))
+	form.RepositoryList = normalizeCSV(field(blockID("repository_list")))
 
-	if interval, err := strconv.Atoi(field("reminder_interval")); err != nil || interval <= 0 {
-		errs["reminder_interval"] = "must be a positive integer"
+	if interval, err := strconv.Atoi(field(blockID("reminder_interval"))); err != nil || interval <= 0 {
+		errs[blockID("reminder_interval")] = "must be a positive integer"
 	} else {
 		form.ReminderInterval = interval
 	}
 
-	intervalStr := field("reviewer_reminder_interval")
+	intervalStr := field(blockID("reviewer_reminder_interval"))
 	if interval, err := strconv.Atoi(intervalStr); err != nil || interval <= 0 {
-		errs["reviewer_reminder_interval"] = "must be a positive integer"
+		errs[blockID("reviewer_reminder_interval")] = "must be a positive integer"
 	} else {
 		form.ReviewerReminderInterval = interval
 	}
 
-	form.BusinessHoursStart = field("business_hours_start")
+	form.BusinessHoursStart = field(blockID("business_hours_start"))
 	if !isValidHHMM(form.BusinessHoursStart) {
-		errs["business_hours_start"] = "must be HH:MM"
+		errs[blockID("business_hours_start")] = "must be HH:MM"
 	}
-	form.BusinessHoursEnd = field("business_hours_end")
+	form.BusinessHoursEnd = field(blockID("business_hours_end"))
 	if !isValidHHMM(form.BusinessHoursEnd) {
-		errs["business_hours_end"] = "must be HH:MM"
+		errs[blockID("business_hours_end")] = "must be HH:MM"
 	}
 
-	form.Timezone = field("timezone")
+	form.Timezone = field(blockID("timezone"))
 	if _, err := time.LoadLocation(form.Timezone); err != nil {
-		errs["timezone"] = "invalid IANA timezone"
+		errs[blockID("timezone")] = "invalid IANA timezone"
 	}
 
-	approvalsStr := field("required_approvals")
+	approvalsStr := field(blockID("required_approvals"))
 	if approvals, err := strconv.Atoi(approvalsStr); err != nil || approvals < 1 || approvals > 10 {
-		errs["required_approvals"] = "must be 1-10"
+		errs[blockID("required_approvals")] = "must be 1-10"
 	} else {
 		form.RequiredApprovals = approvals
 	}
 
-	form.Language = selectField("language")
+	form.Language = selectField(blockID("language"))
 	if form.Language != "ja" && form.Language != "en" {
-		errs["language"] = "must be ja or en"
+		errs[blockID("language")] = "must be ja or en"
 	}
 
 	if !form.CreateNew {
-		form.RenameBlockID = RenameLabelBlockID(form.LabelName)
+		form.RenameBlockID = blockID(renameLabelField)
 		form.RenameTo = field(form.RenameBlockID)
 		if form.RenameTo == form.LabelName {
 			form.RenameTo = ""
@@ -657,23 +700,23 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 
 	// A modal opened before this field existed submits without it. Rejecting the
 	// whole form or defaulting to "off" would silently undo a value set by command.
-	switch notifyOnHolidays := selectField("notify_on_holidays"); notifyOnHolidays {
+	switch notifyOnHolidays := selectField(blockID("notify_on_holidays")); notifyOnHolidays {
 	case "true", "false":
 		enabled := notifyOnHolidays == "true"
 		form.NotifyOnHolidays = &enabled
 	case "":
 	default:
-		errs["notify_on_holidays"] = "must be true or false"
+		errs[blockID("notify_on_holidays")] = "must be true or false"
 	}
 
-	activeStr := selectField("is_active")
+	activeStr := selectField(blockID("is_active"))
 	switch activeStr {
 	case "true":
 		form.IsActive = true
 	case "false":
 		form.IsActive = false
 	default:
-		errs["is_active"] = "must be true or false"
+		errs[blockID("is_active")] = "must be true or false"
 	}
 
 	if len(errs) > 0 {

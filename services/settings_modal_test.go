@@ -79,7 +79,7 @@ func TestBuildSettingsModalView_HasAllFields(t *testing.T) {
 	// label_select: static_select. default_mention_user/reviewer_list: native
 	// pickers. default_mention_text/reviewer_list_text: free-text companions
 	// for subteam IDs, decorative text, and legacy non-ID data.
-	requiredBlockIDs := []string{
+	requiredFields := []string{
 		"label_select",
 		"default_mention_user",
 		"default_mention_text",
@@ -99,14 +99,15 @@ func TestBuildSettingsModalView_HasAllFields(t *testing.T) {
 
 	found := make(map[string]bool)
 	for _, b := range blocks {
-		if id, ok := b["block_id"].(string); ok {
+		el, _ := b["element"].(map[string]any)
+		if id, ok := el["action_id"].(string); ok {
 			found[id] = true
 		}
 	}
 
-	for _, want := range requiredBlockIDs {
+	for _, want := range requiredFields {
 		if !found[want] {
-			t.Errorf("missing block_id: %s", want)
+			t.Errorf("missing field: %s", want)
 		}
 	}
 
@@ -142,21 +143,19 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 	})
 	blocks := view["blocks"].([]map[string]any)
 
-	getElement := func(blockID string) map[string]any {
+	getElement := func(field string) map[string]any {
 		for _, b := range blocks {
-			if id, ok := b["block_id"].(string); ok && id == blockID {
-				if el, ok := b["element"].(map[string]any); ok {
-					return el
-				}
+			if el, ok := b["element"].(map[string]any); ok && el["action_id"] == field {
+				return el
 			}
 		}
 		return nil
 	}
 
 	tests := []struct {
-		blockID string
-		key     string
-		want    string
+		field string
+		key   string
+		want  string
 	}{
 		// users_select uses initial_user (singular, just an ID string)
 		{"default_mention_user", "initial_user", "U99999"},
@@ -170,14 +169,14 @@ func TestBuildSettingsModalView_InitialValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		el := getElement(tt.blockID)
+		el := getElement(tt.field)
 		if el == nil {
-			t.Errorf("element for %s not found", tt.blockID)
+			t.Errorf("element for %s not found", tt.field)
 			continue
 		}
 		got, _ := el[tt.key].(string)
 		if got != tt.want {
-			t.Errorf("%s.%s = %q, want %q", tt.blockID, tt.key, got, tt.want)
+			t.Errorf("%s.%s = %q, want %q", tt.field, tt.key, got, tt.want)
 		}
 	}
 
@@ -249,7 +248,8 @@ func TestBuildSettingsModalView_CreateNewMode(t *testing.T) {
 
 	found := make(map[string]bool)
 	for _, b := range blocks {
-		if id, ok := b["block_id"].(string); ok {
+		el, _ := b["element"].(map[string]any)
+		if id, ok := el["action_id"].(string); ok {
 			found[id] = true
 		}
 	}
@@ -261,13 +261,11 @@ func TestBuildSettingsModalView_CreateNewMode(t *testing.T) {
 	}
 
 	// Defaults: 09:00 / 18:00 / Asia/Tokyo / 1 approver / 30min reviewer reminder
-	getInitial := func(blockID string) string {
+	getInitial := func(field string) string {
 		for _, b := range blocks {
-			if id, _ := b["block_id"].(string); id == blockID {
-				if el, ok := b["element"].(map[string]any); ok {
-					v, _ := el["initial_value"].(string)
-					return v
-				}
+			if el, ok := b["element"].(map[string]any); ok && el["action_id"] == field {
+				v, _ := el["initial_value"].(string)
+				return v
 			}
 		}
 		return ""
@@ -696,5 +694,159 @@ func TestBuildMentionText_PassesThroughFreeText(t *testing.T) {
 		if got := buildMentionText(in); got != want {
 			t.Errorf("buildMentionText(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// inputBlockIDs returns the block_id of every input block in the view, keyed
+// by the block's action_id so fields can be compared across two renders.
+func inputBlockIDs(t *testing.T, view map[string]any) map[string]string {
+	t.Helper()
+	ids := map[string]string{}
+	for _, b := range view["blocks"].([]map[string]any) {
+		if b["type"] != "input" {
+			continue
+		}
+		el := b["element"].(map[string]any)
+		ids[el["action_id"].(string)] = b["block_id"].(string)
+	}
+	return ids
+}
+
+func TestBuildSettingsModalView_SwitchingLabelRendersFreshInputBlocks(t *testing.T) {
+	configs := []*models.ChannelConfig{
+		{LabelName: "needs-review", ReminderInterval: 10},
+		{LabelName: "urgent", ReminderInterval: 60},
+	}
+	render := func(selected string) map[string]string {
+		return inputBlockIDs(t, BuildSettingsModalView(SettingsModalInputs{
+			ChannelID: "C1", UserID: "U1", SelectedLabel: selected, Configs: configs, Lang: "ja",
+		}))
+	}
+	first := render("needs-review")
+	second := render("urgent")
+	creating := render(CreateNewLabelSentinel)
+
+	for actionID, before := range first {
+		if actionID == LabelSelectActionID {
+			if second[actionID] != before {
+				t.Errorf("label_select block_id must stay stable across labels")
+			}
+			continue
+		}
+		if after, ok := second[actionID]; ok && after == before {
+			t.Errorf("%s keeps block_id %q after switching label, so Slack would carry the previous label's value over", actionID, before)
+		}
+		if after, ok := creating[actionID]; ok && after == before {
+			t.Errorf("%s keeps block_id %q after switching to create-new, so Slack would carry the previous label's value over", actionID, before)
+		}
+	}
+}
+
+// submitUnchanged builds the state.values Slack would send if the user pressed
+// submit without touching any field of the rendered view.
+func submitUnchanged(t *testing.T, view map[string]any) map[string]map[string]ViewStateValue {
+	t.Helper()
+	values := map[string]map[string]ViewStateValue{}
+	for _, b := range view["blocks"].([]map[string]any) {
+		if b["type"] != "input" {
+			continue
+		}
+		el := b["element"].(map[string]any)
+		actionID := el["action_id"].(string)
+		v := ViewStateValue{Type: el["type"].(string)}
+		switch v.Type {
+		case "plain_text_input":
+			v.Value, _ = el["initial_value"].(string)
+		case "static_select":
+			if opt, ok := el["initial_option"].(map[string]any); ok {
+				v.SelectedOption = &ViewSelectedOption{Value: opt["value"].(string)}
+			}
+		case "users_select":
+			v.SelectedUser, _ = el["initial_user"].(string)
+		case "multi_users_select":
+			v.SelectedUsers, _ = el["initial_users"].([]string)
+		}
+		values[b["block_id"].(string)] = map[string]ViewStateValue{actionID: v}
+	}
+	return values
+}
+
+func TestParseSettingsModalSubmission_ReadsTheFieldsRenderedForTheSelectedLabel(t *testing.T) {
+	configs := []*models.ChannelConfig{
+		{LabelName: "needs-review", ReminderInterval: 10, Timezone: "Asia/Tokyo", Language: "ja", IsActive: true},
+		{
+			LabelName:                "urgent",
+			DefaultMentionID:         "U99999",
+			ReviewerList:             "U1,alice",
+			RepositoryList:           "owner/repo",
+			ReminderInterval:         60,
+			ReviewerReminderInterval: 45,
+			BusinessHoursStart:       "10:00",
+			BusinessHoursEnd:         "19:00",
+			Timezone:                 "UTC",
+			RequiredApprovals:        2,
+			Language:                 "en",
+			NotifyOnHolidays:         true,
+			IsActive:                 false,
+		},
+	}
+	view := BuildSettingsModalView(SettingsModalInputs{
+		ChannelID: "C1", UserID: "U1", SelectedLabel: "urgent", Configs: configs, Lang: "ja",
+	})
+
+	got, err := ParseSettingsModalSubmission(submitUnchanged(t, view))
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	want := configs[1]
+	if got.LabelName != want.LabelName ||
+		got.DefaultMentionID != want.DefaultMentionID ||
+		got.ReviewerList != want.ReviewerList ||
+		got.RepositoryList != want.RepositoryList ||
+		got.ReminderInterval != want.ReminderInterval ||
+		got.ReviewerReminderInterval != want.ReviewerReminderInterval ||
+		got.BusinessHoursStart != want.BusinessHoursStart ||
+		got.BusinessHoursEnd != want.BusinessHoursEnd ||
+		got.Timezone != want.Timezone ||
+		got.RequiredApprovals != want.RequiredApprovals ||
+		got.Language != want.Language ||
+		got.NotifyOnHolidays == nil || *got.NotifyOnHolidays != want.NotifyOnHolidays ||
+		got.IsActive != want.IsActive ||
+		got.RenameTo != "" || got.DeleteConfig {
+		t.Errorf("submitting the unchanged view must reproduce the selected label's config\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+func TestParseSettingsModalSubmission_ReportsErrorsOnTheRenderedBlock(t *testing.T) {
+	view := BuildSettingsModalView(SettingsModalInputs{
+		ChannelID: "C1", UserID: "U1", SelectedLabel: "urgent",
+		Configs: []*models.ChannelConfig{{LabelName: "urgent"}}, Lang: "ja",
+	})
+	reminderBlockID := inputBlockIDs(t, view)["reminder_interval"]
+	values := submitUnchanged(t, view)
+	values[reminderBlockID] = map[string]ViewStateValue{"reminder_interval": {Value: "abc"}}
+
+	_, err := ParseSettingsModalSubmission(values)
+
+	ve, ok := err.(*ModalValidationError)
+	if !ok {
+		t.Fatalf("want *ModalValidationError, got %T (%v)", err, err)
+	}
+	if _, has := ve.Errors[reminderBlockID]; !has {
+		t.Errorf("error must be keyed by the rendered block_id %q so Slack can show it; got %v", reminderBlockID, ve.Errors)
+	}
+}
+
+func TestParseSettingsModalSubmission_AcceptsAModalRenderedWithUnscopedBlockIDs(t *testing.T) {
+	values := minimalValidParseValues()
+	values["reminder_interval"] = map[string]ViewStateValue{"reminder_interval": {Value: "45"}}
+
+	got, err := ParseSettingsModalSubmission(values)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got.ReminderInterval != 45 {
+		t.Errorf("ReminderInterval = %d, want 45", got.ReminderInterval)
 	}
 }
