@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -255,29 +256,35 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 
 		// Handle each action
 		switch actionID {
-		case "review_done":
-			// Search for task using ts and channel (retry after a short delay if in pending state)
-			var task models.ReviewTask
-			const maxRetries = 5
-			const retryDelay = 200 * time.Millisecond
-
-			var err error
-			for retry := 0; retry < maxRetries; retry++ {
-				err = db.Where("slack_ts = ? AND slack_channel = ?", ts, channel).First(&task).Error
-				if err == nil {
-					break
-				}
-
-				// If record not found, wait briefly and retry
-				if retry < maxRetries-1 {
-					log.Printf("task not found (attempt %d/%d): ts=%s, channel=%s, retrying in %v",
-						retry+1, maxRetries, ts, channel, retryDelay)
-					time.Sleep(retryDelay)
-				}
+		case services.UrgentReviewActionID:
+			task, err := findTaskByMessage(db, ts, channel)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+				return
 			}
 
+			t := i18n.L(task.Language)
+			err = services.ActivateWaitingTaskUrgently(db, task, slackUserID)
+			switch {
+			case errors.Is(err, services.ErrTaskNotWaiting):
+				if perr := services.PostEphemeral(task.SlackChannel, slackUserID, t("notify.urgent_review_already_sent")); perr != nil {
+					log.Printf("urgent review ephemeral error: %v", perr)
+				}
+			case err != nil:
+				log.Printf("urgent review activation failed (task: %s): %v", task.ID, err)
+				if perr := services.PostEphemeral(task.SlackChannel, slackUserID, t("notify.urgent_review_failed")); perr != nil {
+					log.Printf("urgent review ephemeral error: %v", perr)
+				}
+			default:
+				log.Printf("urgent review requested: task=%s, user=%s", task.ID, slackUserID)
+			}
+
+			c.Status(http.StatusOK)
+			return
+
+		case "review_done":
+			task, err := findTaskByMessage(db, ts, channel)
 			if err != nil {
-				log.Printf("task not found after %d retries: ts=%s, channel=%s", maxRetries, ts, channel)
 				c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 				return
 			}
@@ -374,4 +381,28 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 	}
+}
+
+// findTaskByMessage finds the task posted as the Slack message ts in channel. The
+// message is posted before its ts is saved to the task, so a button pressed right
+// after posting may arrive first; the lookup is retried for a short while.
+func findTaskByMessage(db *gorm.DB, ts, channel string) (models.ReviewTask, error) {
+	const maxRetries = 5
+	const retryDelay = 200 * time.Millisecond
+
+	var task models.ReviewTask
+	var err error
+	for retry := 0; retry < maxRetries; retry++ {
+		err = db.Where("slack_ts = ? AND slack_channel = ?", ts, channel).First(&task).Error
+		if err == nil {
+			return task, nil
+		}
+		if retry < maxRetries-1 {
+			log.Printf("task not found (attempt %d/%d): ts=%s, channel=%s, retrying in %v",
+				retry+1, maxRetries, ts, channel, retryDelay)
+			time.Sleep(retryDelay)
+		}
+	}
+	log.Printf("task not found after %d retries: ts=%s, channel=%s", maxRetries, ts, channel)
+	return task, err
 }

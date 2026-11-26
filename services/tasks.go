@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -50,12 +51,68 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 	}
 }
 
-// activateBusinessHoursTask assigns reviewers to a task that was waiting for business
-// hours, posts the morning notification to the thread, and marks the task as in_review.
-// Reviewers are assigned to the task before the notification is sent so the morning
-// greeting can mention them. The task is persisted as in_review only after the
-// notification succeeds, so a failed notification leaves it to be retried next tick.
+// ErrTaskNotWaiting is returned when a task is no longer waiting for business hours,
+// because the morning activation or another urgent review request got to it first.
+var ErrTaskNotWaiting = errors.New("task is not waiting for business hours")
+
+// activateBusinessHoursTask activates a waiting task with the morning notification.
 func activateBusinessHoursTask(db *gorm.DB, task models.ReviewTask, config models.ChannelConfig, labelName string) error {
+	return activateWaitingTask(db, task, config, labelName, func(task models.ReviewTask) error {
+		return PostBusinessHoursNotificationToThread(task, config.DefaultMentionID)
+	})
+}
+
+// ActivateWaitingTaskUrgently activates a task waiting for business hours right away,
+// for the urgent review button on the off-hours message. It returns ErrTaskNotWaiting
+// when the task has already been activated.
+func ActivateWaitingTaskUrgently(db *gorm.DB, task models.ReviewTask, requesterID string) error {
+	if task.Status != "waiting_business_hours" {
+		return ErrTaskNotWaiting
+	}
+	labelName := task.LabelName
+	if labelName == "" {
+		labelName = "needs-review"
+	}
+	var config models.ChannelConfig
+	if err := db.Where("slack_channel_id = ? AND label_name = ?", task.SlackChannel, labelName).First(&config).Error; err != nil {
+		return fmt.Errorf("channel config not found: %w", err)
+	}
+
+	err := activateWaitingTask(db, task, config, labelName, func(task models.ReviewTask) error {
+		return PostUrgentReviewNotificationToThread(task, config.DefaultMentionID, requesterID)
+	})
+	if err != nil {
+		return err
+	}
+
+	if err := UpdateOffHoursMessageForUrgentReview(task, requesterID); err != nil {
+		log.Printf("off-hours message update after urgent review failed (task: %s): %v", task.ID, err)
+	}
+	return nil
+}
+
+// activateWaitingTask assigns reviewers to a task that was waiting for business hours,
+// posts the notification built by notify to the thread, and marks the task as in_review.
+// Reviewers are assigned to the task before the notification is sent so it can mention
+// them.
+//
+// The morning activation and the urgent review button can reach the same task at the
+// same time, so the task is first claimed by moving it out of waiting_business_hours
+// with a conditional update; only the caller that wins the claim notifies. A failed
+// notification puts the task back to waiting_business_hours so the next tick retries it.
+// While claimed, the task has no reviewer, which keeps CheckInReviewTasks from
+// reminding it.
+func activateWaitingTask(db *gorm.DB, task models.ReviewTask, config models.ChannelConfig, labelName string, notify func(models.ReviewTask) error) error {
+	claim := db.Model(&models.ReviewTask{}).
+		Where("id = ? AND status = ?", task.ID, "waiting_business_hours").
+		Updates(map[string]interface{}{"status": "in_review", "updated_at": time.Now()})
+	if claim.Error != nil {
+		return fmt.Errorf("task claim error: %w", claim.Error)
+	}
+	if claim.RowsAffected == 0 {
+		return ErrTaskNotWaiting
+	}
+
 	// Randomly select reviewers (excluding PR author)
 	excludeIDs := []string{}
 	if task.PRAuthorSlackID != "" {
@@ -71,18 +128,20 @@ func activateBusinessHoursTask(db *gorm.DB, task models.ReviewTask, config model
 		reviewerID = reviewerIDs[0]
 	}
 
-	// Assign reviewers before notifying so the morning greeting mentions them. The
-	// morning notification itself announces the reviewers and carries the change/pause
+	// The notification itself announces the reviewers and carries the change/pause
 	// controls, so no separate auto-assigned message is sent.
 	task.Reviewer = reviewerID
 	task.Reviewers = strings.Join(reviewerIDs, ",")
 
-	// Send business hours notification to thread (mentions the assigned reviewers)
-	if err := PostBusinessHoursNotificationToThread(task, config.DefaultMentionID); err != nil {
+	if err := notify(task); err != nil {
+		if rerr := db.Model(&models.ReviewTask{}).
+			Where("id = ? AND status = ?", task.ID, "in_review").
+			Update("status", "waiting_business_hours").Error; rerr != nil {
+			log.Printf("task release after failed notification error (task: %s): %v", task.ID, rerr)
+		}
 		return fmt.Errorf("business hours notification error: %w", err)
 	}
 
-	// Mark the task as in_review only after the notification succeeded
 	task.Status = "in_review"
 	task.UpdatedAt = time.Now()
 	if err := db.Save(&task).Error; err != nil {

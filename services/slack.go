@@ -408,7 +408,8 @@ func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID, lang string
 		message = t("notify.off_hours.without_creator", title, prURL)
 	}
 	doneButton := CreateButton(t("button.review_done"), "review_done", "done", "primary")
-	blocks := CreateMessageWithActionBlocks(message, doneButton)
+	urgentButton := CreateButton(t("button.urgent_review"), UrgentReviewActionID, "urgent", "danger")
+	blocks := CreateMessageWithActionsBlocks(message, doneButton, urgentButton)
 
 	body := map[string]interface{}{
 		"channel": channel,
@@ -451,24 +452,98 @@ func SendSlackMessageOffHours(prURL, title, channel, creatorSlackID, lang string
 	return result.TS, result.Channel, nil
 }
 
+// UrgentReviewActionID is the action_id of the button on the off-hours message that
+// sends the review mention now instead of on the next business day morning.
+const UrgentReviewActionID = "urgent_review"
+
+// UpdateOffHoursMessageForUrgentReview rewrites the off-hours message after the urgent
+// review button was pressed: the "mentions will be sent on the next business day" line
+// and the urgent button go away, and the message names who asked for the urgent review.
+func UpdateOffHoursMessageForUrgentReview(task models.ReviewTask, requesterID string) error {
+	t := i18n.L(task.Language)
+	var message string
+	if task.PRAuthorSlackID != "" {
+		message = t("notify.urgent_review_requested.with_creator", task.PRAuthorSlackID, task.Title, task.PRURL, requesterID)
+	} else {
+		message = t("notify.urgent_review_requested.without_creator", task.Title, task.PRURL, requesterID)
+	}
+	doneButton := CreateButton(t("button.review_done"), "review_done", "done", "primary")
+	blocks := CreateMessageWithActionBlocks(message, doneButton)
+
+	body := map[string]interface{}{
+		"channel": task.SlackChannel,
+		"ts":      task.SlackTS,
+		"blocks":  blocks,
+	}
+
+	jsonData, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.update", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return fmt.Errorf("slack API response parse error: %v", err)
+	}
+
+	if !result.OK {
+		return fmt.Errorf("slack error: %s", result.Error)
+	}
+
+	return nil
+}
+
 // PostBusinessHoursNotificationToThread sends a notification with mentions to a thread when business hours begin
 func PostBusinessHoursNotificationToThread(task models.ReviewTask, mentionID string) error {
 	t := i18n.L(task.Language)
-	mentionText := buildMentionText(mentionID)
+	reviewerText := reviewerTextForThread(task)
+	message := t("notify.business_hours_morning", buildMentionText(mentionID), reviewerText)
+	return postReviewStartToThread(task, message, reviewerText != "")
+}
 
-	// Mention every assigned reviewer in the morning greeting. The reviewer assignment
-	// and its change/pause controls are merged into this single message so reviewers
-	// are not announced twice in the thread.
+// PostUrgentReviewNotificationToThread sends the mention that the urgent review button
+// brings forward from the next business day morning, naming who pressed the button.
+func PostUrgentReviewNotificationToThread(task models.ReviewTask, mentionID, requesterID string) error {
+	t := i18n.L(task.Language)
+	reviewerText := reviewerTextForThread(task)
+	message := t("notify.urgent_review", requesterID, buildMentionText(mentionID), reviewerText)
+	return postReviewStartToThread(task, message, reviewerText != "")
+}
+
+// reviewerTextForThread mentions every assigned reviewer, or returns "" when none is assigned.
+func reviewerTextForThread(task models.ReviewTask) string {
 	reviewerMentions := formatReviewerCSVMentions(task.Reviewers, task.Reviewer)
-	var reviewerText string
-	if reviewerMentions != "" {
-		reviewerText = t("notify.reviewer_in_morning", reviewerMentions)
+	if reviewerMentions == "" {
+		return ""
 	}
+	return i18n.L(task.Language)("notify.reviewer_in_morning", reviewerMentions)
+}
 
-	message := t("notify.business_hours_morning", mentionText, reviewerText)
+// postReviewStartToThread posts the message that starts the review to the task's thread.
+// The reviewer assignment and its change/pause controls are merged into this single
+// message so reviewers are not announced twice in the thread.
+func postReviewStartToThread(task models.ReviewTask, message string, hasReviewers bool) error {
+	t := i18n.L(task.Language)
 
 	var blocks []map[string]interface{}
-	if reviewerMentions != "" {
+	if hasReviewers {
 		changeButton := CreateChangeReviewerButton(task.ID, task.Language)
 		pauseSelect := CreateAllOptionsPauseReminderSelect(task.ID, "pause_reminder_initial", t("button.stop_reminder"), task.Language)
 		blocks = CreateMessageWithActionsBlocks(message, changeButton, pauseSelect)

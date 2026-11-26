@@ -400,10 +400,17 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"button.pause_reminder":  "Pause Reminder",
 	"button.stop_reminder":   "Stop Reminder",
 	"button.change_reviewer": "Change Reviewer!",
+	"button.urgent_review":   "Request Review Now",
 
 	// ==================== Notifications ====================
 	"notify.off_hours.with_creator":    "Review request from <@%s> has been registered\n\n*PR Title*: %s\n*URL*: <%s>\n\n📝 Mentions will be sent on the next business day morning",
 	"notify.off_hours.without_creator": "📝 *A PR has been registered for review*\n\n*PR Title*: %s\n*URL*: <%s>\n\n(Mentions will be sent on the next business day morning)",
+
+	"notify.urgent_review":                          "🚨 *Urgent review requested by <@%s>* %s\n\n📋 Please review this PR. %s",
+	"notify.urgent_review_requested.with_creator":    "Review request from <@%s> has been registered\n\n*PR Title*: %s\n*URL*: <%s>\n\n🚨 <@%s> requested an urgent review, so reviewers were mentioned in the thread",
+	"notify.urgent_review_requested.without_creator": "📝 *A PR has been registered for review*\n\n*PR Title*: %s\n*URL*: <%s>\n\n🚨 <@%s> requested an urgent review, so reviewers were mentioned in the thread",
+	"notify.urgent_review_already_sent":             "Reviewers have already been mentioned for this PR.",
+	"notify.urgent_review_failed":                   "Could not send the urgent review request. Please try again later.",
 
 	"notify.review_request.with_creator":    "%s Review request from <@%s>\n\n*PR Title*: %s\n*URL*: <%s>",
 	"notify.review_request.without_creator": "%s *There is a PR to review!*\n\n*PR Title*: %s\n*URL*: <%s>",
