@@ -185,6 +185,7 @@ When a PR is labeled outside business hours:
 
 #### Manual Actions
 - "Review Done" button: Manually mark review as complete
+- "Request Review Now" button: On an off-hours notification, assign reviewers and mention them now instead of waiting for the next business day morning
 - "Change Reviewer!" button: Re-draw a reviewer
 - Pause reminders at assignment: Pause reminders when a reviewer is assigned
 - Pause options: 1 hour, 2 hours, 4 hours, no more today (until next business day), stop completely

@@ -400,10 +400,18 @@ var messagesJa = map[string]string{
 	"button.pause_reminder":  "リマインドを一時停止",
 	"button.stop_reminder":   "リマインダーを停止",
 	"button.change_reviewer": "変わってほしい！",
+	"button.urgent_review":   "急ぎでレビューを依頼",
 
 	// ==================== Notifications ====================
 	"notify.off_hours.with_creator":    "<@%s> からのレビュー依頼が登録されました\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n📝 レビューのメンションは翌営業日の朝にお送りします",
 	"notify.off_hours.without_creator": "📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n (レビューのメンションは翌営業日の朝にお送りします)",
+
+	"notify.urgent_review":                          "🚨 *<@%s> から急ぎのレビュー依頼です* %s\n\n📋 こちらのPRのレビューをお願いします。%s",
+	"notify.urgent_review_requested.with_creator":    "<@%s> からのレビュー依頼が登録されました\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n🚨 <@%s> が急ぎのレビューを依頼したため、スレッドでメンションしました",
+	"notify.urgent_review_requested.without_creator": "📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n🚨 <@%s> が急ぎのレビューを依頼したため、スレッドでメンションしました",
+	"notify.urgent_review_already_sent":             "このPRのレビュー依頼はすでにメンション済みです。",
+	"notify.urgent_review_already_closed":           "このPRのレビューはすでに完了しています。",
+	"notify.urgent_review_failed":                   "急ぎのレビュー依頼を送れませんでした。時間をおいてもう一度お試しください。",
 
 	"notify.review_request.with_creator":    "%s <@%s> からのレビュー依頼があります\n\n*PRタイトル*: %s\n*URL*: <%s>",
 	"notify.review_request.without_creator": "%s *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>",
