@@ -141,8 +141,10 @@ func handleOpenSettings(c *gin.Context, db *gorm.DB, payload SlackActionPayload)
 // handleLabelSelectChanged is the dispatch_action callback for the label
 // dropdown. When the user picks a different label (or the create-new sentinel),
 // we rebuild the modal with the chosen label's prefilled values and push the
-// new view via views.update — Slack does NOT persist field values across
-// re-renders, so the other fields visually "reset" to the selected label.
+// new view via views.update. Slack keeps an input's value across views.update
+// while its block_id is unchanged, so the other fields only show the selected
+// label's values because their block_ids are scoped to the label
+// (services.SettingsFieldBlockID).
 func handleLabelSelectChanged(c *gin.Context, db *gorm.DB, payload SlackActionPayload) {
 	if payload.View == nil {
 		c.Status(http.StatusOK)
@@ -225,7 +227,7 @@ func handleSettingsModalSubmission(c *gin.Context, db *gorm.DB, payload SlackAct
 				log.Printf("settings modal delete failed: %v", err)
 				c.JSON(http.StatusOK, gin.H{
 					"response_action": "errors",
-					"errors":          gin.H{"delete_config": "delete failed"},
+					"errors":          gin.H{form.DeleteBlockID: "delete failed"},
 				})
 				return
 			}

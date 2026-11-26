@@ -8,11 +8,8 @@ import (
 func notifyOnHolidaysElement(t *testing.T, view map[string]any) map[string]any {
 	t.Helper()
 	for _, b := range view["blocks"].([]map[string]any) {
-		if id, _ := b["block_id"].(string); id == "notify_on_holidays" {
-			el, ok := b["element"].(map[string]any)
-			if !ok {
-				t.Fatalf("notify_on_holidays block has no element")
-			}
+		el, _ := b["element"].(map[string]any)
+		if id, _ := el["action_id"].(string); id == "notify_on_holidays" {
 			return el
 		}
 	}
