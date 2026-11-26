@@ -564,3 +564,82 @@ func TestHandleSlackAction_ViewSubmission_MissingPrivateMetadata(t *testing.T) {
 	assert.Contains(t, body, "response_action")
 	assert.Contains(t, body, "errors")
 }
+
+// scopedSettingsSubmission builds a settings modal view_submission payload whose
+// block_ids are scoped to label, as BuildSettingsModalView renders them.
+func scopedSettingsSubmission(t *testing.T, channelID, label string, fields map[string]map[string]any) string {
+	t.Helper()
+	values := map[string]any{
+		services.LabelSelectActionID: map[string]any{
+			services.LabelSelectActionID: map[string]any{"selected_option": map[string]any{"value": label}},
+		},
+	}
+	for field, state := range fields {
+		values[services.SettingsFieldBlockID(field, label)] = map[string]any{field: state}
+	}
+	payload, err := json.Marshal(map[string]any{
+		"type": "view_submission",
+		"user": map[string]any{"id": "U12345"},
+		"view": map[string]any{
+			"callback_id":      services.SettingsModalCallbackID,
+			"private_metadata": services.EncodeSettingsModalMetadata(services.SettingsModalMetadata{ChannelID: channelID, UserID: "U12345"}),
+			"state":            map[string]any{"values": values},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(payload)
+}
+
+func TestHandleSlackAction_ViewSubmission_SavesFieldsScopedToTheSelectedLabel(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+	db.Create(&models.ChannelConfig{ID: "c1", SlackChannelID: "C99999", LabelName: "urgent", ReminderInterval: 30, IsActive: true})
+
+	w := postPayload(t, router, scopedSettingsSubmission(t, "C99999", "urgent", map[string]map[string]any{
+		"default_mention_user":       {"selected_user": "U77777"},
+		"reminder_interval":          {"value": "15"},
+		"reviewer_reminder_interval": {"value": "20"},
+		"business_hours_start":       {"value": "10:00"},
+		"business_hours_end":         {"value": "19:00"},
+		"timezone":                   {"value": "UTC"},
+		"required_approvals":         {"value": "2"},
+		"language":                   {"selected_option": map[string]any{"value": "en"}},
+		"is_active":                  {"selected_option": map[string]any{"value": "false"}},
+	}))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), "response_action", "body: %s", w.Body.String())
+
+	var cfg models.ChannelConfig
+	assert.NoError(t, db.Where("slack_channel_id = ? AND label_name = ?", "C99999", "urgent").First(&cfg).Error)
+	assert.Equal(t, "U77777", cfg.DefaultMentionID)
+	assert.Equal(t, 15, cfg.ReminderInterval)
+	assert.Equal(t, 20, cfg.ReviewerReminderInterval)
+	assert.Equal(t, "10:00", cfg.BusinessHoursStart)
+	assert.Equal(t, "19:00", cfg.BusinessHoursEnd)
+	assert.Equal(t, "UTC", cfg.Timezone)
+	assert.Equal(t, 2, cfg.RequiredApprovals)
+	assert.Equal(t, "en", cfg.Language)
+	assert.False(t, cfg.IsActive)
+}
+
+func TestHandleSlackAction_ViewSubmission_DeletesWithCheckboxScopedToTheSelectedLabel(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+	db.Create(&models.ChannelConfig{ID: "victim", SlackChannelID: "C99999", LabelName: "urgent", IsActive: true})
+	db.Create(&models.ChannelConfig{ID: "bystander", SlackChannelID: "C99999", LabelName: "needs-review", IsActive: true})
+
+	w := postPayload(t, router, scopedSettingsSubmission(t, "C99999", "urgent", map[string]map[string]any{
+		"delete_config": {"type": "checkboxes", "selected_options": []map[string]any{{"value": "yes"}}},
+		"language":      {"selected_option": map[string]any{"value": "ja"}},
+		"is_active":     {"selected_option": map[string]any{"value": "true"}},
+	}))
+	assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	var count int64
+	db.Model(&models.ChannelConfig{}).Where("slack_channel_id = ? AND label_name = ?", "C99999", "urgent").Count(&count)
+	assert.Equal(t, int64(0), count, "the selected label's config must be deleted")
+	db.Model(&models.ChannelConfig{}).Where("slack_channel_id = ? AND label_name = ?", "C99999", "needs-review").Count(&count)
+	assert.Equal(t, int64(1), count, "other labels must be left alone")
+}

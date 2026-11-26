@@ -497,74 +497,37 @@ func BuildSettingsModalView(in SettingsModalInputs) map[string]any {
 func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (*SettingsForm, error) {
 	errs := map[string]string{}
 
-	field := func(blockID string) string {
-		actions, ok := values[blockID]
-		if !ok {
-			return ""
-		}
-		if v, ok := actions[blockID]; ok {
-			return strings.TrimSpace(v.Value)
+	// Blocks are looked up by block_id and their element by action_id: the two
+	// differ for fields scoped to a label (see SettingsFieldBlockID). A
+	// handcrafted payload may key the inner map differently, so fall back to the
+	// block's only element.
+	state := func(blockID, actionID string) ViewStateValue {
+		actions := values[blockID]
+		if v, ok := actions[actionID]; ok {
+			return v
 		}
 		for _, v := range actions {
-			return strings.TrimSpace(v.Value)
+			return v
+		}
+		return ViewStateValue{}
+	}
+	field := func(blockID, actionID string) string {
+		return strings.TrimSpace(state(blockID, actionID).Value)
+	}
+	selectField := func(blockID, actionID string) string {
+		if opt := state(blockID, actionID).SelectedOption; opt != nil {
+			return opt.Value
 		}
 		return ""
 	}
-	selectField := func(blockID string) string {
-		actions, ok := values[blockID]
-		if !ok {
-			return ""
-		}
-		if v, ok := actions[blockID]; ok && v.SelectedOption != nil {
-			return v.SelectedOption.Value
-		}
-		for _, v := range actions {
-			if v.SelectedOption != nil {
-				return v.SelectedOption.Value
-			}
-		}
-		return ""
+	selectedUser := func(blockID, actionID string) string {
+		return state(blockID, actionID).SelectedUser
 	}
-	selectedUser := func(blockID string) string {
-		actions, ok := values[blockID]
-		if !ok {
-			return ""
-		}
-		if v, ok := actions[blockID]; ok {
-			return v.SelectedUser
-		}
-		for _, v := range actions {
-			return v.SelectedUser
-		}
-		return ""
+	selectedUsers := func(blockID, actionID string) []string {
+		return state(blockID, actionID).SelectedUsers
 	}
-	selectedUsers := func(blockID string) []string {
-		actions, ok := values[blockID]
-		if !ok {
-			return nil
-		}
-		if v, ok := actions[blockID]; ok {
-			return v.SelectedUsers
-		}
-		for _, v := range actions {
-			return v.SelectedUsers
-		}
-		return nil
-	}
-	checkboxChecked := func(blockID, optionValue string) bool {
-		actions, ok := values[blockID]
-		if !ok {
-			return false
-		}
-		v, ok := actions[blockID]
-		if !ok {
-			// Fall back to the first value in the block.
-			for _, x := range actions {
-				v = x
-				break
-			}
-		}
-		for _, opt := range v.SelectedOptions {
+	checkboxChecked := func(blockID, actionID, optionValue string) bool {
+		for _, opt := range state(blockID, actionID).SelectedOptions {
 			if opt.Value == optionValue {
 				return true
 			}
@@ -576,10 +539,10 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 
 	// Label resolution: when the user picks the create-new sentinel, take the
 	// name from the new_label_name text input; otherwise use the selected value.
-	selected := selectField("label_select")
+	selected := selectField(LabelSelectActionID, LabelSelectActionID)
 	if selected == CreateNewLabelSentinel {
 		form.CreateNew = true
-		form.LabelName = field("new_label_name")
+		form.LabelName = field(newLabelNameField, newLabelNameField)
 		switch form.LabelName {
 		case "":
 			errs["new_label_name"] = "label name is required"
@@ -610,11 +573,25 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 		}
 		return id
 	}
+	// at returns the block_id and action_id a field is read from.
+	at := func(field string) (string, string) {
+		return blockID(field), field
+	}
+
+	// The dropdown can change before the views.update that re-renders the other
+	// fields reaches the client. Such a submit carries another label's blocks:
+	// reading them would save the wrong values, and errors keyed by the selected
+	// label's blocks would point at fields Slack is not showing.
+	if selected != "" && !renderedFor(values, scope) {
+		return nil, &ModalValidationError{Errors: map[string]string{
+			LabelSelectActionID: "the form had not switched to this label yet; check the values and submit again",
+		}}
+	}
 
 	// Delete checkbox short-circuits the rest of validation: when the user
 	// asked to delete the row, the other fields don't need to be valid.
 	form.DeleteBlockID = blockID("delete_config")
-	form.DeleteConfig = checkboxChecked(form.DeleteBlockID, "yes")
+	form.DeleteConfig = checkboxChecked(form.DeleteBlockID, "delete_config", "yes")
 	if form.DeleteConfig && !form.CreateNew {
 		// Still need the label name to know what to delete; selectField above
 		// already set it. No further validation needed.
@@ -629,67 +606,67 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 	// as-is. We don't try to resolve the text to an ID — existing channel
 	// configs commonly use decorative text here, and buildMentionText handles
 	// the routing at message-render time.
-	if user := selectedUser(blockID("default_mention_user")); user != "" {
+	if user := selectedUser(at("default_mention_user")); user != "" {
 		form.DefaultMentionID = user
 	} else {
-		form.DefaultMentionID = strings.TrimSpace(field(blockID("default_mention_text")))
+		form.DefaultMentionID = strings.TrimSpace(field(at("default_mention_text")))
 	}
 
 	// Reviewer pool: multi_users_select for picked users + free-text CSV for
 	// anything else (legacy bare names, decorative entries). The two lists are
 	// concatenated, with picker IDs first, and stored as a single CSV.
-	pickerReviewers := selectedUsers(blockID("reviewer_list"))
-	textReviewers := normalizeCSV(field(blockID("reviewer_list_text")))
+	pickerReviewers := selectedUsers(at("reviewer_list"))
+	textReviewers := normalizeCSV(field(at("reviewer_list_text")))
 	merged := make([]string, 0, len(pickerReviewers)+1)
 	merged = append(merged, pickerReviewers...)
 	if textReviewers != "" {
 		merged = append(merged, strings.Split(textReviewers, ",")...)
 	}
 	form.ReviewerList = strings.Join(merged, ",")
-	form.RepositoryList = normalizeCSV(field(blockID("repository_list")))
+	form.RepositoryList = normalizeCSV(field(at("repository_list")))
 
-	if interval, err := strconv.Atoi(field(blockID("reminder_interval"))); err != nil || interval <= 0 {
+	if interval, err := strconv.Atoi(field(at("reminder_interval"))); err != nil || interval <= 0 {
 		errs[blockID("reminder_interval")] = "must be a positive integer"
 	} else {
 		form.ReminderInterval = interval
 	}
 
-	intervalStr := field(blockID("reviewer_reminder_interval"))
+	intervalStr := field(at("reviewer_reminder_interval"))
 	if interval, err := strconv.Atoi(intervalStr); err != nil || interval <= 0 {
 		errs[blockID("reviewer_reminder_interval")] = "must be a positive integer"
 	} else {
 		form.ReviewerReminderInterval = interval
 	}
 
-	form.BusinessHoursStart = field(blockID("business_hours_start"))
+	form.BusinessHoursStart = field(at("business_hours_start"))
 	if !isValidHHMM(form.BusinessHoursStart) {
 		errs[blockID("business_hours_start")] = "must be HH:MM"
 	}
-	form.BusinessHoursEnd = field(blockID("business_hours_end"))
+	form.BusinessHoursEnd = field(at("business_hours_end"))
 	if !isValidHHMM(form.BusinessHoursEnd) {
 		errs[blockID("business_hours_end")] = "must be HH:MM"
 	}
 
-	form.Timezone = field(blockID("timezone"))
+	form.Timezone = field(at("timezone"))
 	if _, err := time.LoadLocation(form.Timezone); err != nil {
 		errs[blockID("timezone")] = "invalid IANA timezone"
 	}
 
-	approvalsStr := field(blockID("required_approvals"))
+	approvalsStr := field(at("required_approvals"))
 	if approvals, err := strconv.Atoi(approvalsStr); err != nil || approvals < 1 || approvals > 10 {
 		errs[blockID("required_approvals")] = "must be 1-10"
 	} else {
 		form.RequiredApprovals = approvals
 	}
 
-	form.Language = selectField(blockID("language"))
+	form.Language = selectField(at("language"))
 	if form.Language != "ja" && form.Language != "en" {
 		errs[blockID("language")] = "must be ja or en"
 	}
 
 	if !form.CreateNew {
 		form.RenameBlockID = blockID(renameLabelField)
-		form.RenameTo = field(form.RenameBlockID)
+		form.RenameTo = field(form.RenameBlockID, renameLabelField)
 		if form.RenameTo == form.LabelName {
 			form.RenameTo = ""
 		}
@@ -700,7 +677,7 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 
 	// A modal opened before this field existed submits without it. Rejecting the
 	// whole form or defaulting to "off" would silently undo a value set by command.
-	switch notifyOnHolidays := selectField(blockID("notify_on_holidays")); notifyOnHolidays {
+	switch notifyOnHolidays := selectField(at("notify_on_holidays")); notifyOnHolidays {
 	case "true", "false":
 		enabled := notifyOnHolidays == "true"
 		form.NotifyOnHolidays = &enabled
@@ -709,7 +686,7 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 		errs[blockID("notify_on_holidays")] = "must be true or false"
 	}
 
-	activeStr := selectField(blockID("is_active"))
+	activeStr := selectField(at("is_active"))
 	switch activeStr {
 	case "true":
 		form.IsActive = true
@@ -723,6 +700,21 @@ func ParseSettingsModalSubmission(values map[string]map[string]ViewStateValue) (
 		return nil, &ModalValidationError{Errors: errs}
 	}
 	return form, nil
+}
+
+// renderedFor reports whether values came from a view rendered for scope (a
+// label name or CreateNewLabelSentinel). A view whose block_ids are not scoped
+// to any label predates SettingsFieldBlockID and is accepted as is; is_active is
+// the marker for it because it is rendered in every mode.
+func renderedFor(values map[string]map[string]ViewStateValue, scope string) bool {
+	suffix := SettingsFieldBlockID("", scope)
+	for id := range values {
+		if strings.HasSuffix(id, suffix) {
+			return true
+		}
+	}
+	_, unscoped := values["is_active"]
+	return unscoped
 }
 
 // normalizeCSV trims whitespace around each comma-separated entry and drops empty items.

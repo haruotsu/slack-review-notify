@@ -733,7 +733,10 @@ func TestBuildSettingsModalView_SwitchingLabelRendersFreshInputBlocks(t *testing
 			}
 			continue
 		}
-		if after, ok := second[actionID]; ok && after == before {
+		after, ok := second[actionID]
+		if !ok {
+			t.Errorf("%s is rendered for one existing label but not for another", actionID)
+		} else if after == before {
 			t.Errorf("%s keeps block_id %q after switching label, so Slack would carry the previous label's value over", actionID, before)
 		}
 		if after, ok := creating[actionID]; ok && after == before {
@@ -848,5 +851,39 @@ func TestParseSettingsModalSubmission_AcceptsAModalRenderedWithUnscopedBlockIDs(
 	}
 	if got.ReminderInterval != 45 {
 		t.Errorf("ReminderInterval = %d, want 45", got.ReminderInterval)
+	}
+}
+
+func TestParseSettingsModalSubmission_RejectsSubmitBeforeTheLabelSwitchIsRendered(t *testing.T) {
+	configs := []*models.ChannelConfig{
+		{LabelName: "needs-review", ReminderInterval: 10, Timezone: "Asia/Tokyo", Language: "ja", IsActive: true},
+		{LabelName: "urgent", ReminderInterval: 60, Timezone: "UTC", Language: "en", IsActive: true},
+	}
+	view := BuildSettingsModalView(SettingsModalInputs{
+		ChannelID: "C1", UserID: "U1", SelectedLabel: "needs-review", Configs: configs, Lang: "ja",
+	})
+	rendered := inputBlockIDs(t, view)
+	values := submitUnchanged(t, view)
+	values[LabelSelectActionID] = map[string]ViewStateValue{
+		LabelSelectActionID: {SelectedOption: &ViewSelectedOption{Value: "urgent"}},
+	}
+
+	_, err := ParseSettingsModalSubmission(values)
+
+	ve, ok := err.(*ModalValidationError)
+	if !ok {
+		t.Fatalf("want *ModalValidationError, got %T (%v)", err, err)
+	}
+	if _, has := ve.Errors[LabelSelectActionID]; !has {
+		t.Errorf("want an error on label_select telling the user to resubmit; got %v", ve.Errors)
+	}
+	onScreen := map[string]bool{}
+	for _, id := range rendered {
+		onScreen[id] = true
+	}
+	for id := range ve.Errors {
+		if !onScreen[id] {
+			t.Errorf("error keyed by %q, which is not on screen, so Slack cannot show it", id)
+		}
 	}
 }
