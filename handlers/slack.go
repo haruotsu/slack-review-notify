@@ -263,21 +263,9 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 
-			t := i18n.L(task.Language)
-			err = services.ActivateWaitingTaskUrgently(db, task, slackUserID)
-			switch {
-			case errors.Is(err, services.ErrTaskNotWaiting):
-				if perr := services.PostEphemeral(task.SlackChannel, slackUserID, t("notify.urgent_review_already_sent")); perr != nil {
-					log.Printf("urgent review ephemeral error: %v", perr)
-				}
-			case err != nil:
-				log.Printf("urgent review activation failed (task: %s): %v", task.ID, err)
-				if perr := services.PostEphemeral(task.SlackChannel, slackUserID, t("notify.urgent_review_failed")); perr != nil {
-					log.Printf("urgent review ephemeral error: %v", perr)
-				}
-			default:
-				log.Printf("urgent review requested: task=%s, user=%s", task.ID, slackUserID)
-			}
+			// Assigning reviewers and posting to Slack can take longer than the 3 seconds
+			// Slack waits for the response, so it runs after the response is sent.
+			runAsync(func() { handleUrgentReview(db, task, slackUserID) })
 
 			c.Status(http.StatusOK)
 			return
@@ -380,6 +368,39 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			c.Status(http.StatusOK)
 			return
 		}
+	}
+}
+
+// handleUrgentReview runs the urgent review button and, when nobody was mentioned by
+// this press, tells the user who pressed it why.
+func handleUrgentReview(db *gorm.DB, task models.ReviewTask, userID string) {
+	err := services.ActivateWaitingTaskUrgently(db, task, userID)
+	if err == nil {
+		log.Printf("urgent review requested: task=%s, user=%s", task.ID, userID)
+		return
+	}
+
+	messageKey := "notify.urgent_review_failed"
+	if errors.Is(err, services.ErrTaskNotWaiting) {
+		// The task may have left waiting_business_hours after it was read, so the
+		// current status decides the message.
+		var current models.ReviewTask
+		if rerr := db.Where("id = ?", task.ID).First(&current).Error; rerr == nil {
+			task.Status = current.Status
+		} else {
+			log.Printf("urgent review task reload error (task: %s): %v", task.ID, rerr)
+		}
+		log.Printf("urgent review ignored: task=%s, user=%s, status=%s", task.ID, userID, task.Status)
+		messageKey = "notify.urgent_review_already_sent"
+		if slices.Contains([]string{"done", "completed", "archived"}, task.Status) {
+			messageKey = "notify.urgent_review_already_closed"
+		}
+	} else {
+		log.Printf("urgent review activation failed (task: %s, user: %s): %v", task.ID, userID, err)
+	}
+
+	if perr := services.PostEphemeral(task.SlackChannel, userID, i18n.L(task.Language)(messageKey)); perr != nil {
+		log.Printf("urgent review ephemeral error (task: %s): %v", task.ID, perr)
 	}
 }
 

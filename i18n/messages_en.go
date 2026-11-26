@@ -410,6 +410,7 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"notify.urgent_review_requested.with_creator":    "Review request from <@%s> has been registered\n\n*PR Title*: %s\n*URL*: <%s>\n\n🚨 <@%s> requested an urgent review, so reviewers were mentioned in the thread",
 	"notify.urgent_review_requested.without_creator": "📝 *A PR has been registered for review*\n\n*PR Title*: %s\n*URL*: <%s>\n\n🚨 <@%s> requested an urgent review, so reviewers were mentioned in the thread",
 	"notify.urgent_review_already_sent":             "Reviewers have already been mentioned for this PR.",
+	"notify.urgent_review_already_closed":           "The review for this PR is already finished.",
 	"notify.urgent_review_failed":                   "Could not send the urgent review request. Please try again later.",
 
 	"notify.review_request.with_creator":    "%s Review request from <@%s>\n\n*PR Title*: %s\n*URL*: <%s>",

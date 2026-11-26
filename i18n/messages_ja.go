@@ -410,6 +410,7 @@ var messagesJa = map[string]string{
 	"notify.urgent_review_requested.with_creator":    "<@%s> からのレビュー依頼が登録されました\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n🚨 <@%s> が急ぎのレビューを依頼したため、スレッドでメンションしました",
 	"notify.urgent_review_requested.without_creator": "📝 *レビュー対象のPRが登録されました*\n\n*PRタイトル*: %s\n*URL*: <%s>\n\n🚨 <@%s> が急ぎのレビューを依頼したため、スレッドでメンションしました",
 	"notify.urgent_review_already_sent":             "このPRのレビュー依頼はすでにメンション済みです。",
+	"notify.urgent_review_already_closed":           "このPRのレビューはすでに完了しています。",
 	"notify.urgent_review_failed":                   "急ぎのレビュー依頼を送れませんでした。時間をおいてもう一度お試しください。",
 
 	"notify.review_request.with_creator":    "%s <@%s> からのレビュー依頼があります\n\n*PRタイトル*: %s\n*URL*: <%s>",

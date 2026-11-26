@@ -45,6 +45,10 @@ func CheckBusinessHoursTasks(db *gorm.DB) {
 		}
 
 		if err := activateBusinessHoursTask(db, task, config, labelName); err != nil {
+			if errors.Is(err, ErrTaskNotWaiting) {
+				log.Printf("waiting_business_hours task left the waiting state before activation (urgent review request or PR close): %s", task.ID)
+				continue
+			}
 			log.Printf("activate waiting_business_hours task failed (task: %s): %v", task.ID, err)
 			continue
 		}
@@ -92,27 +96,16 @@ func ActivateWaitingTaskUrgently(db *gorm.DB, task models.ReviewTask, requesterI
 }
 
 // activateWaitingTask assigns reviewers to a task that was waiting for business hours,
-// posts the notification built by notify to the thread, and marks the task as in_review.
-// Reviewers are assigned to the task before the notification is sent so it can mention
-// them.
+// marks it as in_review, and posts the notification built by notify to the thread.
 //
 // The morning activation and the urgent review button can reach the same task at the
-// same time, so the task is first claimed by moving it out of waiting_business_hours
-// with a conditional update; only the caller that wins the claim notifies. A failed
-// notification puts the task back to waiting_business_hours so the next tick retries it.
-// While claimed, the task has no reviewer, which keeps CheckInReviewTasks from
-// reminding it.
+// same time. The reviewers and the in_review status are written in one UPDATE that
+// only matches while the status is still waiting_business_hours, and only the caller
+// whose UPDATE matched notifies; the other gets ErrTaskNotWaiting. Nothing is written
+// after the notification, so a "Review Done" press or a PR close that lands while the
+// notification is being sent is kept. A failed notification puts the task back to
+// waiting_business_hours without reviewers, so the next tick retries it.
 func activateWaitingTask(db *gorm.DB, task models.ReviewTask, config models.ChannelConfig, labelName string, notify func(models.ReviewTask) error) error {
-	claim := db.Model(&models.ReviewTask{}).
-		Where("id = ? AND status = ?", task.ID, "waiting_business_hours").
-		Updates(map[string]interface{}{"status": "in_review", "updated_at": time.Now()})
-	if claim.Error != nil {
-		return fmt.Errorf("task claim error: %w", claim.Error)
-	}
-	if claim.RowsAffected == 0 {
-		return ErrTaskNotWaiting
-	}
-
 	// Randomly select reviewers (excluding PR author)
 	excludeIDs := []string{}
 	if task.PRAuthorSlackID != "" {
@@ -128,27 +121,38 @@ func activateWaitingTask(db *gorm.DB, task models.ReviewTask, config models.Chan
 		reviewerID = reviewerIDs[0]
 	}
 
-	// The notification itself announces the reviewers and carries the change/pause
-	// controls, so no separate auto-assigned message is sent.
 	task.Reviewer = reviewerID
 	task.Reviewers = strings.Join(reviewerIDs, ",")
+	task.Status = "in_review"
+	task.UpdatedAt = time.Now()
 
+	activated := db.Model(&models.ReviewTask{}).
+		Where("id = ? AND status = ?", task.ID, "waiting_business_hours").
+		Updates(map[string]interface{}{
+			"status":     task.Status,
+			"reviewer":   task.Reviewer,
+			"reviewers":  task.Reviewers,
+			"updated_at": task.UpdatedAt,
+		})
+	if activated.Error != nil {
+		return fmt.Errorf("task activation update error (task: %s): %w", task.ID, activated.Error)
+	}
+	if activated.RowsAffected == 0 {
+		return ErrTaskNotWaiting
+	}
+
+	// The notification itself announces the reviewers and carries the change/pause
+	// controls, so no separate auto-assigned message is sent.
 	if err := notify(task); err != nil {
 		if rerr := db.Model(&models.ReviewTask{}).
 			Where("id = ? AND status = ?", task.ID, "in_review").
-			Update("status", "waiting_business_hours").Error; rerr != nil {
-			log.Printf("task release after failed notification error (task: %s): %v", task.ID, rerr)
+			Updates(map[string]interface{}{"status": "waiting_business_hours", "reviewer": "", "reviewers": ""}).Error; rerr != nil {
+			log.Printf("failed to put task back to waiting_business_hours after notification error (task: %s): %v", task.ID, rerr)
 		}
-		return fmt.Errorf("business hours notification error: %w", err)
+		return fmt.Errorf("review start notification error (task: %s): %w", task.ID, err)
 	}
 
-	task.Status = "in_review"
-	task.UpdatedAt = time.Now()
-	if err := db.Save(&task).Error; err != nil {
-		return fmt.Errorf("task status update error: %w", err)
-	}
-
-	log.Printf("waiting_business_hours task activated: %s", task.ID)
+	log.Printf("waiting_business_hours task activated: task=%s, reviewers=%s", task.ID, task.Reviewers)
 
 	return nil
 }

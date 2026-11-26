@@ -70,9 +70,13 @@ func TestUrgentReviewButton_MentionsReviewerNowAndRewritesOffHoursMessage(t *tes
 	update := nextSlackCall(t, calls)
 	assert.Equal(t, "/chat.update", update.Path)
 	assert.Equal(t, "1700000000.000100", update.Body["ts"])
-	assert.NotContains(t, update.Raw, "翌営業日")
-	assert.NotContains(t, update.Raw, "urgent_review")
-	assert.Contains(t, update.Raw, "review_done")
+	updateText := fmt.Sprint(update.Body["blocks"])
+	assert.Contains(t, updateText, "Urgent PR")
+	assert.Contains(t, updateText, "https://github.com/owner/repo/pull/1")
+	assert.Contains(t, updateText, "<@UCLICKER> が急ぎのレビューを依頼した")
+	assert.NotContains(t, updateText, "翌営業日")
+	assert.NotContains(t, updateText, "urgent_review")
+	assert.Contains(t, updateText, "review_done")
 	requireNoSlackCall(t, calls)
 
 	var task models.ReviewTask
@@ -95,7 +99,43 @@ func TestUrgentReviewButton_AlreadyActivatedTaskOnlyTellsTheClicker(t *testing.T
 	call := nextSlackCall(t, calls)
 	assert.Equal(t, "/chat.postEphemeral", call.Path)
 	assert.Equal(t, "UCLICKER", call.Body["user"])
+	assert.Equal(t, "このPRのレビュー依頼はすでにメンション済みです。", call.Body["text"])
 	requireNoSlackCall(t, calls)
+}
+
+// The off-hours message keeps its button after the PR is closed or marked done while
+// still waiting, so a press then must not claim that reviewers were mentioned.
+func TestUrgentReviewButton_FinishedTaskSaysTheReviewIsFinished(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+	createUrgentReviewFixture(t, db, "completed")
+	calls := startFakeSlack(t)
+
+	require.Equal(t, http.StatusOK, postSignedPayload(t, router, urgentReviewClick).Code)
+
+	call := nextSlackCall(t, calls)
+	assert.Equal(t, "/chat.postEphemeral", call.Path)
+	assert.Equal(t, "このPRのレビューはすでに完了しています。", call.Body["text"])
+	requireNoSlackCall(t, calls)
+}
+
+func TestUrgentReviewButton_FailureTellsTheClickerAndKeepsTaskWaiting(t *testing.T) {
+	db := setupTestDB(t)
+	router := setupActionRouter(db)
+	createUrgentReviewFixture(t, db, "waiting_business_hours")
+	require.NoError(t, db.Where("id = ?", "cfg-urgent").Delete(&models.ChannelConfig{}).Error)
+	calls := startFakeSlack(t)
+
+	require.Equal(t, http.StatusOK, postSignedPayload(t, router, urgentReviewClick).Code)
+
+	call := nextSlackCall(t, calls)
+	assert.Equal(t, "/chat.postEphemeral", call.Path)
+	assert.Equal(t, "急ぎのレビュー依頼を送れませんでした。時間をおいてもう一度お試しください。", call.Body["text"])
+	requireNoSlackCall(t, calls)
+
+	var task models.ReviewTask
+	require.NoError(t, db.First(&task, "id = ?", "task-urgent").Error)
+	assert.Equal(t, "waiting_business_hours", task.Status)
 }
 
 func TestUrgentReviewButton_SecondPressDoesNotMentionAgain(t *testing.T) {
