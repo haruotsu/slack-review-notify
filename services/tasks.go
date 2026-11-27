@@ -216,6 +216,25 @@ func CheckInReviewTasks(db *gorm.DB) {
 
 		// Check if outside business hours
 		isOutsideBusinessHours := !IsWithinBusinessHours(&config, now)
+
+		// Commits were pushed during review: remind the author instead of the reviewers
+		if task.AwaitingReReviewFrom != "" {
+			if isOutsideBusinessHours {
+				continue
+			}
+			if task.UpdatedAt.Before(now.Add(-time.Duration(reminderInterval) * time.Minute)) {
+				if err := PostReReviewRequestReminder(task); err != nil {
+					log.Printf("re-review request reminder send error (task id: %s): %v", task.ID, err)
+					continue
+				}
+				if err := db.Model(&task).Update("updated_at", now).Error; err != nil {
+					log.Printf("task update error: %v", err)
+				}
+				log.Printf("re-review request reminder sent to the author (task id: %s)", task.ID)
+			}
+			continue
+		}
+
 		if isOutsideBusinessHours {
 			// Outside business hours and haven't sent off-hours reminder yet
 			if !task.OutOfHoursReminded {

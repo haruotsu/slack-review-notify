@@ -26,6 +26,7 @@ type ReviewTask struct {
 	PendingReReviewNotify   bool   // Flag indicating a re-review notification is pending until business hours
 	PendingReReviewSender   string // Slack mention string of the re-review requester (e.g., "<@U123>" or "username")
 	PendingReReviewReviewer string // Slack mention string of the reviewer to be notified (e.g., "<@U456>" or "username")
+	AwaitingReReviewFrom    string // Slack mention string of the author asked to request re-review after pushing commits
 	Language                string // Language for messages (copied from ChannelConfig)
 	CreatedAt           time.Time
 	UpdatedAt           time.Time

@@ -408,6 +408,10 @@ The list below omits the leading /slack-review-notify. Omitting [label-name] use
 	"notify.review_request.with_creator":    "%s Review request from <@%s>\n\n*PR Title*: %s\n*URL*: <%s>",
 	"notify.review_request.without_creator": "%s *There is a PR to review!*\n\n*PR Title*: %s\n*URL*: <%s>",
 
+	"notify.re_review_request_reminder":  "%s Once you have finished pushing commits, press the button below to request a re-review from the reviewers.",
+	"notify.re_review_already_requested": "A re-review has already been requested.",
+	"button.request_re_review":           "Request re-review",
+
 	"notify.business_hours_morning":  "🌅 *Good morning!* %s\n\n📋 Please review this PR. %s",
 	"notify.reviewer_in_morning":     "\n\n🎯 *Reviewer*: %s, please take a look!",
 	"notify.reminder":                "%s Would love a review! 👀",

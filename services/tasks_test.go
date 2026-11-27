@@ -460,3 +460,43 @@ func TestCleanupExpiredAvailabilityAt_NowInAnyTimezone(t *testing.T) {
 		assert.Equal(t, int64(0), count, "leave that already ended must be deleted with now in %s", loc)
 	}
 }
+
+func TestCheckInReviewTasks_RemindsAuthorWhenAwaitingReReview(t *testing.T) {
+	db := setupTestDB(t)
+
+	originalToken := os.Getenv("SLACK_BOT_TOKEN")
+	defer func() {
+		_ = os.Setenv("SLACK_BOT_TOKEN", originalToken)
+	}()
+	_ = os.Setenv("SLACK_BOT_TOKEN", "test-token")
+
+	twoHoursAgo := time.Now().Add(-2 * time.Hour)
+	db.Create(&models.ReviewTask{
+		ID:                   "awaiting-review",
+		Repo:                 "owner/repo",
+		PRNumber:             1,
+		SlackTS:              "1234.5678",
+		SlackChannel:         "C12345",
+		Status:               "in_review",
+		Reviewer:             "UREVIEWER",
+		LabelName:            "needs-review",
+		AwaitingReReviewFrom: "<@UAUTHOR>",
+		CreatedAt:            twoHoursAgo,
+		UpdatedAt:            twoHoursAgo,
+	})
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		BodyString(`UAUTHOR.*"action_id":"request_re_review"`).
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	CheckInReviewTasks(db)
+
+	assert.True(t, gock.IsDone(), "the author should be reminded to request re-review")
+
+	var task models.ReviewTask
+	db.Where("id = ?", "awaiting-review").First(&task)
+	assert.True(t, task.UpdatedAt.After(twoHoursAgo), "the reminder clock should be reset after sending")
+}

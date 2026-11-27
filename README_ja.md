@@ -57,7 +57,7 @@ GitHubのリポジトリのSettingsのWebhooksから、以下を設定してく�
 - Secret: 空やお好きな文字列
 - Enable SSL verification: チェックを入れる
 - Let me select individual eventsにチェックを入れて、以下のイベントを有効化:
-  - **Pull requests**: PRのラベル付け/削除を検知
+  - **Pull requests**: PRのラベル付け/削除と push を検知（レビュー中に push があると、リマインドの宛先を作者に切り替えて再レビュー依頼を促す）
   - **Pull request reviews**: レビューの承認/変更要求/コメントを検知（自動完了通知機能）
 
 ### 環境変数

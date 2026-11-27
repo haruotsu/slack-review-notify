@@ -1491,7 +1491,7 @@ func TestHandleReviewSubmittedEvent_SnoozedTaskCompletedOnChangesRequested(t *te
 
 	payload := `{
 		"action": "submitted",
-		"pull_request": {"number": 401, "html_url": "https://github.com/owner/repo/pull/401"},
+		"pull_request": {"number": 401, "html_url": "https://github.com/owner/repo/pull/401", "user": {"login": "author"}},
 		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
 		"review": {"state": "changes_requested", "user": {"login": "reviewer1"}}
 	}`
@@ -2200,4 +2200,115 @@ func TestHandleReviewRequestedEvent_SkipsWhenSenderEqualsReviewer(t *testing.T) 
 	assert.Equal(t, "in_review", updatedTask.Status, "Completed task should still be reverted to in_review")
 	assert.False(t, updatedTask.PendingReReviewNotify, "Should not defer when sender equals reviewer")
 	assert.False(t, gock.IsDone(), "No re-review notification should be sent when sender equals reviewer")
+}
+
+func TestHandleSynchronizeEvent_SwitchesReminderToAuthorOnlyForInReviewTask(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	oneHourAgo := time.Now().Add(-1 * time.Hour)
+	db.Create(&models.ReviewTask{
+		ID:              "sync-inreview",
+		Repo:            "owner/repo",
+		PRNumber:        401,
+		SlackChannel:    "C12345",
+		Reviewer:        "U12345",
+		PRAuthorSlackID: "UAUTHOR",
+		Status:          "in_review",
+		LabelName:       "needs-review",
+		CreatedAt:       oneHourAgo,
+		UpdatedAt:       oneHourAgo,
+	})
+	db.Create(&models.ReviewTask{
+		ID:           "sync-completed",
+		Repo:         "owner/repo",
+		PRNumber:     401,
+		SlackChannel: "C67890",
+		Reviewer:     "U12345",
+		Status:       "completed",
+		LabelName:    "needs-review",
+		CreatedAt:    oneHourAgo,
+		UpdatedAt:    oneHourAgo,
+	})
+
+	payload := `{
+		"action": "synchronize",
+		"pull_request": {"number": 401, "html_url": "https://github.com/owner/repo/pull/401", "user": {"login": "author"}},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var inReview models.ReviewTask
+	db.Where("id = ?", "sync-inreview").First(&inReview)
+	assert.True(t, inReview.UpdatedAt.After(time.Now().Add(-1*time.Minute)),
+		"push should reset the reminder clock of the in_review task")
+	assert.Equal(t, "<@UAUTHOR>", inReview.AwaitingReReviewFrom)
+
+	var completed models.ReviewTask
+	db.Where("id = ?", "sync-completed").First(&completed)
+	assert.WithinDuration(t, oneHourAgo, completed.UpdatedAt, time.Second,
+		"tasks that are not in review should not be touched")
+	assert.Empty(t, completed.AwaitingReReviewFrom)
+}
+
+func TestHandleReviewRequestedEvent_ClearsAwaitingReReview(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	defer gock.Off()
+	gock.New("https://slack.com").
+		Post("/api/chat.postMessage").
+		Persist().
+		Reply(200).
+		JSON(map[string]interface{}{"ok": true})
+
+	db.Create(&models.ReviewTask{
+		ID:                   "awaiting-task",
+		Repo:                 "owner/repo",
+		PRNumber:             402,
+		SlackTS:              "1234.5678",
+		SlackChannel:         "C12345",
+		Reviewer:             "U12345",
+		Status:               "in_review",
+		LabelName:            "needs-review",
+		AwaitingReReviewFrom: "<@UAUTHOR>",
+		CreatedAt:            time.Now(),
+		UpdatedAt:            time.Now(),
+	})
+
+	payload := `{
+		"action": "review_requested",
+		"pull_request": {"number": 402, "html_url": "https://github.com/owner/repo/pull/402"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"},
+		"requested_reviewer": {"login": "reviewer1"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var task models.ReviewTask
+	db.Where("id = ?", "awaiting-task").First(&task)
+	assert.Empty(t, task.AwaitingReReviewFrom, "re-review request should hand the reminder back to the reviewers")
 }

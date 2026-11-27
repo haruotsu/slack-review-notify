@@ -54,6 +54,8 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 					handleClosedEvent(c, db, e)
 				case "review_requested":
 					handleReviewRequestedEvent(c, db, e)
+				case "synchronize":
+					handleSynchronizeEvent(db, e)
 				}
 			}
 		case *github.PullRequestReviewEvent:
@@ -448,6 +450,48 @@ func handleClosedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) 
 	}
 }
 
+// handleSynchronizeEvent switches the reminder from the reviewers to the author when commits are pushed
+// during review. The author is reminded to request re-review once pushes have stopped for the reminder
+// interval, because reminders fire based on updated_at.
+func handleSynchronizeEvent(db *gorm.DB, e *github.PullRequestEvent) {
+	pr := e.PullRequest
+	repo := e.Repo
+	repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
+
+	var tasks []models.ReviewTask
+	if err := db.Where("repo = ? AND pr_number = ? AND status = ?", repoFullName, pr.GetNumber(), "in_review").
+		Find(&tasks).Error; err != nil {
+		log.Printf("synchronize task search error: repo=%s, pr=%d: %v", repoFullName, pr.GetNumber(), err)
+		return
+	}
+
+	for _, task := range tasks {
+		authorMention := pr.GetUser().GetLogin()
+		if task.PRAuthorSlackID != "" {
+			authorMention = fmt.Sprintf("<@%s>", task.PRAuthorSlackID)
+		} else if slackID := services.GetSlackUserIDFromGitHub(db, authorMention); slackID != "" {
+			authorMention = fmt.Sprintf("<@%s>", slackID)
+		}
+
+		if err := db.Model(&models.ReviewTask{}).Where("id = ?", task.ID).
+			Updates(map[string]interface{}{
+				"awaiting_re_review_from": authorMention,
+				"updated_at":              time.Now(),
+			}).Error; err != nil {
+			log.Printf("synchronize task update error: task=%s: %v", task.ID, err)
+			continue
+		}
+		log.Printf("reminder switched to the author by push: task=%s, repo=%s, pr=%d", task.ID, repoFullName, pr.GetNumber())
+	}
+}
+
+func clearAwaitingReReview(db *gorm.DB, taskID string) {
+	if err := db.Model(&models.ReviewTask{}).Where("id = ?", taskID).
+		Update("awaiting_re_review_from", "").Error; err != nil {
+		log.Printf("failed to clear awaiting re-review: task=%s: %v", taskID, err)
+	}
+}
+
 // handleReviewRequestedEvent handles the event when GitHub's re-request review button is pressed
 func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) {
 	pr := e.PullRequest
@@ -509,6 +553,8 @@ func handleReviewRequestedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 	}
 
 	for _, latestTask := range channelLatestTasks {
+		clearAwaitingReReview(db, latestTask.ID)
+
 		// Revert completed tasks to in_review
 		if latestTask.Status == "completed" {
 			result := db.Model(&models.ReviewTask{}).
@@ -671,6 +717,8 @@ func handleReviewSubmittedEvent(c *gin.Context, db *gorm.DB, e *github.PullReque
 
 	// Send notifications for the latest task in each channel
 	for channel, latestTask := range channelLatestTasks {
+		clearAwaitingReReview(db, latestTask.ID)
+
 		// Get RequiredApprovals
 		requiredApprovals := 1
 		if latestTask.LabelName != "" {

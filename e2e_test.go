@@ -787,3 +787,112 @@ func TestE2E_MigrateNormalizeSlackUserIDs(t *testing.T) {
 	db.Unscoped().Model(&models.ReviewerAvailability{}).Where("slack_user_id = ?", "UMIG").Count(&count)
 	assert.Equal(t, int64(0), count, "normalized record must be removed via the slash-command path")
 }
+
+// Test: a push during review switches the reminder to the author, and a re-review request hands it back
+func TestE2E_PushDuringReview_RemindsAuthorUntilReReviewRequested(t *testing.T) {
+	originalURL := os.Getenv("SLACK_API_BASE_URL")
+	os.Setenv("SLACK_API_BASE_URL", slackhogBaseURL+"/api")
+	defer os.Setenv("SLACK_API_BASE_URL", originalURL)
+
+	services.IsTestMode = true
+	db, ts := setupE2EApp(t)
+	defer ts.Close()
+	clearSlackhogMessages(t)
+
+	db.Create(&models.ChannelConfig{
+		ID:                       "e2e-push-config",
+		SlackChannelID:           "C_E2E_PUSH",
+		LabelName:                "needs-review",
+		DefaultMentionID:         "U_E2E_USER",
+		IsActive:                 true,
+		ReviewerReminderInterval: 30,
+		BusinessHoursStart:       "00:00",
+		BusinessHoursEnd:         "23:59",
+		Timezone:                 "Asia/Tokyo",
+		NotifyOnHolidays:         true,
+	})
+
+	rootTS, parentID := postRootMessage(t, "C_E2E_PUSH", "PR notification for pull/20")
+
+	twoHoursAgo := time.Now().Add(-2 * time.Hour)
+	db.Create(&models.ReviewTask{
+		ID:              "e2e-push",
+		PRURL:           "https://github.com/e2e-owner/e2e-repo/pull/20",
+		Repo:            "e2e-owner/e2e-repo",
+		PRNumber:        20,
+		Title:           "E2E Push PR",
+		SlackTS:         rootTS,
+		SlackChannel:    "C_E2E_PUSH",
+		Status:          "in_review",
+		LabelName:       "needs-review",
+		Reviewer:        "U_REVIEWER1",
+		PRAuthorSlackID: "U_E2E_AUTHOR",
+		CreatedAt:       twoHoursAgo,
+		UpdatedAt:       twoHoursAgo,
+	})
+
+	ageTask := func() {
+		require.NoError(t, db.Model(&models.ReviewTask{}).Where("id = ?", "e2e-push").
+			Update("updated_at", time.Now().Add(-2*time.Hour)).Error)
+	}
+	repliesContaining := func(substr string) []string {
+		var found []string
+		for _, r := range getSlackhogReplies(t, parentID) {
+			if c := r.Text + messageContent(r); strings.Contains(c, substr) {
+				found = append(found, c)
+			}
+		}
+		return found
+	}
+
+	// 1. Push during review
+	resp := sendWebhook(t, ts.URL, `{
+		"action": "synchronize",
+		"pull_request": {"number": 20, "html_url": "https://github.com/e2e-owner/e2e-repo/pull/20", "user": {"login": "e2e-author"}},
+		"repository": {"full_name": "e2e-owner/e2e-repo", "owner": {"login": "e2e-owner"}, "name": "e2e-repo"},
+		"sender": {"login": "e2e-author"}
+	}`)
+	resp.Body.Close()
+
+	// 2. Right after the push nobody is reminded
+	services.CheckInReviewTasks(db)
+	time.Sleep(300 * time.Millisecond)
+	assert.Empty(t, repliesContaining("U_REVIEWER1"), "reviewer should not be reminded right after a push")
+	assert.Empty(t, repliesContaining("U_E2E_AUTHOR"), "author should not be reminded while still pushing")
+
+	// 3. After the interval the author, not the reviewer, is reminded
+	ageTask()
+	services.CheckInReviewTasks(db)
+	time.Sleep(300 * time.Millisecond)
+	authorReminders := repliesContaining("U_E2E_AUTHOR")
+	require.Len(t, authorReminders, 1, "author should be reminded once the interval has passed since the push")
+	assert.Contains(t, authorReminders[0], "再レビューを依頼してください")
+	assert.Contains(t, authorReminders[0], "再レビューを依頼する", "the reminder should carry the re-review request button")
+	assert.Empty(t, repliesContaining("U_REVIEWER1"), "reviewer should not be reminded while waiting for a re-review request")
+
+	// 4. Pressing the button on the author's reminder mentions the reviewer right away
+	pressReReviewButton := func() {
+		payload := `{"type":"block_actions","user":{"id":"U_E2E_AUTHOR"},
+			"actions":[{"action_id":"request_re_review","value":"e2e-push"}],
+			"container":{"channel_id":"C_E2E_PUSH"},"message":{"ts":"` + rootTS + `"}}`
+		form := url.Values{"payload": {payload}}
+		resp, err := http.PostForm(ts.URL+"/slack/actions", form)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		time.Sleep(300 * time.Millisecond)
+	}
+	pressReReviewButton()
+	assert.Len(t, repliesContaining("U_REVIEWER1"), 1, "reviewer should be mentioned as soon as the button is pressed")
+
+	// 5. An older button pressed again does not mention the reviewer twice
+	pressReReviewButton()
+	assert.Len(t, repliesContaining("U_REVIEWER1"), 1, "a second press should not mention the reviewer again")
+
+	// 6. From then on the reviewer, not the author, is reminded
+	ageTask()
+	services.CheckInReviewTasks(db)
+	time.Sleep(300 * time.Millisecond)
+	assert.Len(t, repliesContaining("U_REVIEWER1"), 2, "reviewer should be reminded again after the interval")
+	assert.Len(t, repliesContaining("U_E2E_AUTHOR"), 1, "author should not be reminded after requesting a re-review")
+}
