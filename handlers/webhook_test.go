@@ -2201,3 +2201,61 @@ func TestHandleReviewRequestedEvent_SkipsWhenSenderEqualsReviewer(t *testing.T) 
 	assert.False(t, updatedTask.PendingReReviewNotify, "Should not defer when sender equals reviewer")
 	assert.False(t, gock.IsDone(), "No re-review notification should be sent when sender equals reviewer")
 }
+
+func TestHandleSynchronizeEvent_PostponesReminderOnlyForInReviewTask(t *testing.T) {
+	db := setupTestDB(t)
+	gin.SetMode(gin.TestMode)
+	services.IsTestMode = true
+
+	oneHourAgo := time.Now().Add(-1 * time.Hour)
+	db.Create(&models.ReviewTask{
+		ID:           "sync-inreview",
+		Repo:         "owner/repo",
+		PRNumber:     401,
+		SlackChannel: "C12345",
+		Reviewer:     "U12345",
+		Status:       "in_review",
+		LabelName:    "needs-review",
+		CreatedAt:    oneHourAgo,
+		UpdatedAt:    oneHourAgo,
+	})
+	db.Create(&models.ReviewTask{
+		ID:           "sync-completed",
+		Repo:         "owner/repo",
+		PRNumber:     401,
+		SlackChannel: "C67890",
+		Reviewer:     "U12345",
+		Status:       "completed",
+		LabelName:    "needs-review",
+		CreatedAt:    oneHourAgo,
+		UpdatedAt:    oneHourAgo,
+	})
+
+	payload := `{
+		"action": "synchronize",
+		"pull_request": {"number": 401, "html_url": "https://github.com/owner/repo/pull/401"},
+		"repository": {"full_name": "owner/repo", "owner": {"login": "owner"}, "name": "repo"},
+		"sender": {"login": "author"}
+	}`
+
+	req, _ := http.NewRequest("POST", "/webhook", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+
+	w := httptest.NewRecorder()
+	router := gin.Default()
+	router.POST("/webhook", HandleGitHubWebhook(db))
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var inReview models.ReviewTask
+	db.Where("id = ?", "sync-inreview").First(&inReview)
+	assert.True(t, inReview.UpdatedAt.After(time.Now().Add(-1*time.Minute)),
+		"push should reset the reminder clock of the in_review task")
+
+	var completed models.ReviewTask
+	db.Where("id = ?", "sync-completed").First(&completed)
+	assert.WithinDuration(t, oneHourAgo, completed.UpdatedAt, time.Second,
+		"tasks that are not in review should not be touched")
+}

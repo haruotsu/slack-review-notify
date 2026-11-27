@@ -54,6 +54,8 @@ func HandleGitHubWebhook(db *gorm.DB) gin.HandlerFunc {
 					handleClosedEvent(c, db, e)
 				case "review_requested":
 					handleReviewRequestedEvent(c, db, e)
+				case "synchronize":
+					handleSynchronizeEvent(db, e)
 				}
 			}
 		case *github.PullRequestReviewEvent:
@@ -446,6 +448,25 @@ func handleClosedEvent(c *gin.Context, db *gorm.DB, e *github.PullRequestEvent) 
 		log.Printf("task completed due to PR closed: id=%s, repo=%s, pr=%d, merged=%v",
 			task.ID, repoFullName, pr.GetNumber(), pr.GetMerged())
 	}
+}
+
+// handleSynchronizeEvent postpones reviewer reminders while the author keeps pushing commits,
+// because reminders fire based on updated_at.
+func handleSynchronizeEvent(db *gorm.DB, e *github.PullRequestEvent) {
+	pr := e.PullRequest
+	repo := e.Repo
+	repoFullName := fmt.Sprintf("%s/%s", repo.GetOwner().GetLogin(), repo.GetName())
+
+	result := db.Model(&models.ReviewTask{}).
+		Where("repo = ? AND pr_number = ? AND status = ?", repoFullName, pr.GetNumber(), "in_review").
+		Update("updated_at", time.Now())
+	if result.Error != nil {
+		log.Printf("synchronize task update error: repo=%s, pr=%d: %v", repoFullName, pr.GetNumber(), result.Error)
+		return
+	}
+
+	log.Printf("reviewer reminder postponed by push: repo=%s, pr=%d, tasks=%d",
+		repoFullName, pr.GetNumber(), result.RowsAffected)
 }
 
 // handleReviewRequestedEvent handles the event when GitHub's re-request review button is pressed
