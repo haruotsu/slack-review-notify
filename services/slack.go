@@ -704,11 +704,9 @@ func PostReReviewRequestReminder(task models.ReviewTask) error {
 	message := t("notify.re_review_request_reminder", task.AwaitingReReviewFrom)
 	button := CreateButton(t("button.request_re_review"), RequestReReviewActionID, task.ID, "primary")
 
-	// text is kept alongside blocks because notifications only show text, and the author must be notified.
 	body := map[string]interface{}{
 		"channel":   task.SlackChannel,
 		"thread_ts": task.SlackTS,
-		"text":      message,
 		"blocks":    CreateMessageWithActionBlocks(message, button),
 	}
 
