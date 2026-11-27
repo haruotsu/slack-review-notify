@@ -38,7 +38,7 @@ In your repository's Settings > Webhooks, configure the following:
 - Secret: empty or any string of your choice
 - Enable SSL verification: checked
 - Select individual events and enable:
-  - **Pull requests**: Detects label add/remove and pushes on PRs (a push postpones the reminder)
+  - **Pull requests**: Detects label add/remove and pushes on PRs (a push during review switches the reminder to the author, asking for a re-review request)
   - **Pull request reviews**: Detects approval/changes requested/comments (for auto-completion)
 
 ### Environment Variables

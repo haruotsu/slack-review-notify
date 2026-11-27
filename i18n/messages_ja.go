@@ -408,6 +408,8 @@ var messagesJa = map[string]string{
 	"notify.review_request.with_creator":    "%s <@%s> からのレビュー依頼があります\n\n*PRタイトル*: %s\n*URL*: <%s>",
 	"notify.review_request.without_creator": "%s *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>",
 
+	"notify.re_review_request_reminder": "%s コミットを積み終わったら、レビュワーに再レビューを依頼してください🙏",
+
 	"notify.business_hours_morning":  "🌅 *おはようございます！* %s\n\n📋 こちらのPRのレビューをお願いします。%s",
 	"notify.reviewer_in_morning":     "\n\n🎯 *レビュワー*: %s さん、よろしくお願いします！",
 	"notify.reminder":                "%s レビューしてくれたら嬉しいです...👀",
