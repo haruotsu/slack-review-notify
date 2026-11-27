@@ -255,6 +255,10 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 
 		// Handle each action
 		switch actionID {
+		case services.RequestReReviewActionID:
+			handleRequestReReview(c, db, payload.Actions[0].Value, slackUserID)
+			return
+
 		case "review_done":
 			// Search for task using ts and channel (retry after a short delay if in pending state)
 			var task models.ReviewTask
@@ -374,4 +378,42 @@ func HandleSlackAction(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 	}
+}
+
+// handleRequestReReview hands the review back to the reviewers and mentions them right away.
+func handleRequestReReview(c *gin.Context, db *gorm.DB, taskID, slackUserID string) {
+	var task models.ReviewTask
+	if err := db.Where("id = ?", taskID).First(&task).Error; err != nil {
+		log.Printf("task id %s not found: %v", taskID, err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "task not found by ID"})
+		return
+	}
+
+	// The author's reminder repeats, so older buttons stay in the thread;
+	// only the first press may mention the reviewers.
+	result := db.Model(&models.ReviewTask{}).
+		Where("id = ? AND status = ? AND awaiting_re_review_from <> ''", task.ID, "in_review").
+		Updates(map[string]interface{}{
+			"awaiting_re_review_from": "",
+			"updated_at":              time.Now(),
+		})
+	if result.Error != nil {
+		log.Printf("failed to clear awaiting re-review: %v", result.Error)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update task"})
+		return
+	}
+	if result.RowsAffected == 0 {
+		t := i18n.L(task.Language)
+		if err := services.PostEphemeral(task.SlackChannel, slackUserID, t("notify.re_review_already_requested")); err != nil {
+			log.Printf("ephemeral post error: %v", err)
+		}
+		c.Status(http.StatusOK)
+		return
+	}
+
+	task.AwaitingReReviewFrom = ""
+	if err := services.SendReviewerReminderMessage(db, task); err != nil {
+		log.Printf("reviewer reminder send error (task id: %s): %v", task.ID, err)
+	}
+	c.Status(http.StatusOK)
 }

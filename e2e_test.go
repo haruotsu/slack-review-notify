@@ -867,20 +867,32 @@ func TestE2E_PushDuringReview_RemindsAuthorUntilReReviewRequested(t *testing.T) 
 	authorReminders := repliesContaining("U_E2E_AUTHOR")
 	require.Len(t, authorReminders, 1, "author should be reminded once the interval has passed since the push")
 	assert.Contains(t, authorReminders[0], "再レビューを依頼してください")
+	assert.Contains(t, authorReminders[0], "再レビューを依頼する", "the reminder should carry the re-review request button")
 	assert.Empty(t, repliesContaining("U_REVIEWER1"), "reviewer should not be reminded while waiting for a re-review request")
 
-	// 4. A re-review request hands the reminder back to the reviewer
-	resp = sendWebhook(t, ts.URL, `{
-		"action": "review_requested",
-		"pull_request": {"number": 20, "html_url": "https://github.com/e2e-owner/e2e-repo/pull/20"},
-		"repository": {"full_name": "e2e-owner/e2e-repo", "owner": {"login": "e2e-owner"}, "name": "e2e-repo"},
-		"sender": {"login": "e2e-author"},
-		"requested_reviewer": {"login": "e2e-reviewer"}
-	}`)
-	resp.Body.Close()
+	// 4. Pressing the button on the author's reminder mentions the reviewer right away
+	pressReReviewButton := func() {
+		payload := `{"type":"block_actions","user":{"id":"U_E2E_AUTHOR"},
+			"actions":[{"action_id":"request_re_review","value":"e2e-push"}],
+			"container":{"channel_id":"C_E2E_PUSH"},"message":{"ts":"` + rootTS + `"}}`
+		form := url.Values{"payload": {payload}}
+		resp, err := http.PostForm(ts.URL+"/slack/actions", form)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		time.Sleep(300 * time.Millisecond)
+	}
+	pressReReviewButton()
+	assert.Len(t, repliesContaining("U_REVIEWER1"), 1, "reviewer should be mentioned as soon as the button is pressed")
+
+	// 5. An older button pressed again does not mention the reviewer twice
+	pressReReviewButton()
+	assert.Len(t, repliesContaining("U_REVIEWER1"), 1, "a second press should not mention the reviewer again")
+
+	// 6. From then on the reviewer, not the author, is reminded
 	ageTask()
 	services.CheckInReviewTasks(db)
 	time.Sleep(300 * time.Millisecond)
-	assert.NotEmpty(t, repliesContaining("U_REVIEWER1"), "reviewer should be reminded again after a re-review request")
+	assert.Len(t, repliesContaining("U_REVIEWER1"), 2, "reviewer should be reminded again after the interval")
 	assert.Len(t, repliesContaining("U_E2E_AUTHOR"), 1, "author should not be reminded after requesting a re-review")
 }

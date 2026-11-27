@@ -695,6 +695,53 @@ func PostChannelMessage(channel, message string) error {
 	return nil
 }
 
+// RequestReReviewActionID is the button on the author's reminder that hands the review back to the reviewers.
+const RequestReReviewActionID = "request_re_review"
+
+// PostReReviewRequestReminder asks the author to request a re-review once they have finished pushing commits.
+func PostReReviewRequestReminder(task models.ReviewTask) error {
+	t := i18n.L(task.Language)
+	message := t("notify.re_review_request_reminder", task.AwaitingReReviewFrom)
+	button := CreateButton(t("button.request_re_review"), RequestReReviewActionID, task.ID, "primary")
+
+	// text is kept alongside blocks because notifications only show text, and the author must be notified.
+	body := map[string]interface{}{
+		"channel":   task.SlackChannel,
+		"thread_ts": task.SlackTS,
+		"text":      message,
+		"blocks":    CreateMessageWithActionBlocks(message, button),
+	}
+
+	jsonData, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", SlackAPIBaseURL()+"/chat.postMessage", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("SLACK_BOT_TOKEN"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return fmt.Errorf("slack API response parse error: %v", err)
+	}
+	if !result.OK {
+		return fmt.Errorf("slack error: %s", result.Error)
+	}
+	return nil
+}
+
 // PostToThreadWithButtons posts a message with buttons to a thread
 func PostToThreadWithButtons(channel, ts, message string, taskID, lang string) error {
 	t := i18n.L(lang)

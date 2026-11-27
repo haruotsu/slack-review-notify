@@ -2216,9 +2216,9 @@ func TestHandleSynchronizeEvent_SwitchesReminderToAuthorOnlyForInReviewTask(t *t
 		Reviewer:        "U12345",
 		PRAuthorSlackID: "UAUTHOR",
 		Status:          "in_review",
-		LabelName:    "needs-review",
-		CreatedAt:    oneHourAgo,
-		UpdatedAt:    oneHourAgo,
+		LabelName:       "needs-review",
+		CreatedAt:       oneHourAgo,
+		UpdatedAt:       oneHourAgo,
 	})
 	db.Create(&models.ReviewTask{
 		ID:           "sync-completed",

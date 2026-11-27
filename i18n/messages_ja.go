@@ -408,7 +408,9 @@ var messagesJa = map[string]string{
 	"notify.review_request.with_creator":    "%s <@%s> からのレビュー依頼があります\n\n*PRタイトル*: %s\n*URL*: <%s>",
 	"notify.review_request.without_creator": "%s *レビュー対象のPRがあります！*\n\n*PRタイトル*: %s\n*URL*: <%s>",
 
-	"notify.re_review_request_reminder": "%s コミットを積み終わったら、レビュワーに再レビューを依頼してください。",
+	"notify.re_review_request_reminder":  "%s コミットを積み終わったら、下のボタンでレビュワーに再レビューを依頼してください。",
+	"notify.re_review_already_requested": "再レビューはすでに依頼済みです。",
+	"button.request_re_review":           "再レビューを依頼する",
 
 	"notify.business_hours_morning":  "🌅 *おはようございます！* %s\n\n📋 こちらのPRのレビューをお願いします。%s",
 	"notify.reviewer_in_morning":     "\n\n🎯 *レビュワー*: %s さん、よろしくお願いします！",

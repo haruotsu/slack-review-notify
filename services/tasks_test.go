@@ -488,7 +488,7 @@ func TestCheckInReviewTasks_RemindsAuthorWhenAwaitingReReview(t *testing.T) {
 	defer gock.Off()
 	gock.New("https://slack.com").
 		Post("/api/chat.postMessage").
-		BodyString(`UAUTHOR`).
+		BodyString(`"action_id":"request_re_review".*"text":"[^"]*UAUTHOR`).
 		Reply(200).
 		JSON(map[string]interface{}{"ok": true})
 

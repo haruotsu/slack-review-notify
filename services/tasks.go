@@ -223,8 +223,7 @@ func CheckInReviewTasks(db *gorm.DB) {
 				continue
 			}
 			if task.UpdatedAt.Before(now.Add(-time.Duration(reminderInterval) * time.Minute)) {
-				message := i18n.L(task.Language)("notify.re_review_request_reminder", task.AwaitingReReviewFrom)
-				if err := PostToThread(task.SlackChannel, task.SlackTS, message); err != nil {
+				if err := PostReReviewRequestReminder(task); err != nil {
 					log.Printf("re-review request reminder send error (task id: %s): %v", task.ID, err)
 					continue
 				}
